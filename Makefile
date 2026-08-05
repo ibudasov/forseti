@@ -27,3 +27,9 @@ test:
 		-v $(PWD)/tests:/app/tests \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests
+
+up:
+	docker-compose up
+
+down:
+	docker-compose down

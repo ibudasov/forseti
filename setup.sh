@@ -32,11 +32,4 @@ if [ ! -f .env ]; then
   fi
 fi
 
-echo ""
-echo "✓ Setup complete!"
-echo ""
-echo "To start the application with Docker, run:"
-echo "docker-compose up"
-echo ""
-echo "The API will be available at http://localhost:8000"
-echo "The database will be available at localhost:5432"
+make up
