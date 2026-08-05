@@ -1,0 +1,19 @@
+[project]
+name = "forseti"
+version = "0.1.0"
+description = "A FastAPI project scaffold using pedantic for request validation."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Forseti User" }
+]
+dependencies = [
+  "fastapi>=0.109.0",
+  "uvicorn[standard]>=0.23.0",
+  "pedantic>=1.8.0"
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
