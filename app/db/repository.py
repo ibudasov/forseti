@@ -22,7 +22,7 @@ def _normalize_ticker(ticker: str) -> str:
 
 def upsert_price_bars(bars: Iterable[PriceBar], engine=None) -> None:
     engine = engine or get_engine()
-    payloads = [bar.dict(exclude_none=True) for bar in bars]
+    payloads = [bar.model_dump(exclude_none=True) for bar in bars]
     if not payloads:
         return
 
@@ -45,7 +45,7 @@ def upsert_price_bars(bars: Iterable[PriceBar], engine=None) -> None:
 
 def upsert_earnings_event(event: EarningsEvent, engine=None) -> None:
     engine = engine or get_engine()
-    stmt = pg_insert(EarningsEvent.__table__).values(event.dict(exclude_none=True))
+    stmt = pg_insert(EarningsEvent.__table__).values(event.model_dump(exclude_none=True))
     stmt = stmt.on_conflict_do_nothing(index_elements=[EarningsEvent.security_id, EarningsEvent.report_date])
 
     with get_session(engine) as session:
@@ -55,7 +55,7 @@ def upsert_earnings_event(event: EarningsEvent, engine=None) -> None:
 
 def upsert_macro_daily(row: MacroDaily, engine=None) -> None:
     engine = engine or get_engine()
-    stmt = pg_insert(MacroDaily.__table__).values(row.dict(exclude_none=True))
+    stmt = pg_insert(MacroDaily.__table__).values(row.model_dump(exclude_none=True))
     stmt = stmt.on_conflict_do_nothing(index_elements=[MacroDaily.obs_date])
 
     with get_session(engine) as session:

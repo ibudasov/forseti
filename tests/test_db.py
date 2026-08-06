@@ -7,7 +7,7 @@ import os
 import pytest
 from sqlalchemy import inspect
 from sqlmodel import SQLModel, Session, create_engine, select
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from app.db.models import (
     EarningsEvent,
