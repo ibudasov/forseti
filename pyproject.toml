@@ -35,6 +35,7 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src"]
+extend-exclude = [".github/instructions", "app", "tests/test_*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

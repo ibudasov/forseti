@@ -7,9 +7,7 @@ EXCHANGE_ALIASES = {
     "AMEX": "NYSEAMERICAN",
 }
 
-SUPPORTED_EXCHANGES = frozenset(
-    {"NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "CBOE", "BATS"}
-)
+SUPPORTED_EXCHANGES = frozenset({"NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "CBOE", "BATS"})
 
 
 class TickerReferenceParser:

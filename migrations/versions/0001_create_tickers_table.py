@@ -5,8 +5,8 @@ Revises:
 Create Date: 2026-08-06 00:00:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0001_create_tickers_table"
 down_revision = None

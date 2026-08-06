@@ -10,10 +10,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = (
-        "postgresql+asyncpg://"
-        "postgres:postgres@localhost:5432/trading_analyst"
-    )
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/trading_analyst"
     log_level: str = "INFO"
 
 

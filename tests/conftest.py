@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from datetime import datetime, timezone
 import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -27,7 +27,7 @@ async def test_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSessio
         await connection.run_sync(Base.metadata.create_all)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    tracked_since = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
+    tracked_since = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 
     async with session_factory() as session:
         session.add_all(
