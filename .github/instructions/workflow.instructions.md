@@ -1,0 +1,2 @@
+- do not update readme file with endpoints information, we have /docs page for this
+- 

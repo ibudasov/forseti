@@ -395,7 +395,73 @@ class User:
 - Group logically related checks together
 - Extract early before conditions become unmaintainable
 
-### 17. Wrap primitives and strings when they carry domain meaning
+### 17. Use explanatory variables and constants
+
+**Code Calisthenics: Extract Intermediate Results** — Break down complex expressions into well-named variables and constants to improve readability and make intent explicit.
+
+**The Problem**: Complex expressions with magic numbers or unclear intermediate results are hard to understand:
+
+```python
+if price * quantity * 0.92 - 50 > 1000:
+    process_order()
+```
+
+**Using Explanatory Variables** (for computed values):
+
+```python
+subtotal = price * quantity
+tax_rate = 0.92  # After-tax multiplier
+processing_fee = 50
+
+final_amount = subtotal * tax_rate - processing_fee
+minimum_transaction_threshold = 1000
+
+if final_amount > minimum_transaction_threshold:
+    process_order()
+```
+
+**Using Constants** (for magic numbers with domain meaning):
+
+```python
+class OrderPolicy:
+    AFTER_TAX_MULTIPLIER = 0.92
+    PROCESSING_FEE_USD = 50
+    MINIMUM_TRANSACTION_THRESHOLD_USD = 1000
+
+def process_order(price: float, quantity: int) -> bool:
+    subtotal = price * quantity
+    final_amount = subtotal * OrderPolicy.AFTER_TAX_MULTIPLIER - OrderPolicy.PROCESSING_FEE_USD
+    return final_amount > OrderPolicy.MINIMUM_TRANSACTION_THRESHOLD_USD
+```
+
+**Benefits**:
+- Makes calculations and intent self-documenting
+- Eliminates magic numbers
+- Enables reuse of intermediate values
+- Improves debugging (easier to inspect variables)
+- Helps establish domain language and consistency
+- Makes equations and formulas easier to follow step-by-step
+
+**When to Use Explanatory Variables**:
+- Breaking down long arithmetic or string operations
+- Extracting intermediate results that are meaningful
+- Improving the readability of complex logic
+- When the computation takes more than one line
+
+**When to Use Explanatory Constants**:
+- Magic numbers that represent business rules or thresholds
+- Rates, percentages, limits, or configuration values
+- Strings that represent fixed options or states
+- Any value that might need to change globally
+
+**Best Practices**:
+- Use domain-specific names: `order_subtotal` not `amount1`
+- One explanatory variable per concept
+- Constants should be SCREAMING_SNAKE_CASE and grouped by concern
+- Constants that are truly fixed belong at module or class level
+- Avoid creating too many intermediate variables for trivial expressions
+
+### 18. Wrap primitives and strings when they carry domain meaning
 
 Avoid “primitive obsession”.
 
@@ -435,7 +501,34 @@ def calculate_position_size(
 
 This makes illegal states harder to represent.
 
-### 18. Use first-class collections
+### 19. Use one dot per line as a warning signal
+
+Avoid long chains that expose object internals.
+
+Bad:
+
+```python
+city = order.customer.address.city.upper()
+```
+
+Better:
+
+```python
+city = order.customer_city()
+normalized_city = city.upper()
+```
+
+Or better still:
+
+```python
+normalized_city = order.normalized_customer_city()
+```
+
+Long chains often violate encapsulation and the Law of Demeter.
+
+Exceptions are acceptable for fluent builders, query builders, test assertions, or framework APIs when the chain is idiomatic and readable.
+
+### 20. Use first-class collections
 
 Do not spread collection manipulation across unrelated code.
 
@@ -472,34 +565,7 @@ Collection wrappers are useful for:
 - enforcing invariants
 - preventing external mutation
 
-### 19. Use one dot per line as a warning signal
-
-Avoid long chains that expose object internals.
-
-Bad:
-
-```python
-city = order.customer.address.city.upper()
-```
-
-Better:
-
-```python
-city = order.customer_city()
-normalized_city = city.upper()
-```
-
-Or better still:
-
-```python
-normalized_city = order.normalized_customer_city()
-```
-
-Long chains often violate encapsulation and the Law of Demeter.
-
-Exceptions are acceptable for fluent builders, query builders, test assertions, or framework APIs when the chain is idiomatic and readable.
-
-### 20. Keep entities small
+### 21. Keep entities small
 
 Classes, modules, functions, and packages should stay small and cohesive.
 
@@ -515,7 +581,7 @@ A class should have one reason to change.
 
 If a class name contains words like `Manager`, `Helper`, `Util`, or `Processor`, check whether the responsibility is too vague.
 
-### 21. Prefer high cohesion
+### 22. Prefer high cohesion
 
 A class should contain data and behavior that strongly belong together.
 
@@ -523,7 +589,7 @@ If a class has fields that are only used by some methods but not others, split i
 
 If a method mostly works with another object’s data, move the method closer to that data.
 
-### 22. Limit instance variables
+### 23. Limit instance variables
 
 As a design exercise, aim for classes with no more than two instance variables where practical.
 
@@ -555,7 +621,7 @@ class TradeRecommendation:
     warnings: list[str]
 ```
 
-### 23. Avoid getters and setters as the default design
+### 24. Avoid getters and setters as the default design
 
 Do not expose internal state just so other code can make decisions.
 
@@ -591,7 +657,7 @@ But business decisions should usually live inside domain objects.
 
 ## Comments and documentation
 
-### 24. Prefer self-documenting code
+### 25. Prefer self-documenting code
 
 Do not use comments to explain confusing code. First, make the code clearer.
 
@@ -610,7 +676,7 @@ if risk_policy.rejects_trade(drawdown, risk_reward_ratio):
     ...
 ```
 
-### 25. Use comments for why, not what
+### 26. Use comments for why, not what
 
 Good comments explain:
 
@@ -623,7 +689,7 @@ Good comments explain:
 
 Avoid comments that repeat the code.
 
-### 26. Keep comments accurate
+### 27. Keep comments accurate
 
 Outdated comments are worse than no comments.
 
@@ -633,7 +699,7 @@ When changing code, update or delete affected comments.
 
 ## Error handling rules
 
-### 27. Fail fast
+### 28. Fail fast
 
 Validate inputs at boundaries.
 
@@ -641,7 +707,7 @@ Reject invalid states early.
 
 Prefer explicit errors over silent failure.
 
-### 28. Use meaningful exceptions or error results
+### 29. Use meaningful exceptions or error results
 
 Errors should explain:
 
@@ -658,7 +724,7 @@ Something went wrong
 Invalid input
 ```
 
-### 29. Do not swallow errors
+### 30. Do not swallow errors
 
 Avoid empty catches.
 
@@ -677,13 +743,13 @@ If ignoring an error is intentional, explain why and log enough context.
 
 ## Testing rules
 
-### 30. Write tests for behavior, not implementation details
+### 31. Write tests for behavior, not implementation details
 
 Tests should describe what the system does from the caller’s perspective.
 
 Avoid tests that break after harmless refactoring.
 
-### 31. Keep tests clean too
+### 32. Keep tests clean too
 
 Test code must follow the same readability standards as production code.
 
@@ -697,7 +763,7 @@ Use:
 
 Avoid excessive mocking unless needed.
 
-### 32. Add regression tests for bugs
+### 33. Add regression tests for bugs
 
 When fixing a bug:
 
@@ -709,7 +775,7 @@ When fixing a bug:
 
 ## Design and architecture rules
 
-### 33. Separate business logic from infrastructure
+### 34. Separate business logic from infrastructure
 
 Keep domain logic independent from:
 
@@ -723,7 +789,7 @@ Keep domain logic independent from:
 
 Business logic should be testable without real infrastructure.
 
-### 34. Separate UI/API code from business rules
+### 35. Separate UI/API code from business rules
 
 Controllers, routes, handlers, and UI components should be thin.
 
@@ -735,7 +801,7 @@ They should:
 
 They should not contain core business decisions.
 
-### 35. Prefer composition over inheritance
+### 36. Prefer composition over inheritance
 
 Use inheritance only when there is a true substitutable “is-a” relationship.
 
@@ -749,7 +815,7 @@ Prefer:
 
 Avoid deep inheritance hierarchies.
 
-### 36. Avoid duplication
+### 37. Avoid duplication
 
 Remove duplication in:
 
@@ -764,7 +830,7 @@ But do not create a poor abstraction just to remove two similar lines.
 
 Duplication is better than the wrong abstraction.
 
-### 37. Make dependencies explicit
+### 38. Make dependencies explicit
 
 Avoid hidden global dependencies.
 
@@ -785,6 +851,7 @@ Before returning code, verify:
 - [ ]  There is no unnecessary nesting.
 - [ ]  `else` is avoided where guard clauses are clearer.
 - [ ]  Complex conditionals are extracted into named functions or variables.
+- [ ]  Intermediate results are extracted into well-named explanatory variables and constants.
 - [ ]  Domain primitives are wrapped when they carry business meaning.
 - [ ]  Collections with behavior are first-class objects.
 - [ ]  Long method chains are avoided unless idiomatic.
