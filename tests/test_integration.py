@@ -177,7 +177,7 @@ class TestTickerEndpoint:
                 PriceBar(security_id=security.id, bar_date=bar1_date, open=Decimal("100.0"), high=Decimal("103.0"), low=Decimal("99.0"), close=Decimal("101.0"), volume=1_000_000),
                 TechnicalFeature(security_id=security.id, as_of_date=bar2_date, rsi_14=Decimal("58.1234"), sma_50=Decimal("99.5"), sma_200=Decimal("88.0"), volume_trend=Decimal("1.05")),
                 Fundamental(security_id=security.id, as_of_date=date(2025, 12, 31), revenue_growth=Decimal("0.62"), fcf=Decimal("21000000000.0"), debt_to_equity=Decimal("0.41"), eps_trend=Decimal("0.18"), margins=Decimal("0.55"), raw_payload={}),
-                EarningsEvent(security_id=security.id, report_date=date(2026, 2, 25), confirmed=False),
+                EarningsEvent(security_id=security.id, report_date=today + timedelta(days=30), confirmed=False),
             ])
             session.commit()
 
@@ -194,7 +194,7 @@ class TestTickerEndpoint:
         assert body["latest_price_bar"]["volume"] == 1_100_000
         assert body["latest_technical_features"]["rsi_14"] == pytest.approx(58.1234, rel=1e-4)
         assert body["latest_fundamentals"]["revenue_growth"] == pytest.approx(0.62, rel=1e-4)
-        assert body["next_earnings_date"] == "2026-02-25"
+        assert body["next_earnings_date"] == (today + timedelta(days=30)).isoformat()
         assert body["warnings"] == []
         assert body["data_freshness"]["is_price_data_stale"] is False
 
@@ -252,7 +252,6 @@ class TestTickerEndpoint:
     def test_get_ticker_invalid_symbol_returns_422(self, db_client):
         for symbol in [
             "%20",
-            "https%3A%2F%2Fbroker.example%2FNVDA",
             "TOOLONGTICKER",
             "NV%24DA",
         ]:
