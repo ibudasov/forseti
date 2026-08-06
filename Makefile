@@ -30,7 +30,7 @@ test:
 		app python -m pytest tests
 
 ingest:
-	python -m app.ingestion.run --source all
+	docker-compose run --rm app python -m app.ingestion.run --source all
 
 up:
 	docker-compose up
