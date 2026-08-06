@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Iterable, List, Optional
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -74,16 +75,27 @@ def save_recommendation(rec: Recommendation, engine=None) -> Recommendation:
         return rec
 
 
-def get_latest_bars(ticker: str, n: int, engine=None) -> List[PriceBar]:
+def get_security(ticker: str, engine=None) -> Optional[Security]:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = select(Security).where(Security.ticker == ticker)
+
+    with get_session(engine) as session:
+        return session.exec(stmt).first()
+
+
+def get_latest_bars(ticker: str, n: int, engine=None, as_of_date: Optional[date] = None) -> List[PriceBar]:
     engine = engine or get_engine()
     ticker = _normalize_ticker(ticker)
     stmt = (
         select(PriceBar)
         .join(Security)
         .where(Security.ticker == ticker)
-        .order_by(PriceBar.bar_date.desc())
-        .limit(n)
     )
+    if as_of_date is not None:
+        stmt = stmt.where(PriceBar.bar_date <= as_of_date)
+
+    stmt = stmt.order_by(PriceBar.bar_date.desc()).limit(n)
 
     with get_session(engine) as session:
         return session.exec(stmt).all()
