@@ -184,6 +184,16 @@ def analyze_bars(
     return AnalysisResult(response=response, full_payload=payload)
 
 
+def _has_insufficient_data_empty(bars: list[PriceBar]) -> bool:
+    """Check if we have no price bars available."""
+    return len(bars) == 0
+
+
+def _has_insufficient_data_single_bar(bars: list[PriceBar]) -> bool:
+    """Check if we have only one bar, insufficient for trend analysis."""
+    return len(bars) == 1
+
+
 def _determine_price_signal(
     *,
     sorted_bars: list[PriceBar],
@@ -192,7 +202,7 @@ def _determine_price_signal(
     risk_percentage: Optional[float],
     max_position_size_eur: Optional[float],
 ) -> PriceSignal:
-    if len(sorted_bars) == 0:
+    if _has_insufficient_data_empty(sorted_bars):
         return PriceSignal(
             decision=Decision.watchlist,
             confidence=Decimal("0.35"),
@@ -200,7 +210,7 @@ def _determine_price_signal(
             warnings=["insufficient_price_data"],
         )
 
-    if len(sorted_bars) == 1:
+    if _has_insufficient_data_single_bar(sorted_bars):
         return PriceSignal(
             decision=Decision.watchlist,
             confidence=Decimal("0.40"),
@@ -217,6 +227,16 @@ def _determine_price_signal(
     )
 
 
+def _is_positive_momentum(price_change_percentage: Decimal) -> bool:
+    """Check if price movement exceeds positive momentum threshold."""
+    return price_change_percentage > MOVE_THRESHOLD
+
+
+def _is_negative_momentum(price_change_percentage: Decimal) -> bool:
+    """Check if price movement is negative."""
+    return price_change_percentage < Decimal("0")
+
+
 def _analyze_price_movement(
     *,
     previous_close: Decimal,
@@ -231,7 +251,7 @@ def _analyze_price_movement(
     entry_low = _quantize(latest_close * (Decimal("1") - ENTRY_BAND_PERCENTAGE))
     entry_high = _quantize(latest_close * (Decimal("1") + ENTRY_BAND_PERCENTAGE))
 
-    if price_change_percentage > MOVE_THRESHOLD:
+    if _is_positive_momentum(price_change_percentage):
         return _build_trade_signal(
             entry_low=entry_low,
             entry_high=entry_high,
@@ -241,7 +261,7 @@ def _analyze_price_movement(
             max_position_size_eur=max_position_size_eur,
         )
 
-    if price_change_percentage < Decimal("0"):
+    if _is_negative_momentum(price_change_percentage):
         return PriceSignal(
             decision=Decision.no_trade,
             confidence=Decimal("0.46"),
@@ -257,6 +277,11 @@ def _analyze_price_movement(
         warnings=[],
         price_change_percentage=price_change_percentage,
     )
+
+
+def _is_risk_per_share_invalid(risk_per_share: Optional[Decimal]) -> bool:
+    """Check if risk per share calculation is invalid or zero."""
+    return not risk_per_share or risk_per_share <= 0
 
 
 def _build_trade_signal(
@@ -276,7 +301,7 @@ def _build_trade_signal(
         "Risk parameters were derived from the latest close using the placeholder engine.",
     ]
 
-    if not risk_per_share or risk_per_share <= 0:
+    if _is_risk_per_share_invalid(risk_per_share):
         return PriceSignal(
             decision=Decision.trade,
             confidence=Decimal("0.72"),
@@ -330,6 +355,11 @@ def _load_market_data(
         return [], ["market_data_unavailable"]
 
 
+def _security_not_found(security) -> bool:
+    """Check if security lookup returned no result."""
+    return security is None
+
+
 def _try_persist_recommendation(
     ticker: str,
     trace_id: str,
@@ -338,7 +368,7 @@ def _try_persist_recommendation(
 ) -> None:
     try:
         security = get_security(ticker, engine=engine)
-        if security is None:
+        if _security_not_found(security):
             logger.info(
                 "analyze_persistence_skipped",
                 extra={"trace_id": trace_id, "ticker": ticker},
@@ -363,9 +393,14 @@ def _try_persist_recommendation(
                 "decision": analysis_result.response.decision,
             },
         )
-        if "persistence_failed" not in analysis_result.response.warnings:
+        if not _persistence_failure_already_recorded(analysis_result.response.warnings):
             analysis_result.response.warnings.append("persistence_failed")
         analysis_result.full_payload["persistence"] = {"status": "failed"}
+
+
+def _persistence_failure_already_recorded(warnings: list[str]) -> bool:
+    """Check if persistence failure has already been recorded in warnings."""
+    return "persistence_failed" in warnings
 
 
 def _to_recommendation(security_id: int, response: "AnalyzeResponse", full_payload: dict) -> Recommendation:
@@ -390,6 +425,11 @@ def _to_recommendation(security_id: int, response: "AnalyzeResponse", full_paylo
     )
 
 
+def _trade_parameters_are_invalid(risk_per_share: Decimal, entry_mid: Decimal) -> bool:
+    """Check if risk per share or entry midpoint are invalid for position sizing."""
+    return risk_per_share <= 0 or entry_mid <= 0
+
+
 def _calculate_position_size(
     *,
     entry_mid: Decimal,
@@ -399,7 +439,7 @@ def _calculate_position_size(
     max_position_size_eur: Optional[float],
 ) -> Optional[Decimal]:
     risk_per_share = entry_mid - stop_loss
-    if risk_per_share <= 0 or entry_mid <= 0:
+    if _trade_parameters_are_invalid(risk_per_share, entry_mid):
         return None
 
     account_size = Decimal(str(account_size_eur)) if account_size_eur is not None else DEFAULT_ACCOUNT_SIZE_EUR
@@ -407,9 +447,14 @@ def _calculate_position_size(
     risk_budget = account_size * risk_fraction
     position_size = _quantize((risk_budget * entry_mid) / risk_per_share, quant=POSITION_SIZE_PRECISION)
     capped_size = min(position_size, _quantize(account_size, quant=POSITION_SIZE_PRECISION))
-    if max_position_size_eur is not None:
+    if _has_position_size_limit(max_position_size_eur):
         capped_size = min(capped_size, _quantize(Decimal(str(max_position_size_eur)), quant=POSITION_SIZE_PRECISION))
     return capped_size
+
+
+def _has_position_size_limit(max_position_size_eur: Optional[float]) -> bool:
+    """Check if a maximum position size limit is specified."""
+    return max_position_size_eur is not None
 
 
 def _midpoint(value_range: tuple[Decimal, Decimal]) -> Decimal:

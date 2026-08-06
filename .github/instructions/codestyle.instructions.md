@@ -339,7 +339,63 @@ For complex branching, consider:
 
 Do not replace a simple conditional with unnecessary abstraction.
 
-### 16. Wrap primitives and strings when they carry domain meaning
+### 16. Extract complex conditions into named functions or variables
+
+**Code Calisthenics for Conditionals**: Complex boolean expressions should be extracted into well-named functions or variables to improve readability and intent.
+
+**The Problem**: Conditional logic embedded in if statements is hard to read and understand:
+
+```python
+if user.age >= 18 and user.has_valid_license and user.driving_record_clean and not user.is_suspended:
+    grant_access()
+```
+
+**Named Variables** (for simple cases):
+
+```python
+is_eligible_driver = (
+    user.age >= 18 and 
+    user.has_valid_license and 
+    user.driving_record_clean and 
+    not user.is_suspended
+)
+
+if is_eligible_driver:
+    grant_access()
+```
+
+**Named Methods** (preferred approach):
+
+```python
+if user.is_eligible_to_drive():
+    grant_access()
+
+# Implementation:
+class User:
+    def is_eligible_to_drive(self) -> bool:
+        return (
+            self.age >= 18 and 
+            self.has_valid_license and 
+            self.driving_record_clean and 
+            not self.is_suspended
+        )
+```
+
+**Benefits**:
+- Improves readability with self-documenting intent
+- Enables reuse of the condition logic
+- Simplifies maintenance (change logic in one place)
+- Easier to test the condition independently
+- Named methods make the reason for the check explicit
+
+**Best Practices**:
+- Use positive language: `is_valid()` rather than `is_not_invalid()`
+- Each condition method checks one responsibility
+- Return boolean values
+- Group logically related checks together
+- Extract early before conditions become unmaintainable
+
+### 17. Wrap primitives and strings when they carry domain meaning
 
 Avoid “primitive obsession”.
 
@@ -379,7 +435,7 @@ def calculate_position_size(
 
 This makes illegal states harder to represent.
 
-### 17. Use first-class collections
+### 18. Use first-class collections
 
 Do not spread collection manipulation across unrelated code.
 
@@ -416,7 +472,7 @@ Collection wrappers are useful for:
 - enforcing invariants
 - preventing external mutation
 
-### 18. Use one dot per line as a warning signal
+### 19. Use one dot per line as a warning signal
 
 Avoid long chains that expose object internals.
 
@@ -443,7 +499,7 @@ Long chains often violate encapsulation and the Law of Demeter.
 
 Exceptions are acceptable for fluent builders, query builders, test assertions, or framework APIs when the chain is idiomatic and readable.
 
-### 19. Keep entities small
+### 20. Keep entities small
 
 Classes, modules, functions, and packages should stay small and cohesive.
 
@@ -459,7 +515,7 @@ A class should have one reason to change.
 
 If a class name contains words like `Manager`, `Helper`, `Util`, or `Processor`, check whether the responsibility is too vague.
 
-### 20. Prefer high cohesion
+### 21. Prefer high cohesion
 
 A class should contain data and behavior that strongly belong together.
 
@@ -467,7 +523,7 @@ If a class has fields that are only used by some methods but not others, split i
 
 If a method mostly works with another object’s data, move the method closer to that data.
 
-### 21. Limit instance variables
+### 22. Limit instance variables
 
 As a design exercise, aim for classes with no more than two instance variables where practical.
 
@@ -499,7 +555,7 @@ class TradeRecommendation:
     warnings: list[str]
 ```
 
-### 22. Avoid getters and setters as the default design
+### 23. Avoid getters and setters as the default design
 
 Do not expose internal state just so other code can make decisions.
 
@@ -535,7 +591,7 @@ But business decisions should usually live inside domain objects.
 
 ## Comments and documentation
 
-### 23. Prefer self-documenting code
+### 24. Prefer self-documenting code
 
 Do not use comments to explain confusing code. First, make the code clearer.
 
@@ -554,7 +610,7 @@ if risk_policy.rejects_trade(drawdown, risk_reward_ratio):
     ...
 ```
 
-### 24. Use comments for why, not what
+### 25. Use comments for why, not what
 
 Good comments explain:
 
@@ -567,7 +623,7 @@ Good comments explain:
 
 Avoid comments that repeat the code.
 
-### 25. Keep comments accurate
+### 26. Keep comments accurate
 
 Outdated comments are worse than no comments.
 
@@ -577,7 +633,7 @@ When changing code, update or delete affected comments.
 
 ## Error handling rules
 
-### 26. Fail fast
+### 27. Fail fast
 
 Validate inputs at boundaries.
 
@@ -585,7 +641,7 @@ Reject invalid states early.
 
 Prefer explicit errors over silent failure.
 
-### 27. Use meaningful exceptions or error results
+### 28. Use meaningful exceptions or error results
 
 Errors should explain:
 
@@ -602,7 +658,7 @@ Something went wrong
 Invalid input
 ```
 
-### 28. Do not swallow errors
+### 29. Do not swallow errors
 
 Avoid empty catches.
 
@@ -621,13 +677,13 @@ If ignoring an error is intentional, explain why and log enough context.
 
 ## Testing rules
 
-### 29. Write tests for behavior, not implementation details
+### 30. Write tests for behavior, not implementation details
 
 Tests should describe what the system does from the caller’s perspective.
 
 Avoid tests that break after harmless refactoring.
 
-### 30. Keep tests clean too
+### 31. Keep tests clean too
 
 Test code must follow the same readability standards as production code.
 
@@ -641,7 +697,7 @@ Use:
 
 Avoid excessive mocking unless needed.
 
-### 31. Add regression tests for bugs
+### 32. Add regression tests for bugs
 
 When fixing a bug:
 
@@ -653,7 +709,7 @@ When fixing a bug:
 
 ## Design and architecture rules
 
-### 32. Separate business logic from infrastructure
+### 33. Separate business logic from infrastructure
 
 Keep domain logic independent from:
 
@@ -667,7 +723,7 @@ Keep domain logic independent from:
 
 Business logic should be testable without real infrastructure.
 
-### 33. Separate UI/API code from business rules
+### 34. Separate UI/API code from business rules
 
 Controllers, routes, handlers, and UI components should be thin.
 
@@ -679,7 +735,7 @@ They should:
 
 They should not contain core business decisions.
 
-### 34. Prefer composition over inheritance
+### 35. Prefer composition over inheritance
 
 Use inheritance only when there is a true substitutable “is-a” relationship.
 
@@ -693,7 +749,7 @@ Prefer:
 
 Avoid deep inheritance hierarchies.
 
-### 35. Avoid duplication
+### 36. Avoid duplication
 
 Remove duplication in:
 
@@ -708,7 +764,7 @@ But do not create a poor abstraction just to remove two similar lines.
 
 Duplication is better than the wrong abstraction.
 
-### 36. Make dependencies explicit
+### 37. Make dependencies explicit
 
 Avoid hidden global dependencies.
 
@@ -728,6 +784,7 @@ Before returning code, verify:
 - [ ]  Each function has one level of abstraction.
 - [ ]  There is no unnecessary nesting.
 - [ ]  `else` is avoided where guard clauses are clearer.
+- [ ]  Complex conditionals are extracted into named functions or variables.
 - [ ]  Domain primitives are wrapped when they carry business meaning.
 - [ ]  Collections with behavior are first-class objects.
 - [ ]  Long method chains are avoided unless idiomatic.
