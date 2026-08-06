@@ -17,10 +17,18 @@ from app.db.models import (
     Security,
 )
 from app.db.repository import (
+    get_latest_fundamental,
+    get_latest_technical_feature,
+    get_next_earnings_event,
+    list_active_securities,
+    count_price_bars,
     get_latest_bars,
     save_recommendation,
+    upsert_fundamental,
     upsert_earnings_event,
+    upsert_earnings_events,
     upsert_macro_daily,
+    upsert_macro_daily_rows,
     upsert_price_bars,
 )
 
@@ -104,6 +112,29 @@ def test_idempotent_earnings_event_upsert(db_engine):
         assert rows[0].confirmed is True
 
 
+def test_earnings_event_upsert_updates_existing_row(db_engine):
+    security = Security(ticker="EUPD", name="Earnings Update", exchange="NASDAQ", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    upsert_earnings_events(
+        [EarningsEvent(security_id=security.id, report_date=date(2026, 2, 1), confirmed=False)],
+        engine=db_engine,
+    )
+    upsert_earnings_events(
+        [EarningsEvent(security_id=security.id, report_date=date(2026, 2, 1), confirmed=True)],
+        engine=db_engine,
+    )
+
+    with Session(db_engine) as session:
+        row = session.exec(
+            select(EarningsEvent).where(EarningsEvent.security_id == security.id)
+        ).one()
+        assert row.confirmed is True
+
+
 def test_idempotent_macro_daily_upsert(db_engine):
     row = MacroDaily(obs_date=date(2026, 3, 1), vix=Decimal("20.123"))
     upsert_macro_daily(row, engine=db_engine)
@@ -113,6 +144,15 @@ def test_idempotent_macro_daily_upsert(db_engine):
         rows = session.exec(select(MacroDaily).where(MacroDaily.obs_date == date(2026, 3, 1))).all()
         assert len(rows) == 1
         assert rows[0].vix == Decimal("20.123")
+
+
+def test_macro_daily_upsert_updates_existing_row(db_engine):
+    upsert_macro_daily_rows([MacroDaily(obs_date=date(2026, 3, 2), vix=Decimal("21.000"))], engine=db_engine)
+    upsert_macro_daily_rows([MacroDaily(obs_date=date(2026, 3, 2), vix=Decimal("19.100"))], engine=db_engine)
+
+    with Session(db_engine) as session:
+        row = session.exec(select(MacroDaily).where(MacroDaily.obs_date == date(2026, 3, 2))).one()
+        assert row.vix == Decimal("19.100")
 
 
 def test_save_recommendation_is_append_only(db_engine):
@@ -183,12 +223,6 @@ def test_get_latest_bars_returns_expected_rows(db_engine):
 
 
 from app.db.models import Fundamental, TechnicalFeature
-from app.db.repository import (
-    count_price_bars,
-    get_latest_fundamental,
-    get_latest_technical_feature,
-    get_next_earnings_event,
-)
 
 
 def test_count_price_bars(db_engine):
@@ -263,3 +297,47 @@ def test_get_next_earnings_event_skips_past(db_engine):
 
     past_only = get_next_earnings_event("EARN1", on_or_after=date(2027, 1, 1), engine=db_engine)
     assert past_only is None
+
+
+def test_upsert_fundamental_updates_matching_security_and_date(db_engine):
+    security = Security(ticker="FUPD", name="Fund Update", exchange="NYSE", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    initial = Fundamental(
+        security_id=security.id,
+        as_of_date=date(2025, 12, 31),
+        revenue_growth=Decimal("0.100000"),
+        raw_payload={"version": 1},
+    )
+    updated = Fundamental(
+        security_id=security.id,
+        as_of_date=date(2025, 12, 31),
+        revenue_growth=Decimal("0.250000"),
+        fcf=Decimal("1000.0000"),
+        raw_payload={"version": 2},
+    )
+
+    upsert_fundamental(initial, engine=db_engine)
+    upsert_fundamental(updated, engine=db_engine)
+
+    with Session(db_engine) as session:
+        rows = session.exec(select(Fundamental).where(Fundamental.security_id == security.id)).all()
+        assert len(rows) == 1
+        assert rows[0].revenue_growth == Decimal("0.250000")
+        assert rows[0].fcf == Decimal("1000.0000")
+        assert rows[0].raw_payload == {"version": 2}
+
+
+def test_list_active_securities_filters_inactive_rows(db_engine):
+    with Session(db_engine) as session:
+        session.add(Security(ticker="ACT1", name="Active One", exchange="NASDAQ", sector_tag="ai", is_active=True))
+        session.add(Security(ticker="INACT1", name="Inactive One", exchange="NYSE", sector_tag="ai", is_active=False))
+        session.commit()
+
+    active = list_active_securities(engine=db_engine)
+    active_tickers = [security.ticker for security in active]
+    assert "ACT1" in active_tickers
+    assert "INACT1" not in active_tickers

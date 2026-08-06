@@ -1,0 +1,71 @@
+{
+  "facts": {
+    "us-gaap": {
+      "Revenues": {
+        "units": {
+          "USD": [
+            {"end": "2023-12-31", "val": 1000, "form": "10-K", "fp": "FY"},
+            {"end": "2024-12-31", "val": 1200, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 500, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "PaymentsToAcquirePropertyPlantAndEquipment": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 200, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 300, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "DebtCurrent": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 50, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "StockholdersEquity": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 700, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "EarningsPerShareDiluted": {
+        "units": {
+          "USD/shares": [
+            {"end": "2023-12-31", "val": 2.5, "form": "10-K", "fp": "FY"},
+            {"end": "2024-12-31", "val": 3.0, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "NetIncomeLoss": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 240, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      },
+      "Liabilities": {
+        "units": {
+          "USD": [
+            {"end": "2024-12-31", "val": 900, "form": "10-K", "fp": "FY"}
+          ]
+        }
+      }
+    }
+  }
+}
