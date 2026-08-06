@@ -3,11 +3,13 @@ import socket
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Path
 
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
-from app.services.analyzer import analyze_request
+from app.schemas.ticker import TickerProfileResponse
+from app.services.analyzer import analyze_request, validate_and_normalize_ticker
+from app.services.ticker_profile import build_ticker_profile
 from app.settings import get_settings
 
 app = FastAPI(title="Forseti API")
@@ -95,6 +97,21 @@ def get_analysis_engine():
     return get_engine()
 
 
+def validated_symbol(symbol: str = Path(...)) -> str:
+    try:
+        return validate_and_normalize_ticker(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest, engine=Depends(get_analysis_engine)):
     return analyze_request(request, engine=engine)
+
+
+@app.get("/ticker/{symbol}", response_model=TickerProfileResponse)
+def read_ticker_profile(symbol: str = Depends(validated_symbol), engine=Depends(get_analysis_engine)):
+    profile = build_ticker_profile(symbol, engine=engine)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"ticker_not_found: {symbol}")
+    return profile
