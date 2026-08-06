@@ -1,26 +1,13 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml README.md alembic.ini ./
+COPY src ./src
+COPY migrations ./migrations
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir .
 
-# Copy Alembic configuration and migrations for database commands
-COPY alembic.ini ./
-COPY migrations/ ./migrations/
-
-# Copy application code
-COPY app/ ./app/
-
-# Expose port that FastAPI will run on
 EXPOSE 8000
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "trading_analyst.main:app", "--host", "0.0.0.0", "--port", "8000"]
