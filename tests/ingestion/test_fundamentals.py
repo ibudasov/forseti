@@ -4,16 +4,14 @@ import json
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from app.ingestion.fundamentals import to_fundamental
 
 
 def _load_sample_payload() -> dict:
-    with open(
-        "/home/runner/work/forseti/forseti/tests/fixtures/edgar_companyfacts_sample.json",
-        "r",
-        encoding="utf-8",
-    ) as file:
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "edgar_companyfacts_sample.json"
+    with open(fixture_path, "r", encoding="utf-8") as file:
         return json.load(file)
 
 

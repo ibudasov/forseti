@@ -90,7 +90,8 @@ def main() -> int:
         duration_seconds,
     )
 
-    if failed_sources:
+    has_failed_tickers = any(failed_tickers_by_source.values())
+    if failed_sources or has_failed_tickers:
         return 1
     return 0
 
