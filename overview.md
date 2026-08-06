@@ -3,7 +3,7 @@
 This page turns the study plan into a concrete implementation roadmap for the trading pet project described in [Trading](https://app.notion.com/p/Trading-3705752d31288089bf35e21f420cc055?pvs=21).
 
 - the goal of the project is to asses stocks according to how it is described in the page [Trading](https://app.notion.com/p/Trading-3705752d31288089bf35e21f420cc055?pvs=21)
-- the project should receive as an input the reference to the stock on one of the described trading platforms and as a result I would like to receive a recommendation on how to make an trade with necessary parameters of StopLoss, TakeProfit and the size of the deal. Or maybe a recommendation to not do a trade as it is highly unlikely to win.
+- the project should receive as input only a stock ticker abbreviation and return a recommendation on how to make a trade with necessary parameters of StopLoss, TakeProfit, and position size. It may also return a recommendation to avoid the trade when probability of success is low.
 
 ## Project goal
 
@@ -17,7 +17,7 @@ Build an **AI-assisted swing-trade analyst** for US equities in target sectors:
 - robotics
 - space
 
-The system should accept a ticker or a platform reference, gather structured and unstructured evidence, and return one of:
+The system should accept only a ticker abbreviation, gather structured and unstructured evidence, and return one of:
 
 - **Trade**
 - **Watchlist**
@@ -80,8 +80,8 @@ Use **deterministic code** for calculations and hard rules. Use **LLM + RAG** fo
 ## Target architecture
 
 1. **Input layer**
-    - accepts ticker or trading-platform reference
-    - normalizes to a ticker
+    - accepts only ticker abbreviation input
+    - validates and normalizes ticker format
 2. **Structured data layer**
     - price history
     - technical indicators
@@ -161,6 +161,7 @@ To align with Google ecosystem preferences, the project relies heavily on Google
 - define supported sectors and asset universe
 - define exact decision states: trade / watchlist / no-trade
 - define minimum required inputs
+- enforce ticker abbreviation as the only accepted input for v1
 - define the fields of the output contract
 - define hard veto rules
 - define the initial scoring logic
