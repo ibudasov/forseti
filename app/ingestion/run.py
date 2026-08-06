@@ -74,8 +74,6 @@ def main() -> int:
             rows_upserted, failed_tickers = handler(args.ticker)
             rows_by_source[source_name] = rows_upserted
             failed_tickers_by_source[source_name] = failed_tickers
-            if failed_tickers:
-                failed_sources.append(source_name)
         except Exception:
             rows_by_source[source_name] = 0
             failed_tickers_by_source[source_name] = []
