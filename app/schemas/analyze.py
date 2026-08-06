@@ -11,7 +11,7 @@ from app.services.analyzer import validate_and_normalize_ticker
 class AnalyzeRequest(BaseModel):
     ticker: str
     account_size_eur: Optional[float] = Field(default=None, gt=0)
-    risk_pct: Optional[float] = Field(default=None, gt=0, le=1)
+    risk_percentage: Optional[float] = Field(default=None, gt=0, le=1)
     max_position_size_eur: Optional[float] = Field(default=None, gt=0)
     as_of_date: Optional[date] = None
     notes: Optional[str] = None

@@ -84,7 +84,7 @@ class TestAnalyzeEndpoint:
             json={
                 "ticker": " nvda ",
                 "account_size_eur": 10000,
-                "risk_pct": 0.01,
+                "risk_percentage": 0.01,
                 "max_position_size_eur": 500,
             },
         )
