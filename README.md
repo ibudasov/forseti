@@ -63,3 +63,55 @@ Example response:
 ```
 
 This is a deterministic placeholder engine for the current phase. It validates ticker-only input and produces stable structured output while leaving room for richer rules, ingestion, and future RAG-backed explanations.
+## Ticker endpoint
+
+### `GET /ticker/{symbol}`
+
+Returns the stored profile, market-data coverage, and data-freshness status for a given ticker symbol.
+
+**Path parameter:** `symbol` — validated and normalized (strip, uppercase; must match `[A-Z0-9.-]`, ≤10 chars, ≤5 alpha chars, no URL-like strings).
+
+**Example request:**
+```bash
+curl -s http://127.0.0.1:8000/ticker/NVDA | python3 -m json.tool
+```
+
+**Example 200 response (abridged):**
+```json
+{
+  "ticker": "NVDA",
+  "name": "NVIDIA Corporation",
+  "exchange": "NASDAQ",
+  "sector_tag": "ai",
+  "currency": "USD",
+  "is_active": true,
+  "latest_price_bar": { "bar_date": "2026-01-02", "close": 102.5, "volume": 1100000 },
+  "price_bars_stored": 2,
+  "data_freshness": {
+    "latest_price_bar_date": "2026-01-02",
+    "price_data_age_days": 1,
+    "stale_threshold_days": 7,
+    "is_price_data_stale": false
+  },
+  "latest_technical_features": { "as_of_date": "2026-01-02", "rsi_14": 58.1234 },
+  "latest_fundamentals": { "as_of_date": "2025-12-31", "revenue_growth": 0.62 },
+  "next_earnings_date": "2026-02-25",
+  "warnings": []
+}
+```
+
+**Error responses:**
+
+| Case | Status | Body |
+|---|---|---|
+| Symbol fails validation | 422 | `{"detail": "<message>"}` |
+| Valid symbol, not in DB | 404 | `{"detail": "ticker_not_found: NVDA"}` |
+
+**Warning vocabulary** (snake_case strings in `warnings` list):
+
+- `no_price_data` — zero price bars stored
+- `stale_price_data` — latest bar older than 7 days
+- `no_technical_features` — no technical feature row
+- `no_fundamentals` — no fundamental row
+- `no_earnings_data` — no earnings events at all
+- `security_inactive` — `Security.is_active` is `false`

@@ -6,12 +6,16 @@ from typing import Iterable, List, Optional
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import Session, select
 
+from sqlalchemy import func
+
 from app.db.models import (
     EarningsEvent,
+    Fundamental,
     MacroDaily,
     PriceBar,
     Recommendation,
     Security,
+    TechnicalFeature,
 )
 from app.db.session import get_engine, get_session
 
@@ -99,3 +103,59 @@ def get_latest_bars(ticker: str, n: int, engine=None, as_of_date: Optional[date]
 
     with get_session(engine) as session:
         return session.exec(stmt).all()
+
+
+def count_price_bars(ticker: str, engine=None) -> int:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(func.count())
+        .select_from(PriceBar)
+        .join(Security)
+        .where(Security.ticker == ticker)
+    )
+    with get_session(engine) as session:
+        return session.exec(stmt).one()
+
+
+def get_latest_technical_feature(ticker: str, engine=None) -> Optional[TechnicalFeature]:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(TechnicalFeature)
+        .join(Security)
+        .where(Security.ticker == ticker)
+        .order_by(TechnicalFeature.as_of_date.desc())
+        .limit(1)
+    )
+    with get_session(engine) as session:
+        return session.exec(stmt).first()
+
+
+def get_latest_fundamental(ticker: str, engine=None) -> Optional[Fundamental]:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(Fundamental)
+        .join(Security)
+        .where(Security.ticker == ticker)
+        .order_by(Fundamental.as_of_date.desc())
+        .limit(1)
+    )
+    with get_session(engine) as session:
+        return session.exec(stmt).first()
+
+
+def get_next_earnings_event(ticker: str, on_or_after: date, engine=None) -> Optional[EarningsEvent]:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(EarningsEvent)
+        .join(Security)
+        .where(Security.ticker == ticker)
+        .where(EarningsEvent.report_date >= on_or_after)
+        .order_by(EarningsEvent.report_date.asc())
+        .limit(1)
+    )
+    with get_session(engine) as session:
+        return session.exec(stmt).first()
