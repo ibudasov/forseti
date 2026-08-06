@@ -47,10 +47,46 @@ def upsert_price_bars(bars: Iterable[PriceBar], engine=None) -> None:
         session.commit()
 
 
-def upsert_earnings_event(event: EarningsEvent, engine=None) -> None:
+def upsert_fundamental(fundamental: Fundamental, engine=None) -> None:
     engine = engine or get_engine()
-    stmt = pg_insert(EarningsEvent.__table__).values(event.model_dump(exclude_none=True))
-    stmt = stmt.on_conflict_do_nothing(index_elements=[EarningsEvent.security_id, EarningsEvent.report_date])
+    stmt = (
+        select(Fundamental)
+        .where(Fundamental.security_id == fundamental.security_id)
+        .where(Fundamental.as_of_date == fundamental.as_of_date)
+    )
+
+    with get_session(engine) as session:
+        existing = session.exec(stmt).first()
+        if existing is None:
+            session.add(fundamental)
+            session.commit()
+            return
+
+        existing.revenue_growth = fundamental.revenue_growth
+        existing.fcf = fundamental.fcf
+        existing.debt_to_equity = fundamental.debt_to_equity
+        existing.eps_trend = fundamental.eps_trend
+        existing.margins = fundamental.margins
+        existing.raw_payload = fundamental.raw_payload
+        session.add(existing)
+        session.commit()
+
+
+def upsert_earnings_event(event: EarningsEvent, engine=None) -> None:
+    upsert_earnings_events([event], engine=engine)
+
+
+def upsert_earnings_events(events: Iterable[EarningsEvent], engine=None) -> None:
+    engine = engine or get_engine()
+    payloads = [event.model_dump(exclude_none=True) for event in events]
+    if not payloads:
+        return
+
+    stmt = pg_insert(EarningsEvent.__table__).values(payloads)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[EarningsEvent.security_id, EarningsEvent.report_date],
+        set_={"confirmed": stmt.excluded.confirmed},
+    )
 
     with get_session(engine) as session:
         session.execute(stmt)
@@ -58,9 +94,20 @@ def upsert_earnings_event(event: EarningsEvent, engine=None) -> None:
 
 
 def upsert_macro_daily(row: MacroDaily, engine=None) -> None:
+    upsert_macro_daily_rows([row], engine=engine)
+
+
+def upsert_macro_daily_rows(rows: Iterable[MacroDaily], engine=None) -> None:
     engine = engine or get_engine()
-    stmt = pg_insert(MacroDaily.__table__).values(row.model_dump(exclude_none=True))
-    stmt = stmt.on_conflict_do_nothing(index_elements=[MacroDaily.obs_date])
+    payloads = [row.model_dump(exclude_none=True) for row in rows]
+    if not payloads:
+        return
+
+    stmt = pg_insert(MacroDaily.__table__).values(payloads)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[MacroDaily.obs_date],
+        set_={"vix": stmt.excluded.vix},
+    )
 
     with get_session(engine) as session:
         session.execute(stmt)
@@ -86,6 +133,14 @@ def get_security(ticker: str, engine=None) -> Optional[Security]:
 
     with get_session(engine) as session:
         return session.exec(stmt).first()
+
+
+def list_active_securities(engine=None) -> List[Security]:
+    engine = engine or get_engine()
+    stmt = select(Security).where(Security.is_active.is_(True)).order_by(Security.ticker.asc())
+
+    with get_session(engine) as session:
+        return session.exec(stmt).all()
 
 
 def get_latest_bars(ticker: str, n: int, engine=None, as_of_date: Optional[date] = None) -> List[PriceBar]:

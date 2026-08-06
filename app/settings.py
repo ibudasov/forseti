@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import Optional
 
 try:
     from pydantic import BaseSettings, Field
@@ -22,6 +25,15 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = Field(default="forseti", validation_alias="POSTGRES_DB")
     POSTGRES_HOST: str = Field(default="postgresql", validation_alias="POSTGRES_HOST")
     POSTGRES_PORT: int = Field(default=5432, validation_alias="POSTGRES_PORT")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias="ALPHA_VANTAGE_API_KEY",
+    )
+    EDGAR_USER_AGENT: str = Field(
+        default="Forseti/0.1 (forseti-dev@example.com)",
+        validation_alias="EDGAR_USER_AGENT",
+    )
+    INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")
 
 
 @lru_cache(maxsize=1)

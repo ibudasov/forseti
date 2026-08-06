@@ -1,6 +1,6 @@
 DEFAULT_GOAL := help
 
-.PHONY: help migrate migration db-shell test
+.PHONY: help migrate migration db-shell test ingest
 
 help:
 	@echo "Available targets:"
@@ -8,6 +8,7 @@ help:
 	@echo "  make migration name=...  # Generate a new Alembic revision"
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
+	@echo "  make ingest           # Run structured data ingestion pipeline"
 
 migrate:
 	docker-compose run --rm --build app python -m alembic upgrade head
@@ -27,6 +28,10 @@ test:
 		-v $(PWD)/tests:/app/tests \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests
+
+ingest:
+	docker-compose run --rm \
+		app python -m app.ingestion.run --source all
 
 up:
 	docker-compose up
