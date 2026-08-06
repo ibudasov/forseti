@@ -1,10 +1,13 @@
-from dataclasses import asdict
 import os
 import socket
-from urllib.parse import urlparse
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+
+from app.db.session import get_engine
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
+from app.services.analyzer import analyze_request
 
 app = FastAPI(title="Forseti API")
 
@@ -103,3 +106,12 @@ def healthz():
     result["db"]["host"] = db_info.get("host")
     result["db"]["port"] = db_info.get("port")
     return result
+
+
+def get_analysis_engine():
+    return get_engine()
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze(request: AnalyzeRequest, engine=Depends(get_analysis_engine)):
+    return analyze_request(request, engine=engine)
