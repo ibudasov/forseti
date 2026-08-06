@@ -75,7 +75,11 @@ def ingest_prices(engine=None, ticker: Optional[str] = None) -> tuple[int, list[
     for security in active_securities:
         try:
             frame = fetch_price_history(security.ticker)
+            if frame.empty:
+                raise ValueError("empty price frame")
             bars = to_price_bars(security.id, frame)
+            if not bars:
+                raise ValueError("no valid price bars after mapping")
             upsert_price_bars(bars, engine=engine)
             upserted_rows += len(bars)
             logger.info("prices_ingested: ticker=%s rows=%s", security.ticker, len(bars))

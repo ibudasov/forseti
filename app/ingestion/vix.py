@@ -57,7 +57,11 @@ def to_macro_rows(frame: pd.DataFrame) -> list[MacroDaily]:
 
 def ingest_vix(engine=None) -> int:
     frame = fetch_vix_history()
+    if frame.empty:
+        raise ValueError("empty VIX frame")
     rows = to_macro_rows(frame)
+    if not rows:
+        raise ValueError("no valid VIX rows after mapping")
     upsert_macro_daily_rows(rows, engine=engine)
     logger.info("vix_ingested: rows=%s", len(rows))
     return len(rows)

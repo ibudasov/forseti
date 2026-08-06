@@ -63,3 +63,16 @@ class TestPriceIngestion:
             rows = session.exec(select(PriceBar).where(PriceBar.security_id == security.id)).all()
             assert len(rows) == 1
             assert rows[0].close == Decimal("100.5000")
+
+    def test_ingest_prices_collects_failed_ticker_on_empty_frame(self, db_engine, monkeypatch):
+        security = Security(ticker="FAIL1", name="Fail One", exchange="NASDAQ", sector_tag="ai")
+        with Session(db_engine) as session:
+            session.add(security)
+            session.commit()
+
+        monkeypatch.setattr("app.ingestion.prices.fetch_price_history", lambda _: pd.DataFrame())
+
+        rows_upserted, failed_tickers = ingest_prices(engine=db_engine)
+
+        assert rows_upserted == 0
+        assert failed_tickers == ["FAIL1"]
