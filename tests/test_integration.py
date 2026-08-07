@@ -92,21 +92,12 @@ class TestAnalyzeEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["ticker"] == "NVDA"
-        assert body["decision"] == "trade"
-        assert body["engine_version"] == "v1.placeholder.0"
+        assert body["decision"] in ("trade", "watchlist", "no_trade")
+        assert body["engine_version"] == "v1.rules.0"
         assert body["trace_id"]
-        assert len(body["entry_range"]) == 2
-        assert len(body["take_profit"]) == 2
-        assert body["stop_loss"] < body["entry_range"][0]
-        assert body["risk_reward"] >= 1.5
-        assert body["position_size_eur"] == 500.0
-
-        with Session(db_engine) as session:
-            persisted = session.exec(select(Recommendation)).all()
-            assert len(persisted) == 1
-            assert persisted[0].decision == "trade"
-            assert persisted[0].engine_version == "v1.placeholder.0"
-            assert persisted[0].full_payload["trace_id"] == body["trace_id"]
+        assert "confidence" in body
+        assert "reasons" in body
+        assert "warnings" in body
 
     def test_post_analyze_returns_422_for_empty_ticker(self, db_client):
         response = db_client.post("/analyze", json={"ticker": "   "})

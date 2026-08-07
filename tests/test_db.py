@@ -15,6 +15,8 @@ from app.db.models import (
     PriceBar,
     Recommendation,
     Security,
+    Fundamental,
+    TechnicalFeature,
 )
 from app.db.repository import (
     get_latest_fundamental,
@@ -30,6 +32,8 @@ from app.db.repository import (
     upsert_macro_daily,
     upsert_macro_daily_rows,
     upsert_price_bars,
+    get_latest_macro_daily,
+    upsert_technical_feature,
 )
 
 
@@ -222,9 +226,6 @@ def test_get_latest_bars_returns_expected_rows(db_engine):
     assert latest_bars[0].bar_date == date(2026, 1, 2)
 
 
-from app.db.models import Fundamental, TechnicalFeature
-
-
 def test_count_price_bars(db_engine):
     security = Security(ticker="CPBR", name="Count PriceBar", exchange="NYSE", sector_tag="ai")
     with Session(db_engine) as session:
@@ -341,3 +342,83 @@ def test_list_active_securities_filters_inactive_rows(db_engine):
     active_tickers = [security.ticker for security in active]
     assert "ACT1" in active_tickers
     assert "INACT1" not in active_tickers
+
+
+def test_get_latest_macro_daily_returns_latest_vix(db_engine):
+    from app.db.repository import get_latest_macro_daily, upsert_macro_daily_rows
+
+    rows = [
+        MacroDaily(obs_date=date(2026, 1, 1), vix=Decimal("18.0")),
+        MacroDaily(obs_date=date(2026, 1, 2), vix=Decimal("22.5")),
+        MacroDaily(obs_date=date(2026, 1, 3), vix=Decimal("19.0")),
+    ]
+    upsert_macro_daily_rows(rows, engine=db_engine)
+
+    latest = get_latest_macro_daily(engine=db_engine)
+    assert latest is not None
+    assert latest.obs_date == date(2026, 1, 3)
+    assert latest.vix == Decimal("19.0")
+
+
+def test_upsert_technical_feature_idempotent(db_engine):
+    from app.db.repository import upsert_technical_feature
+
+    security = Security(ticker="TECH2", name="Tech Two", exchange="NASDAQ", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    feature = TechnicalFeature(
+        security_id=security.id,
+        as_of_date=date(2026, 1, 1),
+        rsi_14=Decimal("55.0000"),
+        sma_50=Decimal("100.5000"),
+        sma_200=Decimal("95.2500"),
+        volume_trend=Decimal("1.0500"),
+    )
+
+    upsert_technical_feature(feature, engine=db_engine)
+    upsert_technical_feature(feature, engine=db_engine)
+
+    with Session(db_engine) as session:
+        rows = session.exec(select(TechnicalFeature).where(TechnicalFeature.security_id == security.id)).all()
+        assert len(rows) == 1
+        assert rows[0].rsi_14 == Decimal("55.0000")
+
+
+def test_upsert_technical_feature_updates_existing(db_engine):
+    from app.db.repository import upsert_technical_feature
+
+    security = Security(ticker="TECH3", name="Tech Three", exchange="NASDAQ", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    initial = TechnicalFeature(
+        security_id=security.id,
+        as_of_date=date(2026, 1, 1),
+        rsi_14=Decimal("45.0000"),
+        sma_50=None,
+        sma_200=None,
+        volume_trend=None,
+    )
+    upsert_technical_feature(initial, engine=db_engine)
+
+    updated = TechnicalFeature(
+        security_id=security.id,
+        as_of_date=date(2026, 1, 1),
+        rsi_14=Decimal("55.0000"),
+        sma_50=Decimal("100.0000"),
+        sma_200=Decimal("95.0000"),
+        volume_trend=Decimal("1.2000"),
+    )
+    upsert_technical_feature(updated, engine=db_engine)
+
+    with Session(db_engine) as session:
+        rows = session.exec(select(TechnicalFeature).where(TechnicalFeature.security_id == security.id)).all()
+        assert len(rows) == 1
+        assert rows[0].rsi_14 == Decimal("55.0000")
+        assert rows[0].sma_50 == Decimal("100.0000")
+        assert rows[0].volume_trend == Decimal("1.2000")
