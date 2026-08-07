@@ -34,5 +34,9 @@ class AnalyzeResponse(BaseModel):
     reasons: list[str]
     warnings: list[str]
     engine_version: str
-    created_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now())
     trace_id: str
+
+    class Config:
+        # Allow mutation for trace_id
+        populate_by_name = True

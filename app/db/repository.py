@@ -214,3 +214,33 @@ def get_next_earnings_event(ticker: str, on_or_after: date, engine=None) -> Opti
     )
     with get_session(engine) as session:
         return session.exec(stmt).first()
+
+
+def get_latest_macro_daily(engine=None) -> Optional[MacroDaily]:
+    engine = engine or get_engine()
+    stmt = select(MacroDaily).order_by(MacroDaily.obs_date.desc()).limit(1)
+    with get_session(engine) as session:
+        return session.exec(stmt).first()
+
+
+def upsert_technical_feature(feature: TechnicalFeature, engine=None) -> None:
+    engine = engine or get_engine()
+    stmt = (
+        select(TechnicalFeature)
+        .where(TechnicalFeature.security_id == feature.security_id)
+        .where(TechnicalFeature.as_of_date == feature.as_of_date)
+    )
+
+    with get_session(engine) as session:
+        existing = session.exec(stmt).first()
+        if existing is None:
+            session.add(feature)
+            session.commit()
+            return
+
+        existing.rsi_14 = feature.rsi_14
+        existing.sma_50 = feature.sma_50
+        existing.sma_200 = feature.sma_200
+        existing.volume_trend = feature.volume_trend
+        session.add(existing)
+        session.commit()

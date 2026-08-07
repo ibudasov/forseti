@@ -106,7 +106,12 @@ def validated_symbol(symbol: str = Path(...)) -> str:
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest, engine=Depends(get_analysis_engine)):
-    return analyze_request(request, engine=engine)
+    try:
+        return analyze_request(request, engine=engine)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/ticker/{symbol}", response_model=TickerProfileResponse)
