@@ -111,7 +111,7 @@ def calculate_risk_levels(
     if shares == 0:
         return RiskDowngrade(
             reason="position_size_zero",
-            detail=f"shares: {shares} (budget: {float(risk_budget):.2f} EUR, risk_per_share: {float(risk_per_share):.2f})",
+            detail=f"shares: {shares} (budget: {float(risk_budget):.2f} EUR, risk_per_share: {float(entry_risk_per_share):.2f})",
         )
 
     position_size_eur = _quantize(Decimal(shares) * entry_high)
