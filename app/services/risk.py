@@ -72,12 +72,20 @@ def calculate_risk_levels(
     stop_loss_atr = close - (ATR_STOP_MULTIPLE * atr)
     stop_loss = _quantize(min(swing_low_20, stop_loss_atr))
 
-    # Risk per share
-    risk_per_share = entry_high - stop_loss
-    if risk_per_share <= 0:
+    # Use the full entry range for sizing, but evaluate reward-to-risk
+    # from the current price anchor used by the rest of the engine.
+    entry_risk_per_share = entry_high - stop_loss
+    if entry_risk_per_share <= 0:
         return RiskDowngrade(
             reason="invalid_risk_geometry",
-            detail=f"risk_per_share: {float(risk_per_share):.2f} <= 0",
+            detail=f"entry_risk_per_share: {float(entry_risk_per_share):.2f} <= 0",
+        )
+
+    trade_risk_per_share = close - stop_loss
+    if trade_risk_per_share <= 0:
+        return RiskDowngrade(
+            reason="invalid_risk_geometry",
+            detail=f"trade_risk_per_share: {float(trade_risk_per_share):.2f} <= 0",
         )
 
     # Swing high 60 bars (TP1 anchor)
@@ -85,10 +93,10 @@ def calculate_risk_levels(
 
     # Take profit levels
     tp1 = swing_high_60
-    tp2 = _quantize(close + (TP2_RISK_MULTIPLE * risk_per_share))
+    tp2 = _quantize(close + (TP2_RISK_MULTIPLE * trade_risk_per_share))
 
     # Risk reward
-    risk_reward = (tp1 - close) / risk_per_share
+    risk_reward = (tp1 - close) / trade_risk_per_share
     if risk_reward < RISK_REWARD_MIN:
         return RiskDowngrade(
             reason="risk_reward_below_min",
@@ -97,7 +105,7 @@ def calculate_risk_levels(
 
     # Position sizing
     risk_budget = risk_config.capital_eur * risk_config.risk_per_trade_pct
-    shares_raw = risk_budget / risk_per_share
+    shares_raw = risk_budget / entry_risk_per_share
     shares = int(shares_raw)  # floor
 
     if shares == 0:
@@ -128,8 +136,9 @@ def _calculate_atr(bars: List[PriceBar]) -> Decimal:
         return Decimal("4.00")  # Default to spec example if insufficient bars
 
     true_ranges = []
-    start_idx = len(bars) - ATR_PERIOD
-    for i in range(start_idx, len(bars)):
+    last_completed_bar_index = len(bars) - 1
+    start_idx = last_completed_bar_index - ATR_PERIOD
+    for i in range(start_idx, last_completed_bar_index):
         high = Decimal(str(bars[i].high))
         low = Decimal(str(bars[i].low))
         close_prev = Decimal(str(bars[i - 1].close))

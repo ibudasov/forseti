@@ -316,15 +316,21 @@ def _evaluate_data_gate(
             "gate_reasons": ["no_price_data: no price data available"],
         }
 
+    # Check for insufficient bars for SMA_LONG
+    if len(bars) < SMA_LONG:
+        warnings.append("insufficient_price_data")
+        return {
+            "initial_decision": "watchlist",
+            "warnings": warnings,
+            "bars": bars,
+            "gate_reasons": ["insufficient_price_data: fewer than 200 price bars available"],
+        }
+
     latest_bar = bars[-1]
     bars_age_days = (today - latest_bar.bar_date).days
 
     if bars_age_days > STALE_PRICE_DATA_THRESHOLD_DAYS:
         warnings.append("stale_price_data")
-
-    # Check for insufficient bars for SMA_LONG
-    if len(bars) < SMA_LONG:
-        warnings.append("insufficient_price_data")
 
     # Check for technical features
     technical_feature = get_latest_technical_feature(symbol, engine=engine)

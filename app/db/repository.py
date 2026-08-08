@@ -225,22 +225,37 @@ def get_latest_macro_daily(engine=None) -> Optional[MacroDaily]:
 
 def upsert_technical_feature(feature: TechnicalFeature, engine=None) -> None:
     engine = engine or get_engine()
+    security_id = feature.security_id
+    as_of_date = feature.as_of_date
+    rsi_14 = feature.rsi_14
+    sma_50 = feature.sma_50
+    sma_200 = feature.sma_200
+    volume_trend = feature.volume_trend
     stmt = (
         select(TechnicalFeature)
-        .where(TechnicalFeature.security_id == feature.security_id)
-        .where(TechnicalFeature.as_of_date == feature.as_of_date)
+        .where(TechnicalFeature.security_id == security_id)
+        .where(TechnicalFeature.as_of_date == as_of_date)
     )
 
     with get_session(engine) as session:
         existing = session.exec(stmt).first()
         if existing is None:
-            session.add(feature)
+            session.add(
+                TechnicalFeature(
+                    security_id=security_id,
+                    as_of_date=as_of_date,
+                    rsi_14=rsi_14,
+                    sma_50=sma_50,
+                    sma_200=sma_200,
+                    volume_trend=volume_trend,
+                )
+            )
             session.commit()
             return
 
-        existing.rsi_14 = feature.rsi_14
-        existing.sma_50 = feature.sma_50
-        existing.sma_200 = feature.sma_200
-        existing.volume_trend = feature.volume_trend
+        existing.rsi_14 = rsi_14
+        existing.sma_50 = sma_50
+        existing.sma_200 = sma_200
+        existing.volume_trend = volume_trend
         session.add(existing)
         session.commit()

@@ -62,9 +62,10 @@ def _source_handlers() -> dict[str, Callable[[str | None], tuple[int, list[str]]
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _build_parser().parse_args()
+    handlers = _source_handlers()
 
     start_time = time.monotonic()
-    selected_sources = ["prices", "vix", "fundamentals", "earnings", "features"]
+    selected_sources = list(handlers)
     if args.source != "all":
         selected_sources = [args.source]
 
@@ -76,7 +77,7 @@ def main() -> int:
     failed_sources: list[str] = []
 
     for source_name in selected_sources:
-        handler = _source_handlers()[source_name]
+        handler = handlers[source_name]
         try:
             rows_upserted, failed_tickers = handler(args.ticker)
             rows_by_source[source_name] = rows_upserted
