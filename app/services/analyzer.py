@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
 from app.db.models import Decision, PriceBar, Recommendation
-from app.db.repository import get_latest_bars, get_security, save_recommendation
+from app.db.repository import (
+    get_latest_bars,
+    get_latest_fundamental,
+    get_latest_macro_daily,
+    get_latest_technical_feature,
+    get_next_earnings_event,
+    get_security,
+    save_recommendation,
+)
+from app.services.checklist import evaluate_checklist
+from app.services.risk import RiskConfig, calculate_risk_levels, RiskDowngrade
+from app.services.vetoes import check_vetoes
+from app.settings import get_settings
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -18,41 +29,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ENGINE_VERSION = "v1.placeholder.0"
-DEFAULT_ACCOUNT_SIZE_EUR = Decimal("10000")
-DEFAULT_RISK_PERCENTAGE = Decimal("0.01")
-PRICE_PRECISION = Decimal("0.0001")
-POSITION_SIZE_PRECISION = Decimal("0.01")
-MOVE_THRESHOLD = Decimal("0.01")
-ENTRY_BAND_PERCENTAGE = Decimal("0.005")
-STOP_LOSS_PERCENTAGE = Decimal("0.04")
+# Frozen constants
+ENGINE_VERSION = "v1.rules.0"
 MIN_TICKER_LENGTH = 1
 MAX_TICKER_LENGTH = 10
 SAFE_TICKER_RE = re.compile(r"^[A-Z0-9.-]+$")
 URL_HINTS = ("http://", "https://", "www.", "/", "?", "&", "=", ":")
 
+# Decision thresholds
+SCORE_TRADE_MIN = 8
+SCORE_WATCHLIST_MIN = 5
+CONFIDENCE_WARNING_PENALTY = Decimal("0.05")
 
-@dataclass
-class AnalysisResult:
-    response: "AnalyzeResponse"
-    full_payload: dict
-
-
-@dataclass
-class PriceSignal:
-    decision: Decision
-    confidence: Decimal
-    reasons: list[str]
-    warnings: list[str]
-    entry_range: Optional[tuple[Decimal, Decimal]] = None
-    stop_loss: Optional[Decimal] = None
-    take_profit: Optional[tuple[Decimal, Decimal]] = None
-    risk_reward: Optional[Decimal] = None
-    position_size_eur: Optional[Decimal] = None
-    price_change_percentage: Optional[Decimal] = None
+# Data gate
+STALE_PRICE_DATA_THRESHOLD_DAYS = 7
+SMA_LONG = 200
 
 
 def validate_and_normalize_ticker(ticker: str) -> str:
+    """Validate and normalize a ticker symbol."""
     normalized = ticker.strip().upper()
     if not normalized:
         raise ValueError("Ticker must not be empty.")
@@ -68,426 +63,331 @@ def validate_and_normalize_ticker(ticker: str) -> str:
 
 
 def analyze_request(request: "AnalyzeRequest", engine: Optional["Engine"] = None) -> "AnalyzeResponse":
+    """Main entry point for analysis request."""
+    from fastapi import HTTPException
+
     normalized_ticker = validate_and_normalize_ticker(request.ticker)
     trace_id = str(uuid4())
-    created_at = datetime.now(timezone.utc)
+    today = datetime.now(timezone.utc).date()
+
     logger.info(
         "analyze_request_received",
-        extra={
-            "trace_id": trace_id,
-            "ticker": normalized_ticker,
-            "has_as_of_date": request.as_of_date is not None,
-            "has_notes": bool(request.notes),
-        },
+        extra={"trace_id": trace_id, "ticker": normalized_ticker},
     )
 
-    bars, initial_warnings = _load_market_data(normalized_ticker, trace_id, engine, request.as_of_date)
+    # Check if ticker exists
+    security = get_security(normalized_ticker, engine=engine)
+    if security is None:
+        raise HTTPException(status_code=404, detail=f"ticker_not_found: {normalized_ticker}")
 
-    analysis_result = analyze_bars(
-        ticker=normalized_ticker,
-        bars=bars,
-        account_size_eur=request.account_size_eur,
-        risk_percentage=request.risk_percentage,
-        max_position_size_eur=request.max_position_size_eur,
-        as_of_date=request.as_of_date.isoformat() if request.as_of_date else None,
-        notes=request.notes,
-        trace_id=trace_id,
-        created_at=created_at,
-        base_warnings=initial_warnings,
-    )
+    response = analyze(normalized_ticker, engine=engine, today=today)
 
-    _try_persist_recommendation(normalized_ticker, trace_id, analysis_result, engine)
+    # Persist recommendation
+    try:
+        recommendation = _to_recommendation(security.id, response, today)
+        save_recommendation(recommendation, engine=engine)
+        logger.info(
+            "recommendation_persisted",
+            extra={
+                "trace_id": trace_id,
+                "ticker": normalized_ticker,
+                "decision": response.decision,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "recommendation_persistence_failed",
+            extra={"trace_id": trace_id, "ticker": normalized_ticker},
+        )
 
-    logger.info(
-        "analyze_completed",
-        extra={
-            "trace_id": trace_id,
-            "ticker": normalized_ticker,
-            "decision": analysis_result.response.decision,
-        },
-    )
-    return analysis_result.response
+    # Add trace info
+    response.trace_id = trace_id
+    logger.info("analyze_completed", extra={"trace_id": trace_id, "ticker": normalized_ticker})
+    return response
 
 
-def analyze_bars(
-    *,
-    ticker: str,
-    bars: Sequence[PriceBar],
-    account_size_eur: Optional[float],
-    risk_percentage: Optional[float],
-    max_position_size_eur: Optional[float],
-    as_of_date: Optional[str],
-    notes: Optional[str],
-    trace_id: str,
-    created_at: datetime,
-    base_warnings: Optional[list[str]] = None,
-) -> AnalysisResult:
+def analyze(
+    symbol: str,
+    engine: Optional["Engine"] = None,
+    today: Optional[date] = None,
+) -> "AnalyzeResponse":
+    """
+    6-step evaluation pipeline:
+    Step 0: Data gate (freshness/completeness)
+    Step 1: Hard vetoes
+    Step 2: Checklist scoring
+    Step 3: Decision thresholds
+    Step 4: Risk math (if trade)
+    Step 5: Confidence and warnings
+    """
     from app.schemas.analyze import AnalyzeResponse
 
-    initial_warnings = list(base_warnings or [])
-    sorted_bars = sorted(bars, key=lambda bar: bar.bar_date)
-    closes = [Decimal(str(bar.close)) for bar in sorted_bars]
+    if today is None:
+        today = datetime.now(timezone.utc).date()
 
-    signal = _determine_price_signal(
-        sorted_bars=sorted_bars,
-        closes=closes,
-        account_size_eur=account_size_eur,
-        risk_percentage=risk_percentage,
-        max_position_size_eur=max_position_size_eur,
-    )
-    all_warnings = _dedupe_preserve_order(initial_warnings + signal.warnings)
-
-    response = AnalyzeResponse(
-        ticker=ticker,
-        decision=signal.decision.value,
-        entry_range=_to_float_pair(signal.entry_range),
-        stop_loss=_to_float(signal.stop_loss),
-        take_profit=_to_float_pair(signal.take_profit),
-        risk_reward=_to_float(signal.risk_reward),
-        position_size_eur=_to_float(signal.position_size_eur),
-        confidence=float(_clamp(signal.confidence, Decimal("0"), Decimal("1"))),
-        reasons=signal.reasons,
-        warnings=all_warnings,
-        engine_version=ENGINE_VERSION,
-        created_at=created_at,
-        trace_id=trace_id,
-    )
-    payload = {
-        "trace_id": trace_id,
-        "ticker": ticker,
-        "engine_version": ENGINE_VERSION,
-        "request": {
-            "account_size_eur": account_size_eur,
-            "risk_percentage": risk_percentage,
-            "max_position_size_eur": max_position_size_eur,
-            "as_of_date": as_of_date,
-            "notes": notes,
-        },
-        "bars_considered": [
-            {
-                "bar_date": bar.bar_date.isoformat(),
-                "close": float(Decimal(str(bar.close))),
-            }
-            for bar in sorted_bars
-        ],
-        "calculations": {
-            "close_change_pct": _to_float(_quantize(signal.price_change_percentage)) if signal.price_change_percentage is not None else None,
-            "entry_range": list(response.entry_range) if response.entry_range else None,
-            "stop_loss": response.stop_loss,
-            "take_profit": list(response.take_profit) if response.take_profit else None,
-            "risk_reward": response.risk_reward,
-            "position_size_eur": response.position_size_eur,
-        },
-        "decision": response.decision,
-        "warnings": response.warnings,
-    }
-    return AnalysisResult(response=response, full_payload=payload)
-
-
-def _has_insufficient_data_empty(bars: list[PriceBar]) -> bool:
-    """Check if we have no price bars available."""
-    return len(bars) == 0
-
-
-def _has_insufficient_data_single_bar(bars: list[PriceBar]) -> bool:
-    """Check if we have only one bar, insufficient for trend analysis."""
-    return len(bars) == 1
-
-
-def _determine_price_signal(
-    *,
-    sorted_bars: list[PriceBar],
-    closes: list[Decimal],
-    account_size_eur: Optional[float],
-    risk_percentage: Optional[float],
-    max_position_size_eur: Optional[float],
-) -> PriceSignal:
-    if _has_insufficient_data_empty(sorted_bars):
-        return PriceSignal(
-            decision=Decision.watchlist,
-            confidence=Decimal("0.35"),
-            reasons=["No recent price bars are available for deterministic analysis."],
-            warnings=["insufficient_price_data"],
-        )
-
-    if _has_insufficient_data_single_bar(sorted_bars):
-        return PriceSignal(
-            decision=Decision.watchlist,
-            confidence=Decimal("0.40"),
-            reasons=["Only one recent price bar is available, so trend evidence is incomplete."],
-            warnings=["insufficient_price_data"],
-        )
-
-    return _analyze_price_movement(
-        previous_close=closes[-2],
-        latest_close=closes[-1],
-        account_size_eur=account_size_eur,
-        risk_percentage=risk_percentage,
-        max_position_size_eur=max_position_size_eur,
-    )
-
-
-def _is_positive_momentum(price_change_percentage: Decimal) -> bool:
-    """Check if price movement exceeds positive momentum threshold."""
-    return price_change_percentage > MOVE_THRESHOLD
-
-
-def _is_negative_momentum(price_change_percentage: Decimal) -> bool:
-    """Check if price movement is negative."""
-    return price_change_percentage < Decimal("0")
-
-
-def _analyze_price_movement(
-    *,
-    previous_close: Decimal,
-    latest_close: Decimal,
-    account_size_eur: Optional[float],
-    risk_percentage: Optional[float],
-    max_position_size_eur: Optional[float],
-) -> PriceSignal:
-    price_change_percentage = (
-        (latest_close - previous_close) / previous_close if previous_close > 0 else Decimal("0")
-    )
-    entry_low = _quantize(latest_close * (Decimal("1") - ENTRY_BAND_PERCENTAGE))
-    entry_high = _quantize(latest_close * (Decimal("1") + ENTRY_BAND_PERCENTAGE))
-
-    if _is_positive_momentum(price_change_percentage):
-        return _build_trade_signal(
-            entry_low=entry_low,
-            entry_high=entry_high,
-            price_change_percentage=price_change_percentage,
-            account_size_eur=account_size_eur,
-            risk_percentage=risk_percentage,
-            max_position_size_eur=max_position_size_eur,
-        )
-
-    if _is_negative_momentum(price_change_percentage):
-        return PriceSignal(
-            decision=Decision.no_trade,
-            confidence=Decimal("0.46"),
-            reasons=["Latest close declined versus the previous close, so momentum is unfavorable."],
-            warnings=["negative_price_momentum"],
-            price_change_percentage=price_change_percentage,
-        )
-
-    return PriceSignal(
-        decision=Decision.watchlist,
-        confidence=Decimal("0.55"),
-        reasons=["Latest close stayed within the neutral deterministic threshold, so the ticker remains on watchlist."],
-        warnings=[],
-        price_change_percentage=price_change_percentage,
-    )
-
-
-def _is_risk_per_share_invalid(risk_per_share: Optional[Decimal]) -> bool:
-    """Check if risk per share calculation is invalid or zero."""
-    return not risk_per_share or risk_per_share <= 0
-
-
-def _build_trade_signal(
-    *,
-    entry_low: Decimal,
-    entry_high: Decimal,
-    price_change_percentage: Decimal,
-    account_size_eur: Optional[float],
-    risk_percentage: Optional[float],
-    max_position_size_eur: Optional[float],
-) -> PriceSignal:
-    entry_range = (entry_low, entry_high)
-    stop_loss = _quantize(entry_low * (Decimal("1") - STOP_LOSS_PERCENTAGE))
-    risk_per_share = _quantize(_midpoint(entry_range) - stop_loss)
-    reasons = [
-        "Latest close moved higher than the deterministic momentum threshold.",
-        "Risk parameters were derived from the latest close using the placeholder engine.",
-    ]
-
-    if _is_risk_per_share_invalid(risk_per_share):
-        return PriceSignal(
-            decision=Decision.trade,
-            confidence=Decimal("0.72"),
-            reasons=reasons,
+    # Step 0: Data gate
+    security = get_security(symbol, engine=engine)
+    if security is None:
+        return AnalyzeResponse(
+            ticker=symbol,
+            decision="no_trade",
+            entry_range=None,
+            stop_loss=None,
+            take_profit=None,
+            risk_reward=None,
+            position_size_eur=None,
+            confidence=0.0,
+            reasons=[],
             warnings=[],
-            entry_range=entry_range,
-            stop_loss=stop_loss,
-            price_change_percentage=price_change_percentage,
+            engine_version=ENGINE_VERSION,
+            trace_id="",
         )
 
-    take_profit = (
-        _quantize(_midpoint(entry_range) + (risk_per_share * Decimal("1.5"))),
-        _quantize(_midpoint(entry_range) + (risk_per_share * Decimal("2.0"))),
+    gates = _evaluate_data_gate(symbol, security, today, engine)
+    decision = gates["initial_decision"]
+    gate_warnings = gates["warnings"]
+    bars = gates["bars"]
+
+    if decision != "trade":
+        # Already decided by gate
+        confidence = _calculate_confidence(0, gate_warnings)
+        return AnalyzeResponse(
+            ticker=symbol,
+            decision=decision,
+            entry_range=None,
+            stop_loss=None,
+            take_profit=None,
+            risk_reward=None,
+            position_size_eur=None,
+            confidence=float(confidence),
+            reasons=gates.get("gate_reasons", []),
+            warnings=gate_warnings,
+            engine_version=ENGINE_VERSION,
+            trace_id="",
+        )
+
+    # Get all required data for evaluation
+    latest_bar = bars[0] if bars else None
+    technical_feature = get_latest_technical_feature(symbol, engine=engine)
+    fundamental = get_latest_fundamental(symbol, engine=engine)
+    vix_row = get_latest_macro_daily(engine=engine)
+    next_earnings = get_next_earnings_event(symbol, on_or_after=today, engine=engine)
+
+    vix_close = Decimal(str(vix_row.vix)) if vix_row and vix_row.vix is not None else None
+
+    # Step 1: Hard vetoes
+    veto = check_vetoes(
+        rsi=technical_feature.rsi_14 if technical_feature else None,
+        latest_bar=latest_bar,
+        vix_close=vix_close,
+        next_earnings=next_earnings,
+        sma_200=technical_feature.sma_200 if technical_feature else None,
+        today=today,
     )
-    risk_reward = _quantize((take_profit[0] - _midpoint(entry_range)) / risk_per_share)
-    position_size_eur = _calculate_position_size(
-        entry_mid=_midpoint(entry_range),
-        stop_loss=stop_loss,
-        account_size_eur=account_size_eur,
-        risk_percentage=risk_percentage,
-        max_position_size_eur=max_position_size_eur,
+
+    if veto:
+        # Veto triggers downgrade or stop
+        if veto.rule_id == "earnings_too_close":
+            decision = "watchlist"
+        else:
+            decision = "no_trade"
+        confidence = _calculate_confidence(0, gate_warnings)
+        return AnalyzeResponse(
+            ticker=symbol,
+            decision=decision,
+            entry_range=None,
+            stop_loss=None,
+            take_profit=None,
+            risk_reward=None,
+            position_size_eur=None,
+            confidence=float(confidence),
+            reasons=[f"{veto.rule_id}: {veto.detail}"],
+            warnings=gate_warnings,
+            engine_version=ENGINE_VERSION,
+            trace_id="",
+        )
+
+    # Step 2: Checklist scoring
+    score, checklist_results = evaluate_checklist(
+        latest_bar=latest_bar,
+        fundamental=fundamental,
+        technical_feature=technical_feature,
+        vix_close=vix_close,
     )
-    return PriceSignal(
-        decision=Decision.trade,
-        confidence=Decimal("0.72"),
-        reasons=reasons,
-        warnings=[],
+
+    # Step 3: Decision thresholds
+    if score >= SCORE_TRADE_MIN:
+        decision = "trade"
+    elif score >= SCORE_WATCHLIST_MIN:
+        decision = "watchlist"
+    else:
+        decision = "no_trade"
+
+    # Apply gate caps
+    if "stale_price_data" in gate_warnings or "no_fundamentals" in gate_warnings:
+        if decision == "trade":
+            decision = "watchlist"
+
+    # Step 4: Risk math (only for trade)
+    risk_levels = None
+    risk_downgrade = None
+    if decision == "trade" and latest_bar and bars:
+        settings = get_settings()
+        risk_config = RiskConfig(
+            capital_eur=Decimal(str(settings.ACCOUNT_CAPITAL_EUR)),
+            risk_per_trade_pct=Decimal(str(settings.RISK_PER_TRADE_PCT)),
+        )
+        result = calculate_risk_levels(bars, risk_config)
+        if isinstance(result, RiskDowngrade):
+            risk_downgrade = result
+            decision = "watchlist"
+        elif result:
+            risk_levels = result
+
+    # Build reasons
+    reasons = []
+    for check in checklist_results:
+        reasons.append(f"{check.rule_id}: {check.detail}")
+    if risk_downgrade:
+        reasons.append(f"{risk_downgrade.reason}: {risk_downgrade.detail}")
+
+    # Step 5: Confidence
+    confidence = _calculate_confidence(score, gate_warnings)
+
+    entry_range = None
+    stop_loss = None
+    take_profit = None
+    risk_reward = None
+    position_size_eur = None
+
+    if decision == "trade" and risk_levels:
+        entry_range = (float(risk_levels.entry_low), float(risk_levels.entry_high))
+        stop_loss = float(risk_levels.stop_loss)
+        take_profit = (float(risk_levels.take_profit_1), float(risk_levels.take_profit_2))
+        risk_reward = float(risk_levels.risk_reward)
+        position_size_eur = float(risk_levels.position_size_eur)
+
+    return AnalyzeResponse(
+        ticker=symbol,
+        decision=decision,
         entry_range=entry_range,
         stop_loss=stop_loss,
         take_profit=take_profit,
         risk_reward=risk_reward,
         position_size_eur=position_size_eur,
-        price_change_percentage=price_change_percentage,
+        confidence=float(confidence),
+        reasons=reasons,
+        warnings=gate_warnings,
+        engine_version=ENGINE_VERSION,
+        trace_id="",
     )
 
 
-def _load_market_data(
-    ticker: str,
-    trace_id: str,
+def _evaluate_data_gate(
+    symbol: str,
+    security,
+    today: date,
     engine,
-    as_of_date,
-) -> tuple[list[PriceBar], list[str]]:
-    try:
-        bars = get_latest_bars(ticker, 2, engine=engine, as_of_date=as_of_date)
-        return list(bars), []
-    except Exception:
-        logger.exception(
-            "analyze_market_data_load_failed",
-            extra={"trace_id": trace_id, "ticker": ticker},
-        )
-        return [], ["market_data_unavailable"]
+) -> dict:
+    """
+    Step 0: Data gate.
+    Returns dict with initial_decision, warnings, bars, and gate_reasons.
+    """
+    warnings = []
+    gate_reasons = []
+
+    if not security.is_active:
+        warnings.append("security_inactive")
+        return {
+            "initial_decision": "no_trade",
+            "warnings": warnings,
+            "bars": [],
+            "gate_reasons": ["security_inactive: security is inactive"],
+        }
+
+    # Get latest bars
+    bars = list(reversed(get_latest_bars(symbol, 250, engine=engine)))
+    if not bars:
+        warnings.append("no_price_data")
+        return {
+            "initial_decision": "no_trade",
+            "warnings": warnings,
+            "bars": [],
+            "gate_reasons": ["no_price_data: no price data available"],
+        }
+
+    # Check for insufficient bars for SMA_LONG
+    if len(bars) < SMA_LONG:
+        warnings.append("insufficient_price_data")
+        return {
+            "initial_decision": "watchlist",
+            "warnings": warnings,
+            "bars": bars,
+            "gate_reasons": ["insufficient_price_data: fewer than 200 price bars available"],
+        }
+
+    latest_bar = bars[-1]
+    bars_age_days = (today - latest_bar.bar_date).days
+
+    if bars_age_days > STALE_PRICE_DATA_THRESHOLD_DAYS:
+        warnings.append("stale_price_data")
+
+    # Check for technical features
+    technical_feature = get_latest_technical_feature(symbol, engine=engine)
+    if technical_feature is None:
+        warnings.append("no_technical_features")
+
+    # Check for fundamentals
+    fundamental = get_latest_fundamental(symbol, engine=engine)
+    if fundamental is None:
+        warnings.append("no_fundamentals")
+
+    # Check for earnings data
+    next_earnings = get_next_earnings_event(symbol, on_or_after=date.min, engine=engine)
+    if next_earnings is None:
+        warnings.append("no_earnings_data")
+
+    return {
+        "initial_decision": "trade",  # will be refined further
+        "warnings": warnings,
+        "bars": bars,
+        "gate_reasons": gate_reasons,
+    }
 
 
-def _security_not_found(security) -> bool:
-    """Check if security lookup returned no result."""
-    return security is None
+def _calculate_confidence(score: int, warnings: List[str]) -> Decimal:
+    """
+    Calculate confidence as clamp(score / 11 - 0.05 * len(warnings), 0.0, 1.0).
+    """
+    confidence = Decimal(score) / Decimal(11) - (CONFIDENCE_WARNING_PENALTY * len(warnings))
+    confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+    return confidence.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _try_persist_recommendation(
-    ticker: str,
-    trace_id: str,
-    analysis_result: AnalysisResult,
-    engine,
-) -> None:
-    try:
-        security = get_security(ticker, engine=engine)
-        if _security_not_found(security):
-            logger.info(
-                "analyze_persistence_skipped",
-                extra={"trace_id": trace_id, "ticker": ticker},
-            )
-            return
-        recommendation = _to_recommendation(security.id, analysis_result.response, analysis_result.full_payload)
-        save_recommendation(recommendation, engine=engine)
-        logger.info(
-            "analyze_persisted",
-            extra={
-                "trace_id": trace_id,
-                "ticker": ticker,
-                "decision": analysis_result.response.decision,
-            },
-        )
-    except Exception:
-        logger.exception(
-            "analyze_persistence_failed",
-            extra={
-                "trace_id": trace_id,
-                "ticker": ticker,
-                "decision": analysis_result.response.decision,
-            },
-        )
-        if not _persistence_failure_already_recorded(analysis_result.response.warnings):
-            analysis_result.response.warnings.append("persistence_failed")
-        analysis_result.full_payload["persistence"] = {"status": "failed"}
-
-
-def _persistence_failure_already_recorded(warnings: list[str]) -> bool:
-    """Check if persistence failure has already been recorded in warnings."""
-    return "persistence_failed" in warnings
-
-
-def _to_recommendation(security_id: int, response: "AnalyzeResponse", full_payload: dict) -> Recommendation:
+def _to_recommendation(security_id: int, response: "AnalyzeResponse", today: date) -> Recommendation:
+    """Convert response to Recommendation model for persistence."""
     entry_range = response.entry_range or (None, None)
     take_profit = response.take_profit or (None, None)
+
     return Recommendation(
         security_id=security_id,
-        created_at=response.created_at,
+        created_at=datetime.now(timezone.utc),
         decision=response.decision,
-        entry_low=_to_decimal(entry_range[0]),
-        entry_high=_to_decimal(entry_range[1]),
-        stop_loss=_to_decimal(response.stop_loss),
-        take_profit_1=_to_decimal(take_profit[0]),
-        take_profit_2=_to_decimal(take_profit[1]),
-        risk_reward=_to_decimal(response.risk_reward),
-        position_size=_to_decimal(response.position_size_eur),
-        confidence=_to_decimal(response.confidence, quant=Decimal("0.001")),
+        entry_low=Decimal(str(entry_range[0])) if entry_range[0] else None,
+        entry_high=Decimal(str(entry_range[1])) if entry_range[1] else None,
+        stop_loss=Decimal(str(response.stop_loss)) if response.stop_loss else None,
+        take_profit_1=Decimal(str(take_profit[0])) if take_profit[0] else None,
+        take_profit_2=Decimal(str(take_profit[1])) if take_profit[1] else None,
+        risk_reward=Decimal(str(response.risk_reward)) if response.risk_reward else None,
+        position_size=Decimal(str(response.position_size_eur)) if response.position_size_eur else None,
+        confidence=Decimal(str(response.confidence)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
         reasons=response.reasons,
         warnings=response.warnings,
-        full_payload=full_payload,
-        engine_version=response.engine_version,
+        full_payload={
+            "trace_id": response.trace_id,
+            "ticker": response.ticker,
+            "engine_version": ENGINE_VERSION,
+            "decision": response.decision,
+        },
+        engine_version=ENGINE_VERSION,
     )
-
-
-def _trade_parameters_are_invalid(risk_per_share: Decimal, entry_mid: Decimal) -> bool:
-    """Check if risk per share or entry midpoint are invalid for position sizing."""
-    return risk_per_share <= 0 or entry_mid <= 0
-
-
-def _calculate_position_size(
-    *,
-    entry_mid: Decimal,
-    stop_loss: Decimal,
-    account_size_eur: Optional[float],
-    risk_percentage: Optional[float],
-    max_position_size_eur: Optional[float],
-) -> Optional[Decimal]:
-    risk_per_share = entry_mid - stop_loss
-    if _trade_parameters_are_invalid(risk_per_share, entry_mid):
-        return None
-
-    account_size = Decimal(str(account_size_eur)) if account_size_eur is not None else DEFAULT_ACCOUNT_SIZE_EUR
-    risk_fraction = Decimal(str(risk_percentage)) if risk_percentage is not None else DEFAULT_RISK_PERCENTAGE
-    risk_budget = account_size * risk_fraction
-    position_size = _quantize((risk_budget * entry_mid) / risk_per_share, quant=POSITION_SIZE_PRECISION)
-    capped_size = min(position_size, _quantize(account_size, quant=POSITION_SIZE_PRECISION))
-    if _has_position_size_limit(max_position_size_eur):
-        capped_size = min(capped_size, _quantize(Decimal(str(max_position_size_eur)), quant=POSITION_SIZE_PRECISION))
-    return capped_size
-
-
-def _has_position_size_limit(max_position_size_eur: Optional[float]) -> bool:
-    """Check if a maximum position size limit is specified."""
-    return max_position_size_eur is not None
-
-
-def _midpoint(value_range: tuple[Decimal, Decimal]) -> Decimal:
-    return _quantize((value_range[0] + value_range[1]) / Decimal("2"))
-
-
-def _clamp(value: Decimal, lower: Decimal, upper: Decimal) -> Decimal:
-    return max(lower, min(value, upper))
-
-
-def _quantize(value: Optional[Decimal], quant: Decimal = PRICE_PRECISION) -> Optional[Decimal]:
-    if value is None:
-        return None
-    return value.quantize(quant, rounding=ROUND_HALF_UP)
-
-
-def _to_decimal(value: Optional[float], quant: Decimal = PRICE_PRECISION) -> Optional[Decimal]:
-    if value is None:
-        return None
-    return _quantize(Decimal(str(value)), quant=quant)
-
-
-def _to_float(value: Optional[Decimal]) -> Optional[float]:
-    if value is None:
-        return None
-    return float(value)
-
-
-def _to_float_pair(value: Optional[tuple[Decimal, Decimal]]) -> Optional[tuple[float, float]]:
-    if value is None:
-        return None
-    return float(value[0]), float(value[1])
-
-
-def _dedupe_preserve_order(items: Sequence[str]) -> list[str]:
-    return list(dict.fromkeys(items))

@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from app.ingestion.earnings import ingest_earnings
+from app.ingestion.features import compute_technical_features
 from app.ingestion.fundamentals import ingest_fundamentals
 from app.ingestion.prices import ingest_prices
 from app.ingestion.universe import seed_universe
@@ -19,7 +20,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Forseti structured data ingestion")
     parser.add_argument(
         "--source",
-        choices=["all", "prices", "vix", "fundamentals", "earnings"],
+        choices=["all", "prices", "vix", "fundamentals", "earnings", "features"],
         default="all",
         help="Select which source to ingest",
     )
@@ -43,21 +44,28 @@ def _run_earnings(ticker: str | None) -> tuple[int, list[str]]:
     return ingest_earnings(ticker=ticker)
 
 
+def _run_features(_: str | None) -> tuple[int, list[str]]:
+    rows_upserted, failed_tickers = compute_technical_features()
+    return rows_upserted, failed_tickers
+
+
 def _source_handlers() -> dict[str, Callable[[str | None], tuple[int, list[str]]]]:
     return {
         "prices": _run_prices,
         "vix": _run_vix,
         "fundamentals": _run_fundamentals,
         "earnings": _run_earnings,
+        "features": _run_features,
     }
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _build_parser().parse_args()
+    handlers = _source_handlers()
 
     start_time = time.monotonic()
-    selected_sources = ["prices", "vix", "fundamentals", "earnings"]
+    selected_sources = list(handlers)
     if args.source != "all":
         selected_sources = [args.source]
 
@@ -69,7 +77,7 @@ def main() -> int:
     failed_sources: list[str] = []
 
     for source_name in selected_sources:
-        handler = _source_handlers()[source_name]
+        handler = handlers[source_name]
         try:
             rows_upserted, failed_tickers = handler(args.ticker)
             rows_by_source[source_name] = rows_upserted
