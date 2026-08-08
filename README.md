@@ -58,7 +58,7 @@ The ingestion commands are idempotent and can be safely re-run.
 
 The deterministic evaluation engine analyzes securities in a six-step pipeline:
 
-### Pipeline Overview
+### Decision making overview
 
 1. **Data Gate** — Checks freshness and completeness of stored data (warnings: `no_price_data`, `stale_price_data`, `security_inactive`, `insufficient_price_data`, `no_technical_features`, `no_fundamentals`, `no_earnings_data`)
 2. **Hard Vetoes** — Applies strict rules that block trade decisions (RSI overbought > 70, VIX panic > 30, earnings too close within 7 days, price deep below SMA200)
@@ -85,24 +85,3 @@ The deterministic evaluation engine analyzes securities in a six-step pipeline:
 - **Deterministic**: identical inputs produce identical decisions
 - **Fully persisted** via `Recommendation` table for audit and backtesting
 - **Frozen constants** (not settings): all thresholds are module-level constants; only account capital and risk percentage are configurable via environment
-
-### Usage
-
-Features are automatically computed during ingestion:
-
-```bash
-make ingest  # Includes feature computation (RSI, SMA, volume trend) at the end
-```
-
-To analyze a ticker via the API:
-
-```bash
-curl -X POST http://127.0.0.1:8000/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"ticker": "NVDA"}'
-```
-
-Account parameters (via environment):
-
-- `ACCOUNT_CAPITAL_EUR` (default: 10000.0)
-- `RISK_PER_TRADE_PCT` (default: 0.01)

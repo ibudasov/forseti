@@ -192,17 +192,20 @@ def _compute_margins(payload: dict[str, Any]) -> Optional[Decimal]:
     )
 
 
-def _resolve_as_of_date(payload: dict[str, Any]) -> date:
+def _resolve_as_of_date(payload: dict[str, Any]) -> Optional[date]:
     latest_revenue = _latest_annual_fact(payload, _REVENUE_TAGS)
     if latest_revenue is None:
-        raise ValueError("missing annual revenue fact")
+        return None
     return latest_revenue.end_date
 
 
-def to_fundamental(security_id: int, payload: dict[str, Any]) -> Fundamental:
+def to_fundamental(security_id: int, payload: dict[str, Any]) -> Optional[Fundamental]:
+    as_of_date = _resolve_as_of_date(payload)
+    if as_of_date is None:
+        return None
     return Fundamental(
         security_id=security_id,
-        as_of_date=_resolve_as_of_date(payload),
+        as_of_date=as_of_date,
         revenue_growth=_compute_revenue_growth(payload),
         fcf=_compute_fcf(payload),
         debt_to_equity=_compute_debt_to_equity(payload),
@@ -235,6 +238,13 @@ def ingest_fundamentals(engine=None, ticker: Optional[str] = None) -> tuple[int,
             try:
                 payload = client.fetch_company_facts(cik)
                 fundamental = to_fundamental(security.id, payload)
+                if fundamental is None:
+                    logger.warning(
+                        "fundamentals_skipped: ticker=%s cik=%s reason=missing_annual_revenue",
+                        security.ticker,
+                        cik,
+                    )
+                    continue
                 upsert_fundamental(fundamental, engine=engine)
                 upserted_rows += 1
                 logger.info(

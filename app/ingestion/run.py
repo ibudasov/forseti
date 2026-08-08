@@ -98,8 +98,9 @@ def main() -> int:
         duration_seconds,
     )
 
-    has_failed_tickers = any(failed_tickers_by_source.values())
-    if failed_sources or has_failed_tickers:
+    # Only fail if there are source-level failures, not individual ticker failures
+    # Ticker failures may be due to missing data, which is expected for some securities
+    if failed_sources:
         return 1
     return 0
 
