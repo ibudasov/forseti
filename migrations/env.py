@@ -40,6 +40,17 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # First, try to create the pgvector extension if it doesn't exist
+        # This needs to be done outside the transaction
+        try:
+            connection.connection.autocommit = True
+            cursor = connection.connection.cursor()
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            cursor.close()
+            connection.connection.autocommit = False
+        except Exception as e:
+            print(f"Note: pgvector extension may already exist or couldn't be created: {e}")
+        
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():

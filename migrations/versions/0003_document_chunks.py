@@ -6,6 +6,7 @@ Create Date: 2026-08-10 00:00:00.000000
 """
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 
 revision = "0003_document_chunks"
 down_revision = "0002_pgvector_extension"
@@ -40,15 +41,17 @@ def upgrade() -> None:
         ),
     )
     # Convert to pgvector column after table creation
-    op.execute(f"ALTER TABLE document_chunk ALTER COLUMN embedding TYPE vector({EMBEDDING_DIM}) USING NULL")
+    op.execute(text(f"ALTER TABLE document_chunk ALTER COLUMN embedding TYPE vector({EMBEDDING_DIM}) USING NULL"))
 
     op.create_index("ix_document_chunk_ticker_source_type", "document_chunk", ["ticker", "source_type"])
     op.create_index("ix_document_chunk_published_at", "document_chunk", ["published_at"])
     op.create_unique_constraint("uq_document_chunk_source_hash", "document_chunk", ["source_hash"])
     # HNSW index for fast cosine similarity search
     op.execute(
-        "CREATE INDEX ix_document_chunk_embedding_hnsw "
-        "ON document_chunk USING hnsw (embedding vector_cosine_ops)"
+        text(
+            "CREATE INDEX ix_document_chunk_embedding_hnsw "
+            "ON document_chunk USING hnsw (embedding vector_cosine_ops)"
+        )
     )
 
 

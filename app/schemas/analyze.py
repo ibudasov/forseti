@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
 
@@ -53,6 +53,5 @@ class AnalyzeResponse(BaseModel):
     trace_id: str
     evidence: Optional[EvidenceBlock] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
