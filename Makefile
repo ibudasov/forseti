@@ -29,7 +29,9 @@ test:
 		-e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$${POSTGRES_DB:-forseti} \
 		-v $(PWD)/tests:/app/tests \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		app python -m pytest tests
+		app python -m pytest tests \
+			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
+			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
 ingest:
 	$(DOCKER_COMPOSE) run --rm \
