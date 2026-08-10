@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
 
@@ -22,6 +22,21 @@ class AnalyzeRequest(BaseModel):
         return validate_and_normalize_ticker(value)
 
 
+class EvidenceItemResponse(BaseModel):
+    claim: str
+    chunk_ids: List[int] = Field(default_factory=list)
+
+
+class EvidenceBlock(BaseModel):
+    bullish_drivers: List[EvidenceItemResponse] = Field(default_factory=list)
+    bearish_risks: List[EvidenceItemResponse] = Field(default_factory=list)
+    catalysts: List[EvidenceItemResponse] = Field(default_factory=list)
+    news_alignment: str = ""
+    red_flags: List[EvidenceItemResponse] = Field(default_factory=list)
+    chunk_count: int = 0
+    status: str = "ok"
+
+
 class AnalyzeResponse(BaseModel):
     ticker: str
     decision: Literal["trade", "watchlist", "no_trade"]
@@ -36,7 +51,7 @@ class AnalyzeResponse(BaseModel):
     engine_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now())
     trace_id: str
+    evidence: Optional[EvidenceBlock] = None
 
-    class Config:
-        # Allow mutation for trace_id
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
+

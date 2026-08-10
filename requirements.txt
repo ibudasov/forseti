@@ -12,3 +12,5 @@ python-dotenv>=1.0.0
 pydantic-settings>=2.0.0
 testcontainers[community]>=4.0.0
 flake8>=6.0.0
+pgvector>=0.3.0
+google-cloud-aiplatform>=1.40.0

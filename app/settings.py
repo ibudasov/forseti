@@ -37,6 +37,24 @@ class Settings(BaseSettings):
     ACCOUNT_CAPITAL_EUR: float = Field(default=10000.0, validation_alias="ACCOUNT_CAPITAL_EUR")
     RISK_PER_TRADE_PCT: float = Field(default=0.01, validation_alias="RISK_PER_TRADE_PCT")
 
+    # RAG / vector database settings
+    EMBEDDING_DIM: int = Field(default=768, validation_alias="EMBEDDING_DIM")
+    EMBEDDING_MODEL: str = Field(
+        default="text-embedding-004",
+        validation_alias="EMBEDDING_MODEL",
+    )
+    CHUNK_SIZE_TOKENS: int = Field(default=800, validation_alias="CHUNK_SIZE_TOKENS")
+    CHUNK_OVERLAP_TOKENS: int = Field(default=100, validation_alias="CHUNK_OVERLAP_TOKENS")
+    VERTEX_AI_PROJECT: Optional[str] = Field(
+        default=None, validation_alias="VERTEX_AI_PROJECT"
+    )
+    VERTEX_AI_LOCATION: str = Field(
+        default="us-central1", validation_alias="VERTEX_AI_LOCATION"
+    )
+    GEMINI_MODEL: str = Field(
+        default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

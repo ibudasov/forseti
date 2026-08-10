@@ -8,7 +8,7 @@ from app.db.models import PriceBar, TechnicalFeature
 from app.db.repository import (
     get_latest_bars,
     list_active_securities,
-    upsert_technical_feature,
+    upsert_technical_features,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def compute_technical_features(engine=None) -> Tuple[int, List[str]]:
     Returns tuple of (rows_upserted, failed_tickers).
     """
     securities = list_active_securities(engine=engine)
-    rows_upserted = 0
+    features_to_upsert = []
     failed_tickers = []
 
     for security in securities:
@@ -131,7 +131,7 @@ def compute_technical_features(engine=None) -> Tuple[int, List[str]]:
             # Get as_of_date from latest bar
             as_of_date = bars[-1].bar_date
 
-            # Create and upsert feature
+            # Create feature
             feature = TechnicalFeature(
                 security_id=security.id,
                 as_of_date=as_of_date,
@@ -140,8 +140,7 @@ def compute_technical_features(engine=None) -> Tuple[int, List[str]]:
                 sma_200=sma_200,
                 volume_trend=volume_trend,
             )
-            upsert_technical_feature(feature, engine=engine)
-            rows_upserted += 1
+            features_to_upsert.append(feature)
 
             logger.debug(
                 "technical_feature_computed: ticker=%s rsi=%s sma50=%s sma200=%s vol_trend=%s",
@@ -156,4 +155,8 @@ def compute_technical_features(engine=None) -> Tuple[int, List[str]]:
             logger.exception("feature_computation_failed: ticker=%s", security.ticker)
             failed_tickers.append(security.ticker)
 
-    return rows_upserted, failed_tickers
+    # Batch upsert all features
+    if features_to_upsert:
+        upsert_technical_features(features_to_upsert, engine=engine)
+
+    return len(features_to_upsert), failed_tickers

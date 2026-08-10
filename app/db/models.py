@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field, SQLModel
 
@@ -121,6 +122,47 @@ class TechnicalFeature(SQLModel, table=True):
     sma_50: Optional[Decimal] = Field(sa_column=Column(sa.Numeric(14, 4), nullable=True))
     sma_200: Optional[Decimal] = Field(sa_column=Column(sa.Numeric(14, 4), nullable=True))
     volume_trend: Optional[Decimal] = Field(sa_column=Column(sa.Numeric(14, 6), nullable=True))
+
+
+class SourceType(str, enum.Enum):
+    filing_business = "filing_business"
+    filing_risk = "filing_risk"
+    earnings_call = "earnings_call"
+    company_news = "company_news"
+    sector_news = "sector_news"
+
+
+class DocumentChunk(SQLModel, table=True):
+    __tablename__ = "document_chunk"
+    __table_args__ = (
+        sa.Index("ix_document_chunk_ticker_source_type", "ticker", "source_type"),
+        sa.Index("ix_document_chunk_published_at", "published_at"),
+        sa.UniqueConstraint("source_hash", name="uq_document_chunk_source_hash"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(sa_column=Column(sa.String(length=16), nullable=False, index=True))
+    source_type: SourceType = Field(
+        sa_column=Column(
+            sa.String(length=32),
+            nullable=False,
+        )
+    )
+    source_url: str = Field(sa_column=Column(sa.Text, nullable=False))
+    source_hash: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
+    published_at: Optional[datetime] = Field(
+        sa_column=Column(sa.DateTime(timezone=True), nullable=True)
+    )
+    ingested_at: datetime = Field(
+        default_factory=_utc_now,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, default=_utc_now),
+    )
+    chunk_index: int = Field(sa_column=Column(sa.Integer, nullable=False))
+    text: str = Field(sa_column=Column(sa.Text, nullable=False))
+    embedding: Optional[List[float]] = Field(
+        default=None,
+        sa_column=Column(Vector(768), nullable=True),
+    )
 
 
 class Recommendation(SQLModel, table=True):
