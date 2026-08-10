@@ -38,7 +38,13 @@ from app.db.repository import (
 
 
 def _create_test_engine(database_url: str):
-    return create_engine(database_url, echo=False, future=True)
+    from sqlalchemy import text
+
+    engine = create_engine(database_url, echo=False, future=True)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    return engine
 
 
 @pytest.fixture
@@ -53,7 +59,7 @@ def db_engine():
         engine.dispose()
         return
 
-    with PostgresContainer("postgres:15") as postgres:
+    with PostgresContainer("pgvector/pgvector:pg15") as postgres:
         url = postgres.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
         engine = _create_test_engine(url)
         SQLModel.metadata.drop_all(engine)
@@ -71,6 +77,7 @@ def test_tables_exist(db_engine):
     assert inspector.has_table("macro_daily")
     assert inspector.has_table("technical_feature")
     assert inspector.has_table("recommendation")
+    assert inspector.has_table("document_chunk")
 
 
 def test_idempotent_price_bar_upsert(db_engine):

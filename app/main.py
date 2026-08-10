@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, HTTPException, Path
 
 from app.db.session import get_engine
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
 from app.schemas.ticker import TickerProfileResponse
 from app.services.analyzer import analyze_request, validate_and_normalize_ticker
 from app.services.ticker_profile import build_ticker_profile
@@ -112,6 +112,24 @@ def analyze(request: AnalyzeRequest, engine=Depends(get_analysis_engine)):
         raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/ticker/{symbol}/evidence", response_model=EvidenceBlock)
+def ticker_evidence(symbol: str = Depends(validated_symbol), engine=Depends(get_analysis_engine)):
+    """Return evidence-backed analysis for *symbol* from the RAG layer."""
+    from app.rag.evidence import build_evidence
+    from app.rag.synthesis import SynthesisOutput
+
+    output: SynthesisOutput = build_evidence(ticker=symbol, engine=engine)
+    return EvidenceBlock(
+        bullish_drivers=[{"claim": item.claim, "chunk_ids": item.chunk_ids} for item in output.bullish_drivers],
+        bearish_risks=[{"claim": item.claim, "chunk_ids": item.chunk_ids} for item in output.bearish_risks],
+        catalysts=[{"claim": item.claim, "chunk_ids": item.chunk_ids} for item in output.catalysts],
+        news_alignment=output.news_alignment,
+        red_flags=[{"claim": item.claim, "chunk_ids": item.chunk_ids} for item in output.red_flags],
+        chunk_count=output.chunk_count,
+        status=output.status,
+    )
 
 
 @app.get("/ticker/{symbol}", response_model=TickerProfileResponse)

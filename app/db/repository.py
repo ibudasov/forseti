@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Iterable, List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import Session, select
 
 from sqlalchemy import func
 
 from app.db.models import (
+    DocumentChunk,
     EarningsEvent,
     Fundamental,
     MacroDaily,
     PriceBar,
     Recommendation,
     Security,
+    SourceType,
     TechnicalFeature,
 )
 from app.db.session import get_engine, get_session
@@ -259,3 +262,70 @@ def upsert_technical_feature(feature: TechnicalFeature, engine=None) -> None:
         existing.volume_trend = volume_trend
         session.add(existing)
         session.commit()
+
+
+# ---------------------------------------------------------------------------
+# DocumentChunk repository
+# ---------------------------------------------------------------------------
+
+def upsert_document_chunks(chunks: Iterable[DocumentChunk], engine=None) -> None:
+    """Insert document chunks, skipping duplicates by source_hash (idempotent)."""
+    engine = engine or get_engine()
+    payloads = [chunk.model_dump(exclude_none=False) for chunk in chunks]
+    payloads = [p for p in payloads if p]
+    if not payloads:
+        return
+
+    # Exclude id and ingested_at so the DB default applies
+    for payload in payloads:
+        payload.pop("id", None)
+
+    stmt = pg_insert(DocumentChunk.__table__).values(payloads)
+    stmt = stmt.on_conflict_do_nothing(constraint="uq_document_chunk_source_hash")
+
+    with get_session(engine) as session:
+        session.execute(stmt)
+        session.commit()
+
+
+def similarity_search(
+    ticker: str,
+    query_embedding: List[float],
+    top_k: int = 5,
+    source_types: Optional[List[SourceType]] = None,
+    published_after: Optional[datetime] = None,
+    engine=None,
+) -> List[DocumentChunk]:
+    """Return the *top_k* most similar chunks for *ticker*.
+
+    Similarity is measured by cosine distance via pgvector operator ``<=>``.
+    Ordering: score ASC (nearest), then published_at DESC, then id ASC.
+    """
+    engine = engine or get_engine()
+    table = DocumentChunk.__table__
+
+    embedding_col = sa.cast(
+        sa.literal(query_embedding, type_=sa.ARRAY(sa.Float)),
+        DocumentChunk.__table__.c.embedding.type,
+    )
+    distance = table.c.embedding.op("<=>")(embedding_col)
+
+    stmt = sa.select(table).where(table.c.ticker == ticker.strip().upper())
+
+    if source_types:
+        stmt = stmt.where(table.c.source_type.in_([st.value for st in source_types]))
+
+    if published_after is not None:
+        stmt = stmt.where(
+            sa.or_(table.c.published_at.is_(None), table.c.published_at >= published_after)
+        )
+
+    stmt = stmt.order_by(
+        distance.asc(),
+        sa.nullslast(table.c.published_at.desc()),
+        table.c.id.asc(),
+    ).limit(top_k)
+
+    with get_session(engine) as session:
+        rows = session.execute(stmt).fetchall()
+        return [DocumentChunk(**dict(row._mapping)) for row in rows]
