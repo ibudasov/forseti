@@ -42,6 +42,35 @@ jobs:
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
-          make test
+          docker-compose run --rm --build \
+            -e TEST_DATABASE_URL=postgresql://user:password@postgresql:5432/forseti \
+            -v $(PWD)/tests:/app/tests \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            app python -m pytest tests --cov=app --cov-report=xml
+
+      - name: Extract coverage
+        id: cov
+        run: |
+          COVERAGE=$(grep -o 'line-rate="[^"]*"' coverage.xml | head -1 | cut -d'"' -f2)
+          PCT=$(echo "$COVERAGE * 100" | bc | cut -d'.' -f1)
+          echo "percentage=$PCT" >> $GITHUB_OUTPUT
+          if [ "$PCT" -ge 80 ]; then COLOR="brightgreen"; elif [ "$PCT" -ge 60 ]; then COLOR="yellow"; else COLOR="red"; fi
+          echo "color=$COLOR" >> $GITHUB_OUTPUT
+
+      - name: Update Coverage Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: c379641f823db1522632b363883f81f4
+          filename: coverage.json
+          label: coverage
+          message: ${{ steps.cov.outputs.percentage }}%
+          color: ${{ steps.cov.outputs.color }}
+
+      - name: Create Coverage Comment
+        uses: orgoro/coverage@v3.1
+        with:
+            coverageFile: coverage.xml
+            token: ${{ secrets.GITHUB_TOKEN }}

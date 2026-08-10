@@ -1,5 +1,8 @@
 # Forseti 
 
+[![CI Tests](https://github.com/ibudasov/forseti/actions/workflows/test.yml/badge.svg)](https://github.com/ibudasov/forseti/actions/workflows/test.yml)
+[![Coverage Badge](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ibudasov/c379641f823db1522632b363883f81f4/raw/coverage.json)](https://github.com/ibudasov/forseti/actions/workflows/test.yml)
+
 A minimalistic trading advisor: accepts a ticker (e.g.: MSFT) and gived you an advise on either execute on the traid or refrain from it.
 Very basic UI is here http://127.0.0.1:8000/docs
 
