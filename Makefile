@@ -1,7 +1,7 @@
 DEFAULT_GOAL := help
 DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; elif docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo docker-compose; fi)
 
-.PHONY: help migrate migration db-shell test ingest
+.PHONY: help migrate migration db-shell test ingest ingest-rag
 
 help:
 	@echo "Available targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
 	@echo "  make ingest           # Run structured data ingestion pipeline"
+	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 
 migrate:
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
@@ -33,6 +34,10 @@ test:
 ingest:
 	$(DOCKER_COMPOSE) run --rm \
 		app python -m app.ingestion.run --source all
+	make ingest-rag
+
+ingest-rag:
+	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
 
 up:
 	$(DOCKER_COMPOSE) up
