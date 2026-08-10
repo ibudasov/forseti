@@ -504,7 +504,7 @@ Package the project as if it were for a real customer.
 
 ## Agentic workflow (Google ADK)
 
-The `agents/` package wires the deterministic services above into a traceable, multi-agent workflow built on [Google ADK](https://google.github.io/adk-docs/) (see `docs/adr-003-adk-vs-langgraph.md`). It is additive: the `PIPELINE_MODE` setting (`linear` | `agentic`, default `linear`) controls whether `POST /analyze` runs the existing linear pipeline or the ADK-orchestrated one; the response schema does not change between modes.
+The `agents/` package wires the deterministic services above into a traceable, multi-agent workflow built on [Google ADK](https://google.github.io/adk-docs/) (see `docs/adr/003-adk-vs-langgraph.md`). It is additive: the `PIPELINE_MODE` setting (`linear` | `agentic`, default `linear`) controls whether `POST /analyze` runs the existing linear pipeline or the ADK-orchestrated one; the response schema does not change between modes.
 
 Topology (Trade Analyst Supervisor root agent):
 
