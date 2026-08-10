@@ -497,10 +497,23 @@ Package the project as if it were for a real customer.
 1. deterministic trade engine
 2. structured data ingestion
 3. RAG explanation layer
-4. LangGraph orchestration
+4. ADK agentic orchestration
 5. evaluation and observability
 6. GCP deployment
 7. optional UX improvements
+
+## Agentic workflow (Google ADK)
+
+The `agents/` package wires the deterministic services above into a traceable, multi-agent workflow built on [Google ADK](https://google.github.io/adk-docs/) (see `docs/adr-003-adk-vs-langgraph.md`). It is additive: the `PIPELINE_MODE` setting (`linear` | `agentic`, default `linear`) controls whether `POST /analyze` runs the existing linear pipeline or the ADK-orchestrated one; the response schema does not change between modes.
+
+Topology (Trade Analyst Supervisor root agent):
+
+1. Input Resolver — normalizes the ticker (deterministic).
+2. Structured Data Collector + Retriever — gather OHLCV/indicators/fundamentals and evidence chunks (deterministic).
+3. Fundamental Analyst + Technical Analyst — LLM specialists grounded in the deterministic data.
+4. Risk Manager — the only source of entry/stop/target/size/R-R numbers (deterministic).
+5. Decision Synthesizer — combines rules-engine output and analyst views into the recommendation memo (LLM).
+6. Critic/Guardrail — can only downgrade confidence or the decision label, never upgrade it (LLM + deterministic validators).
 
 ## Backlog for later
 

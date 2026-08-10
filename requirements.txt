@@ -14,3 +14,4 @@ testcontainers[community]>=4.0.0
 flake8>=6.0.0
 pgvector>=0.3.0
 google-cloud-aiplatform>=1.40.0
+google-adk>=1.0.0,<3.0.0

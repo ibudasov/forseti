@@ -55,6 +55,16 @@ class Settings(BaseSettings):
         default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
     )
 
+    # Agentic workflow (ADK) settings
+    PIPELINE_MODE: str = Field(default="linear", validation_alias="PIPELINE_MODE")
+    AGENT_MODEL_TEMPERATURE: float = Field(
+        default=0.2, validation_alias="AGENT_MODEL_TEMPERATURE"
+    )
+    AGENT_TIMEOUT_SECONDS: float = Field(
+        default=30.0, validation_alias="AGENT_TIMEOUT_SECONDS"
+    )
+    AGENT_MAX_RETRIES: int = Field(default=1, validation_alias="AGENT_MAX_RETRIES")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
