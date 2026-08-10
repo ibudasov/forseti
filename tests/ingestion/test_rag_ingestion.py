@@ -132,9 +132,9 @@ class TestIngestors:
         assert len(chunks) > 0
         for i, chunk in enumerate(chunks):
             assert chunk.chunk_index == i
-            assert chunk.metadata is not None
-            assert "chunk_count" in chunk.metadata
-            assert chunk.metadata["chunk_count"] == len(chunks)
+            assert chunk.chunk_metadata is not None
+            assert "chunk_count" in chunk.chunk_metadata
+            assert chunk.chunk_metadata["chunk_count"] == len(chunks)
 
 
 class TestIngestionManager:

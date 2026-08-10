@@ -195,6 +195,6 @@ class DocumentChunk(SQLModel, table=True):
     text: str = Field(sa_column=Column(sa.Text(), nullable=False))
     chunk_size: int = Field(sa_column=Column(sa.Integer(), nullable=False))
     chunk_index: int = Field(sa_column=Column(sa.Integer(), nullable=False))
-    metadata: Dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False), default_factory=dict)
+    chunk_metadata: Dict[str, Any] = Field(sa_column=Column("metadata", JSONB, nullable=False), default_factory=dict)
     source_hash: str = Field(sa_column=Column(sa.String(length=64), nullable=False, unique=True))
     embedding: Optional[str] = Field(sa_column=Column(sa.Text(), nullable=True))

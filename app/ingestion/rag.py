@@ -179,7 +179,7 @@ class BasicIngestor(Ingestor):
                 chunk_size=chunk_size_estimate,
                 chunk_index=chunk_index,
                 source_hash=source_hash,
-                metadata={
+                chunk_metadata={
                     "content_length": len(chunk_text_content),
                     "chunk_count": len(chunks),
                 },
