@@ -36,6 +36,20 @@ class Settings(BaseSettings):
     INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")
     ACCOUNT_CAPITAL_EUR: float = Field(default=10000.0, validation_alias="ACCOUNT_CAPITAL_EUR")
     RISK_PER_TRADE_PCT: float = Field(default=0.01, validation_alias="RISK_PER_TRADE_PCT")
+    
+    # RAG + Vector Database settings
+    EMBEDDING_MODEL_NAME: str = Field(
+        default="text-embedding-004",
+        validation_alias="EMBEDDING_MODEL_NAME",
+    )
+    EMBEDDING_DIMENSION: int = Field(default=768, validation_alias="EMBEDDING_DIMENSION")
+    CHUNK_SIZE_TOKENS: int = Field(default=800, validation_alias="CHUNK_SIZE_TOKENS")
+    CHUNK_OVERLAP_TOKENS: int = Field(default=100, validation_alias="CHUNK_OVERLAP_TOKENS")
+    VERTEX_AI_PROJECT: Optional[str] = Field(
+        default=None,
+        validation_alias="VERTEX_AI_PROJECT",
+    )
+    VERTEX_AI_LOCATION: str = Field(default="us-central1", validation_alias="VERTEX_AI_LOCATION")
 
 
 @lru_cache(maxsize=1)

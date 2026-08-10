@@ -16,6 +16,8 @@ from app.db.models import (
     Recommendation,
     Security,
     TechnicalFeature,
+    DocumentChunk,
+    DocumentSourceType,
 )
 from app.db.session import get_engine, get_session
 
@@ -259,3 +261,66 @@ def upsert_technical_feature(feature: TechnicalFeature, engine=None) -> None:
         existing.volume_trend = volume_trend
         session.add(existing)
         session.commit()
+
+
+def create_document_chunk(chunk: DocumentChunk, engine=None) -> DocumentChunk:
+    """Create a single document chunk. Raises if source_hash already exists."""
+    engine = engine or get_engine()
+    with get_session(engine) as session:
+        session.add(chunk)
+        session.commit()
+        session.refresh(chunk)
+        return chunk
+
+
+def bulk_create_document_chunks(chunks: Iterable[DocumentChunk], engine=None) -> int:
+    """Bulk create document chunks with idempotency via source_hash.
+    
+    Returns the number of chunks created (skips duplicates).
+    """
+    engine = engine or get_engine()
+    payloads = [chunk.model_dump(exclude_none=True) for chunk in chunks]
+    if not payloads:
+        return 0
+
+    stmt = pg_insert(DocumentChunk.__table__).values(payloads)
+    stmt = stmt.on_conflict_do_nothing(index_elements=[DocumentChunk.source_hash])
+
+    with get_session(engine) as session:
+        result = session.execute(stmt)
+        session.commit()
+        return result.rowcount or 0
+
+
+def get_document_chunks_by_ticker(
+    ticker: str,
+    source_type: Optional[DocumentSourceType] = None,
+    limit: int = 100,
+    engine=None,
+) -> List[DocumentChunk]:
+    """Get document chunks for a ticker, optionally filtered by source type."""
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = select(DocumentChunk).where(DocumentChunk.ticker == ticker)
+    
+    if source_type:
+        stmt = stmt.where(DocumentChunk.source_type == source_type)
+    
+    stmt = stmt.order_by(DocumentChunk.ingested_at.desc()).limit(limit)
+
+    with get_session(engine) as session:
+        return session.exec(stmt).all()
+
+
+def delete_document_chunks_by_source_hash(source_hash: str, engine=None) -> bool:
+    """Delete a document chunk by source_hash. Returns True if deleted."""
+    engine = engine or get_engine()
+    stmt = select(DocumentChunk).where(DocumentChunk.source_hash == source_hash)
+
+    with get_session(engine) as session:
+        chunk = session.exec(stmt).first()
+        if chunk is None:
+            return False
+        session.delete(chunk)
+        session.commit()
+        return True

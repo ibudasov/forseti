@@ -6,6 +6,7 @@ from typing import Literal, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
+from app.schemas.evidence import EvidenceBlockSchema
 
 
 class AnalyzeRequest(BaseModel):
@@ -36,6 +37,7 @@ class AnalyzeResponse(BaseModel):
     engine_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now())
     trace_id: str
+    evidence: Optional[EvidenceBlockSchema] = Field(None, description="RAG evidence block")
 
     class Config:
         # Allow mutation for trace_id

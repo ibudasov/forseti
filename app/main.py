@@ -8,8 +8,11 @@ from fastapi import Depends, FastAPI, HTTPException, Path
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
 from app.schemas.ticker import TickerProfileResponse
+from app.schemas.evidence import TickerEvidenceResponse, EvidenceBlockSchema
 from app.services.analyzer import analyze_request, validate_and_normalize_ticker
 from app.services.ticker_profile import build_ticker_profile
+from app.services.retrieval import retrieve
+from app.services.synthesis import synthesize_evidence
 from app.settings import get_settings
 
 app = FastAPI(title="Forseti API")
@@ -120,3 +123,62 @@ def read_ticker_profile(symbol: str = Depends(validated_symbol), engine=Depends(
     if profile is None:
         raise HTTPException(status_code=404, detail=f"ticker_not_found: {symbol}")
     return profile
+
+
+@app.get("/ticker/{symbol}/evidence", response_model=TickerEvidenceResponse)
+def get_ticker_evidence(symbol: str = Depends(validated_symbol), engine=Depends(get_analysis_engine)):
+    """Retrieve evidence for a ticker from document chunks."""
+    try:
+        # Retrieve relevant chunks
+        retrieval_results = retrieve(ticker=symbol, top_k=10, engine=engine)
+        
+        # Synthesize into structured evidence
+        synthesis = synthesize_evidence(retrieval_results)
+        
+        # Convert to API schema
+        evidence_block = EvidenceBlockSchema(
+            bullish_drivers=[
+                {
+                    "text": item.text,
+                    "chunk_id": item.chunk_id,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at,
+                }
+                for item in synthesis.bullish_drivers
+            ],
+            bearish_risks=[
+                {
+                    "text": item.text,
+                    "chunk_id": item.chunk_id,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at,
+                }
+                for item in synthesis.bearish_risks
+            ],
+            catalysts=[
+                {
+                    "text": item.text,
+                    "chunk_id": item.chunk_id,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at,
+                }
+                for item in synthesis.catalysts
+            ],
+            news_alignment=synthesis.news_alignment,
+            red_flags=[
+                {
+                    "text": item.text,
+                    "chunk_id": item.chunk_id,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at,
+                }
+                for item in synthesis.red_flags
+            ],
+            confidence_adjustment=synthesis.confidence_adjustment,
+            status=synthesis.status,
+        )
+        
+        return TickerEvidenceResponse(ticker=symbol, evidence=evidence_block)
+    
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error retrieving evidence: {str(exc)}") from exc

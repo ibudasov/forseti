@@ -156,3 +156,45 @@ class Recommendation(SQLModel, table=True):
     warnings: List[str] = Field(sa_column=Column(JSONB, nullable=False), default_factory=list)
     full_payload: Dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     engine_version: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
+
+
+class DocumentSourceType(str, enum.Enum):
+    filing_business = "filing_business"
+    filing_risk = "filing_risk"
+    earnings_call = "earnings_call"
+    company_news = "company_news"
+    sector_news = "sector_news"
+
+
+class DocumentChunk(SQLModel, table=True):
+    __tablename__ = "document_chunk"
+    __table_args__ = (
+        sa.Index("ix_document_chunk_ticker", "ticker"),
+        sa.Index("ix_document_chunk_source_type", "source_type"),
+        sa.Index("ix_document_chunk_ingested_at", "ingested_at"),
+        sa.Index("ix_document_chunk_source_hash", "source_hash", unique=True),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(sa_column=Column(sa.String(length=16), nullable=False, index=True))
+    source_type: DocumentSourceType = Field(
+        sa_column=Column(
+            sa.String(length=32),
+            sa.CheckConstraint(
+                "source_type IN ('filing_business','filing_risk','earnings_call','company_news','sector_news')",
+            ),
+            nullable=False,
+        )
+    )
+    source_url: str = Field(sa_column=Column(sa.String(length=2048), nullable=False))
+    published_at: Optional[datetime] = Field(sa_column=Column(sa.DateTime(timezone=True), nullable=True))
+    ingested_at: datetime = Field(
+        default_factory=_utc_now,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, default=_utc_now),
+    )
+    text: str = Field(sa_column=Column(sa.Text(), nullable=False))
+    chunk_size: int = Field(sa_column=Column(sa.Integer(), nullable=False))
+    chunk_index: int = Field(sa_column=Column(sa.Integer(), nullable=False))
+    metadata: Dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False), default_factory=dict)
+    source_hash: str = Field(sa_column=Column(sa.String(length=64), nullable=False, unique=True))
+    embedding: Optional[str] = Field(sa_column=Column(sa.Text(), nullable=True))
