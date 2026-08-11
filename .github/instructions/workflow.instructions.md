@@ -1,2 +1,4 @@
 - do not update readme file with endpoints information, we have /docs page for this
-- 
+- after any code change (new code, edits, refactors, or migrations), you MUST run `make test` before finishing work unless the user explicitly tells you not to run tests
+- if no code changes were made, state that tests were not run because no code changed
+- in the final response, always report the exact test command executed and whether it passed or failed
