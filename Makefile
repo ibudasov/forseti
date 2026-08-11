@@ -1,5 +1,5 @@
 DEFAULT_GOAL := help
-DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; elif docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo docker-compose; fi)
+DOCKER_COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
 
 .PHONY: help migrate migration db-shell test ingest ingest-rag
 
@@ -25,9 +25,10 @@ db-shell:
 	@$(DOCKER_COMPOSE) exec postgresql psql -U "$${POSTGRES_USER:-user}" -d "$${POSTGRES_DB:-forseti}"
 
 test:
+	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
 		-e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$${POSTGRES_DB:-forseti} \
-		-v $(PWD)/tests:/app/tests \
+		-v "$$PWD/tests:/app/tests" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests \
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
