@@ -20,7 +20,7 @@ def get_engine(database_url: Optional[str] = None) -> Engine:
 
 
 def get_session(engine: Optional[Engine] = None) -> Session:
-    return Session(engine or get_engine())
+    return Session(engine or get_engine(), expire_on_commit=False)
 
 
 def create_db_and_tables(engine: Optional[Engine] = None) -> None:
