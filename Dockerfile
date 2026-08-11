@@ -18,6 +18,7 @@ COPY migrations/ ./migrations/
 
 # Copy application code
 COPY app/ ./app/
+COPY agents/ ./agents/
 
 # Expose port that FastAPI will run on
 EXPOSE 8000
