@@ -1,7 +1,13 @@
 DEFAULT_GOAL := help
-DOCKER_COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
+DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
 
-.PHONY: help migrate migration db-shell test ingest ingest-rag
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-rag
+
+check-compose:
+	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
+		echo "Error: neither 'docker compose' nor 'docker-compose' is available."; \
+		exit 1; \
+	fi
 
 help:
 	@echo "Available targets:"
@@ -12,19 +18,19 @@ help:
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 
-migrate:
+migrate: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
 
-migration:
+migration: check-compose
 	ifeq (,$(name))
 		$(error name is required. Run `make migration name=your_migration_name`)
 	endif
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic revision --autogenerate -m "$(name)"
 
-db-shell:
+db-shell: check-compose
 	@$(DOCKER_COMPOSE) exec postgresql psql -U "$${POSTGRES_USER:-user}" -d "$${POSTGRES_DB:-forseti}"
 
-test:
+test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
 		-e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$${POSTGRES_DB:-forseti} \
@@ -34,16 +40,16 @@ test:
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
-ingest:
+ingest: check-compose
 	$(DOCKER_COMPOSE) run --rm \
 		app python -m app.ingestion.run --source all
 	make ingest-rag
 
-ingest-rag:
+ingest-rag: check-compose
 	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
 
-up:
+up: check-compose
 	$(DOCKER_COMPOSE) up
 
-down:
+down: check-compose
 	$(DOCKER_COMPOSE) down
