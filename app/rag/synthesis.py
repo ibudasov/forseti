@@ -110,11 +110,14 @@ def synthesize(
     gemini_model: Optional[str] = None,
     vertex_project: Optional[str] = None,
     vertex_location: str = "us-central1",
+    fail_loud: bool = False,
 ) -> SynthesisOutput:
     """Call Gemini with the retrieved chunks and return a :class:`SynthesisOutput`.
 
     Falls back to ``status="insufficient_data"`` when chunks are empty,
-    the LLM is unavailable, or the response fails validation.
+    the LLM is unavailable, or the response fails validation. When
+    *fail_loud* is ``True``, a Gemini call failure is re-raised instead of
+    falling back silently.
     """
     if not chunks:
         return _insufficient_output(ticker, [])
@@ -147,4 +150,6 @@ def synthesize(
         return _parse_llm_json(ticker, raw_json, chunks)
     except Exception as exc:
         logger.warning("Gemini synthesis failed for %s: %s", ticker, exc)
+        if fail_loud:
+            raise
         return _insufficient_output(ticker, chunks)

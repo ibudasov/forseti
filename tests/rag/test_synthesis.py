@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import pytest
 
@@ -119,3 +121,38 @@ class TestInsufficientOutput:
         output = _insufficient_output("NVDA", chunks)
         assert output.status == "insufficient_data"
         assert output.chunk_count == 2
+
+
+class TestFailLoud:
+    def _install_failing_gemini(self, monkeypatch):
+        """Simulate a `vertexai` install whose Gemini call always raises."""
+        fake_vertexai = types.ModuleType("vertexai")
+        fake_vertexai.init = lambda **kwargs: None
+        fake_generative_models = types.ModuleType("vertexai.generative_models")
+
+        class _FailingModel:
+            def __init__(self, model_name):
+                pass
+
+            def generate_content(self, prompt, generation_config=None):
+                raise RuntimeError("gemini backend unavailable")
+
+        fake_generative_models.GenerativeModel = _FailingModel
+        fake_vertexai.generative_models = fake_generative_models
+        monkeypatch.setitem(sys.modules, "vertexai", fake_vertexai)
+        monkeypatch.setitem(sys.modules, "vertexai.generative_models", fake_generative_models)
+
+    def test_fail_loud_propagates_gemini_failure(self, monkeypatch):
+        self._install_failing_gemini(monkeypatch)
+        chunks = [_make_chunk(1)]
+
+        with pytest.raises(RuntimeError):
+            synthesize("NVDA", chunks=chunks, vertex_project="proj", fail_loud=True)
+
+    def test_default_fail_loud_returns_insufficient_on_failure(self, monkeypatch):
+        self._install_failing_gemini(monkeypatch)
+        chunks = [_make_chunk(1)]
+
+        result = synthesize("NVDA", chunks=chunks, vertex_project="proj")
+
+        assert result.status == "insufficient_data"

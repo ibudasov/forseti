@@ -1,0 +1,15 @@
+"""Tests for app.settings: RAG_FAIL_LOUD flag parsing."""
+from __future__ import annotations
+
+from app.settings import Settings
+
+
+def test_rag_fail_loud_defaults_to_false():
+    settings = Settings(_env_file=None)
+    assert settings.RAG_FAIL_LOUD is False
+
+
+def test_rag_fail_loud_env_var_parses_to_true(monkeypatch):
+    monkeypatch.setenv("RAG_FAIL_LOUD", "true")
+    settings = Settings(_env_file=None)
+    assert settings.RAG_FAIL_LOUD is True

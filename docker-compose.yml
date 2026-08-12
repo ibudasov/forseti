@@ -28,11 +28,21 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-forseti}
       - POSTGRES_HOST=postgresql
       - POSTGRES_PORT=5432
+      - VERTEX_AI_PROJECT=${VERTEX_AI_PROJECT:-}
+      - VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-us-central1}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-004}
+      - EMBEDDING_DIM=${EMBEDDING_DIM:-768}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-001}
+      - RAG_FAIL_LOUD=${RAG_FAIL_LOUD:-false}
+      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-TRUE}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
     depends_on:
       postgresql:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
 
 volumes:
   db_data:

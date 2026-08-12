@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = Field(
         default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
     )
+    RAG_FAIL_LOUD: bool = Field(default=False, validation_alias="RAG_FAIL_LOUD")
 
     # Agentic workflow (ADK) settings
     PIPELINE_MODE: str = Field(default="linear", validation_alias="PIPELINE_MODE")

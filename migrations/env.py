@@ -40,31 +40,16 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        # Pre-migration setup: Create extensions and refresh collation
-        # These need to be done outside the transaction
+        # First, try to create the pgvector extension if it doesn't exist
+        # This needs to be done outside the transaction
         try:
             connection.connection.autocommit = True
             cursor = connection.connection.cursor()
-            
-            # Create pgvector extension if it doesn't exist
-            try:
-                cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            except Exception as e:
-                print(f"Note: pgvector extension may already exist or couldn't be created: {e}")
-            
-            # Refresh collation version to match the operating system's collation library
-            # This resolves "has a collation version mismatch" warnings
-            try:
-                db_name = settings.DATABASE_URL.split("/")[-1]
-                cursor.execute(f"ALTER DATABASE {db_name} REFRESH COLLATION VERSION;")
-                print(f"Refreshed collation version for database '{db_name}'")
-            except Exception as e:
-                print(f"Note: Could not refresh collation version: {e}")
-            
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             cursor.close()
             connection.connection.autocommit = False
         except Exception as e:
-            print(f"Note: Error during pre-migration setup: {e}")
+            print(f"Note: pgvector extension may already exist or couldn't be created: {e}")
         
         context.configure(connection=connection, target_metadata=target_metadata)
 

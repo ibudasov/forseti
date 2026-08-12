@@ -70,4 +70,5 @@ def build_evidence(
         gemini_model=settings.GEMINI_MODEL,
         vertex_project=settings.VERTEX_AI_PROJECT,
         vertex_location=settings.VERTEX_AI_LOCATION,
+        fail_loud=settings.RAG_FAIL_LOUD,
     )

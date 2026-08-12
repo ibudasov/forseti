@@ -79,6 +79,8 @@ def ingest_ticker(
                 embeddings = embedding_client.embed_texts(texts)
             except Exception as exc:
                 logger.warning("Embedding failed for %s (%s): %s", ticker, doc.source_url, exc)
+                if settings.RAG_FAIL_LOUD:
+                    raise
                 embeddings = [[0.0] * settings.EMBEDDING_DIM] * len(texts)
 
             all_chunks.extend(_build_chunks(doc, chunk_size, overlap, embeddings, text_chunks))
