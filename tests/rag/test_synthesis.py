@@ -99,10 +99,10 @@ class TestParseLLMJson:
         assert result.status == "ok"
         assert len(result.bullish_drivers) == 1
 
-    def test_invalid_json_returns_insufficient(self):
+    def test_invalid_json_raises(self):
         chunks = [_make_chunk(1)]
-        result = _parse_llm_json("NVDA", "not valid json", chunks)
-        assert result.status == "insufficient_data"
+        with pytest.raises(ValueError, match="invalid JSON"):
+            _parse_llm_json("NVDA", "not valid json", chunks)
 
     def test_empty_chunks_returns_insufficient(self):
         result = synthesize("NVDA", chunks=[], vertex_project=None)
@@ -149,10 +149,9 @@ class TestFailLoud:
         with pytest.raises(RuntimeError):
             synthesize("NVDA", chunks=chunks, vertex_project="proj", fail_loud=True)
 
-    def test_default_fail_loud_returns_insufficient_on_failure(self, monkeypatch):
+    def test_gemini_failure_raises_even_without_legacy_flag(self, monkeypatch):
         self._install_failing_gemini(monkeypatch)
         chunks = [_make_chunk(1)]
 
-        result = synthesize("NVDA", chunks=chunks, vertex_project="proj")
-
-        assert result.status == "insufficient_data"
+        with pytest.raises(RuntimeError, match="gemini backend unavailable"):
+            synthesize("NVDA", chunks=chunks, vertex_project="proj")

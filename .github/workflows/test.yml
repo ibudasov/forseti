@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .[test]
       
       - name: Lint with flake8
         run: |
@@ -51,9 +51,11 @@ jobs:
         env:
           DOCKER_COMPOSE: docker compose
         run: |
-          COVERAGE=$(grep -o 'line-rate="[^"]*"' coverage.xml | head -1 | cut -d'"' -f2)
-          PCT=$(echo "$COVERAGE * 100" | bc | cut -d'.' -f1)
-          echo "percentage=$PCT" >> $GITHUB_OUTPUT
-          if [ "$PCT" -ge 80 ]; then COLOR="brightgreen"; elif [ "$PCT" -ge 60 ]; then COLOR="yellow"; else COLOR="red"; fi
-          echo "color=$COLOR" >> $GITHUB_OUTPUT
+          make test
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Coverage gate
+        run: make coverage
 

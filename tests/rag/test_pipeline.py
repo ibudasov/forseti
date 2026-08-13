@@ -60,7 +60,7 @@ def _patch_ingestors(monkeypatch):
 
 
 class TestIngestTickerFailLoud:
-    def test_default_flag_falls_back_to_zero_vectors(self, monkeypatch):
+    def test_embedding_failure_always_raises(self, monkeypatch):
         _patch_ingestors(monkeypatch)
         monkeypatch.setattr(pipeline, "get_settings", lambda: _settings(rag_fail_loud=False))
 
@@ -69,10 +69,9 @@ class TestIngestTickerFailLoud:
             pipeline, "upsert_document_chunks", lambda chunks, engine=None: stored_chunks.extend(chunks)
         )
 
-        count = pipeline.ingest_ticker(ticker="NVDA", embedding_client=_RaisingEmbeddingClient())
-
-        assert count == len(stored_chunks) > 0
-        assert all(chunk.embedding == [0.0] * 8 for chunk in stored_chunks)
+        with pytest.raises(RuntimeError, match="Google embedding failed"):
+            pipeline.ingest_ticker(ticker="NVDA", embedding_client=_RaisingEmbeddingClient())
+        assert stored_chunks == []
 
     def test_fail_loud_reraises_and_skips_upsert(self, monkeypatch):
         _patch_ingestors(monkeypatch)

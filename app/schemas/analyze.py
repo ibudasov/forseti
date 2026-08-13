@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Literal, Optional, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -37,6 +37,27 @@ class EvidenceBlock(BaseModel):
     status: str = "ok"
 
 
+class TraceStep(BaseModel):
+    sequence: int
+    agent_name: str
+    status: str
+    tool_calls: List[str] = Field(default_factory=list)
+    latency_ms: float = 0.0
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    retries: int = 0
+    output: Optional[dict[str, Any]] = None
+
+
+class AnalysisTrace(BaseModel):
+    run_id: str
+    ticker: str
+    steps: List[TraceStep] = Field(default_factory=list)
+    final_decision: Optional[str] = None
+    total_latency_ms: float = 0.0
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class AnalyzeResponse(BaseModel):
     ticker: str
     decision: Literal["trade", "watchlist", "no_trade"]
@@ -52,6 +73,7 @@ class AnalyzeResponse(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now())
     trace_id: str
     evidence: Optional[EvidenceBlock] = None
+    trace: Optional[AnalysisTrace] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

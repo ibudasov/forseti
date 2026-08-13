@@ -10,6 +10,8 @@ from sqlmodel import Session, select
 from sqlalchemy import func
 
 from app.db.models import (
+    AgentRun,
+    AgentRunStep,
     DocumentChunk,
     EarningsEvent,
     Fundamental,
@@ -127,6 +129,29 @@ def save_recommendation(rec: Recommendation, engine=None) -> Recommendation:
         session.commit()
         session.refresh(rec)
         return rec
+
+
+def save_agent_run(run: AgentRun, steps: Iterable[AgentRunStep], engine=None) -> AgentRun:
+    engine = engine or get_engine()
+    with get_session(engine) as session:
+        session.add(run)
+        session.add_all(list(steps))
+        session.commit()
+        session.refresh(run)
+        return run
+
+
+def get_agent_run(run_id: str, engine=None) -> Optional[AgentRun]:
+    engine = engine or get_engine()
+    with get_session(engine) as session:
+        return session.get(AgentRun, run_id)
+
+
+def get_agent_run_steps(run_id: str, engine=None) -> List[AgentRunStep]:
+    engine = engine or get_engine()
+    statement = select(AgentRunStep).where(AgentRunStep.run_id == run_id).order_by(AgentRunStep.sequence)
+    with get_session(engine) as session:
+        return list(session.exec(statement).all())
 
 
 def get_security(ticker: str, engine=None) -> Optional[Security]:

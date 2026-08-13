@@ -3,8 +3,9 @@ import socket
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Path
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
 
+from agents.orchestration.workflow import GoogleWorkflowError
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
 from app.schemas.ticker import TickerProfileResponse
@@ -105,13 +106,40 @@ def validated_symbol(symbol: str = Path(...)) -> str:
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(request: AnalyzeRequest, engine=Depends(get_analysis_engine)):
+def analyze(
+    request: AnalyzeRequest,
+    include_trace: bool = Query(default=False),
+    engine=Depends(get_analysis_engine),
+):
     try:
+        from agents.config import load_agent_config
+
+        if load_agent_config().is_agentic():
+            from agents.orchestration.workflow import AgenticAnalysisWorkflow
+
+            response = AgenticAnalysisWorkflow(load_agent_config(), engine=engine).analyze(
+                request.ticker, request=request
+            )
+            if not include_trace:
+                response.trace = None
+            return response
         return analyze_request(request, engine=engine)
+    except GoogleWorkflowError as exc:
+        raise HTTPException(status_code=502, detail=f"google_workflow_failed: {exc}") from exc
     except HTTPException:
         raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/runs/{run_id}")
+def read_run(run_id: str, engine=Depends(get_analysis_engine)):
+    from agents.orchestration.workflow import load_trace
+
+    trace = load_trace(run_id, engine=engine)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"agent_run_not_found: {run_id}")
+    return trace
 
 
 @app.get("/ticker/{symbol}/evidence", response_model=EvidenceBlock)

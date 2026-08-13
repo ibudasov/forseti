@@ -23,9 +23,23 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "pytest>=7.0.0",
+  "pytest-cov>=4.1.0",
   "httpx>=0.24.0",
-  "testcontainers[community]>=4.0.0"
+  "testcontainers[community]>=4.0.0",
+  "mypy>=1.8.0"
 ]
+
+[tool.coverage.run]
+source = ["app", "agents"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "@abstractmethod",
+  "raise NotImplementedError",
+]
+omit = ["migrations/*"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

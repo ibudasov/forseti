@@ -1,3 +1,13 @@
+# Agentic workflow
+
+Set `PIPELINE_MODE=agentic` to enable the Google ADK supervisor while keeping
+the deterministic rules and risk services authoritative. The workflow records
+resolver, data, retrieval, specialist, risk, synthesis, and critic steps.
+
+Use the API documentation to include a trace in an analysis response or fetch a
+persisted run by id. A specialist or tool failure returns the deterministic
+recommendation with a warning rather than changing the risk math or producing
+a server error.
 # Pet Project
 
 This page turns the study plan into a concrete implementation roadmap for the trading pet project described in [Trading](https://app.notion.com/p/Trading-3705752d31288089bf35e21f420cc055?pvs=21).

@@ -78,19 +78,28 @@ Respond with valid JSON matching this schema:
 }}"""
 
 
-def _parse_llm_json(ticker: str, raw_json: str, chunks: List[DocumentChunk]) -> SynthesisOutput:
+def _parse_llm_json(
+    ticker: str,
+    raw_json: str,
+    chunks: List[DocumentChunk],
+    fail_loud: bool = True,
+) -> SynthesisOutput:
     import json
 
     try:
         data = json.loads(raw_json)
     except json.JSONDecodeError as exc:
         logger.warning("LLM returned invalid JSON for %s: %s", ticker, exc)
+        if fail_loud:
+            raise ValueError(f"Gemini returned invalid JSON for {ticker}") from exc
         return _insufficient_output(ticker, chunks)
 
     try:
         output = SynthesisOutput(ticker=ticker, chunk_count=len(chunks), **data)
     except Exception as exc:
         logger.warning("SynthesisOutput validation failed for %s: %s", ticker, exc)
+        if fail_loud:
+            raise ValueError(f"Gemini returned invalid synthesis output for {ticker}") from exc
         return _insufficient_output(ticker, chunks)
 
     return output
@@ -147,9 +156,7 @@ def synthesize(
             getattr(response.usage_metadata, "prompt_token_count", "?"),
             getattr(response.usage_metadata, "candidates_token_count", "?"),
         )
-        return _parse_llm_json(ticker, raw_json, chunks)
+        return _parse_llm_json(ticker, raw_json, chunks, fail_loud=True)
     except Exception as exc:
         logger.warning("Gemini synthesis failed for %s: %s", ticker, exc)
-        if fail_loud:
-            raise
-        return _insufficient_output(ticker, chunks)
+        raise

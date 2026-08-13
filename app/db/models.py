@@ -198,3 +198,36 @@ class Recommendation(SQLModel, table=True):
     warnings: List[str] = Field(sa_column=Column(JSONB, nullable=False), default_factory=list)
     full_payload: Dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     engine_version: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
+
+
+class AgentRun(SQLModel, table=True):
+    __tablename__ = "agent_runs"
+
+    run_id: str = Field(sa_column=Column(sa.String(length=36), primary_key=True))
+    ticker: str = Field(sa_column=Column(sa.String(length=16), nullable=False, index=True))
+    created_at: datetime = Field(
+        default_factory=_utc_now,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, default=_utc_now),
+    )
+    final_decision: Optional[Decision] = Field(
+        default=None, sa_column=Column(sa.String(length=16), nullable=True)
+    )
+    total_latency_ms: float = Field(default=0.0, nullable=False)
+    token_usage: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
+    warnings: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+
+
+class AgentRunStep(SQLModel, table=True):
+    __tablename__ = "agent_run_steps"
+    __table_args__ = (sa.UniqueConstraint("run_id", "sequence", name="uq_agent_run_steps_order"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: str = Field(foreign_key="agent_runs.run_id", nullable=False, index=True)
+    sequence: int = Field(nullable=False)
+    agent_name: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
+    status: str = Field(sa_column=Column(sa.String(length=16), nullable=False))
+    tool_calls: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    latency_ms: float = Field(default=0.0, nullable=False)
+    token_usage: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
+    retries: int = Field(default=0, nullable=False)
+    output: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))

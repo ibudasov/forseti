@@ -59,6 +59,20 @@ The ingestion commands are idempotent and can be safely re-run.
 
 ## Evaluation engine
 
+## Agent workflow
+
+Forseti supports two execution modes behind the same analysis service. The
+default `PIPELINE_MODE=linear` runs the deterministic rules and risk pipeline.
+`PIPELINE_MODE=agentic` adds a Google ADK supervisor with parallel-minded
+structured-data and retrieval steps, fundamental and technical specialists, a
+decision synthesizer, and a critic/guardrail. The deterministic rules and risk
+engine remain authoritative in both modes; an agent can only downgrade a
+decision or confidence and cannot change trade numbers.
+
+Agentic runs persist an ordered execution trace. The API documentation describes
+how to request and retrieve that trace. Configure the mode and model through
+the corresponding variables in `.env.example`.
+
 The deterministic evaluation engine analyzes securities in a six-step pipeline:
 
 ### Decision making overview
