@@ -28,6 +28,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-forseti}
       - POSTGRES_HOST=postgresql
       - POSTGRES_PORT=5432
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - VERTEX_AI_PROJECT=${VERTEX_AI_PROJECT:-}
       - VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-us-central1}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-004}

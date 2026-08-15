@@ -19,7 +19,7 @@ _EARNINGS_CALENDAR_URL = "https://www.alphavantage.co/query"
 def fetch_earnings_calendar_csv(api_key: str) -> str:
     response = httpx.get(
         _EARNINGS_CALENDAR_URL,
-        params={"function": "EARNINGS_CALENDAR", "horizon": "3month", "apikey": api_key},
+        params={"function": "EARNINGS_CALENDAR", "horizon": "12month", "apikey": api_key},
         timeout=30.0,
     )
     response.raise_for_status()

@@ -149,6 +149,66 @@ class TestAnalyzeEndpoint:
         assert body["warnings"] == ["insufficient_price_data"]
 
 
+class TestScreeningEndpoint:
+    def test_get_screening_returns_summary_and_priority_order(self, db_client, db_engine, monkeypatch):
+        from app.db.models import Security
+        from app.schemas.analyze import AnalyzeResponse
+
+        with Session(db_engine) as session:
+            session.add_all(
+                [
+                    Security(ticker="MSFT", name="Microsoft", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="AMD", name="AMD", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="AAPL", name="Apple", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="QQQ", name="Nasdaq", exchange="NASDAQ", sector_tag="ai", is_active=False),
+                ]
+            )
+            session.commit()
+
+        def fake_analyze(symbol, engine=None, today=None):
+            mapping = {
+                "MSFT": AnalyzeResponse(
+                    ticker="MSFT",
+                    decision="trade",
+                    confidence=0.9,
+                    reasons=["screened trade"],
+                    warnings=[],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                ),
+                "AMD": AnalyzeResponse(
+                    ticker="AMD",
+                    decision="watchlist",
+                    confidence=0.5,
+                    reasons=["screened watchlist"],
+                    warnings=["insufficient_price_data"],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                ),
+                "AAPL": AnalyzeResponse(
+                    ticker="AAPL",
+                    decision="no_trade",
+                    confidence=0.2,
+                    reasons=["screened no_trade"],
+                    warnings=["no_price_data"],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                ),
+            }
+            return mapping[symbol]
+
+        monkeypatch.setattr("app.services.analyzer.analyze", fake_analyze)
+
+        response = db_client.get("/screening")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body.keys()) >= {"summary", "items"}
+        assert body["summary"] == {"total": 3, "trade": 1, "watchlist": 1, "no_trade": 1, "errors": 0}
+        assert [item["ticker"] for item in body["items"]] == ["MSFT", "AMD", "AAPL"]
+        assert [item["decision"] for item in body["items"]] == ["trade", "watchlist", "no_trade"]
+
+
 class TestTickerEndpoint:
     def test_get_ticker_happy_path_full_data(self, db_client, db_engine):
         from decimal import Decimal

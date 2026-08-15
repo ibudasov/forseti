@@ -8,8 +8,10 @@ from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from agents.orchestration.workflow import GoogleWorkflowError
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
+from app.schemas.screening import ScreeningResponse
 from app.schemas.ticker import TickerProfileResponse
 from app.services.analyzer import analyze_request, validate_and_normalize_ticker
+from app.services.screening import run_screening
 from app.services.ticker_profile import build_ticker_profile
 from app.settings import get_settings
 
@@ -130,6 +132,11 @@ def analyze(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/screening", response_model=ScreeningResponse)
+def read_screening(engine=Depends(get_analysis_engine)):
+    return run_screening(engine=engine)
 
 
 @app.get("/runs/{run_id}")

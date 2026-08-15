@@ -20,6 +20,16 @@ Very basic UI is here http://127.0.0.1:8000/docs
 
 http://127.0.0.1:8000/docs
 
+## Screening endpoint
+
+`GET /screening` runs the existing deterministic analyzer across the active universe and returns a compact, read-only batch result sorted by actionability: trade first, then watchlist, then no-trade, then errors.
+
+```bash
+curl -s http://127.0.0.1:8000/screening | python3 -m json.tool
+```
+
+The endpoint is intentionally write-free: it does not persist recommendations and it bypasses the agentic workflow. For per-ticker detail or audit trail, use `POST /analyze`.
+
 ## Test
 
 ```bash
