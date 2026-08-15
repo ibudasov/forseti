@@ -1,53 +1,19 @@
 """Tests for DocumentChunk repository functions.
 
-These tests require a pgvector-enabled Postgres instance.  They reuse the
-``db_engine`` fixture from ``tests/test_db.py`` but need to ensure the
-pgvector extension is present.  When run via testcontainers the tests spin up
-a ``pgvector/pgvector:pg15`` image.
+These tests require a pgvector-enabled Postgres instance.  The ``pgvector_engine``
+fixture lives in ``tests/conftest.py``; without ``TEST_DATABASE_URL`` it spins up
+a ``pgvector/pgvector:pg15`` container.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
-import pytest
-from sqlalchemy import inspect, text
-from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy import inspect
+from sqlmodel import Session
 
 from app.db.models import DocumentChunk, Security, SourceType
 from app.db.repository import upsert_document_chunks, similarity_search
 from app.rag.ingestion.base import compute_source_hash
-
-
-def _create_pgvector_engine(database_url: str):
-    engine = create_engine(database_url, echo=False, future=True)
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-    SQLModel.metadata.drop_all(engine)
-    SQLModel.metadata.create_all(engine)
-    return engine
-
-
-@pytest.fixture
-def pgvector_engine():
-    url = os.getenv("TEST_DATABASE_URL")
-    if url:
-        engine = _create_pgvector_engine(url)
-        yield engine
-        engine.dispose()
-        return
-
-    try:
-        from testcontainers.community.postgres import PostgresContainer
-
-        with PostgresContainer("pgvector/pgvector:pg15") as postgres:
-            url = postgres.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
-            engine = _create_pgvector_engine(url)
-            yield engine
-            engine.dispose()
-    except Exception as exc:
-        pytest.skip(f"pgvector container unavailable: {exc}")
 
 
 def _make_chunk(ticker: str, chunk_index: int, text: str, embedding=None) -> DocumentChunk:

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-import os
 
 import pytest
 from sqlalchemy import inspect
-from sqlmodel import SQLModel, Session, create_engine, select
-from testcontainers.community.postgres import PostgresContainer
+from sqlmodel import Session, select
 
 from app.db.models import (
     EarningsEvent,
@@ -35,37 +33,6 @@ from app.db.repository import (
     get_latest_macro_daily,
     upsert_technical_feature,
 )
-
-
-def _create_test_engine(database_url: str):
-    from sqlalchemy import text
-
-    engine = create_engine(database_url, echo=False, future=True)
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-    return engine
-
-
-@pytest.fixture
-def db_engine():
-    # Prefer an explicitly provided database URL (useful in docker-compose test runs).
-    url = os.getenv("TEST_DATABASE_URL")
-    if url:
-        engine = _create_test_engine(url)
-        SQLModel.metadata.drop_all(engine)
-        SQLModel.metadata.create_all(engine)
-        yield engine
-        engine.dispose()
-        return
-
-    with PostgresContainer("pgvector/pgvector:pg15") as postgres:
-        url = postgres.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
-        engine = _create_test_engine(url)
-        SQLModel.metadata.drop_all(engine)
-        SQLModel.metadata.create_all(engine)
-        yield engine
-        engine.dispose()
 
 
 def test_tables_exist(db_engine):

@@ -19,7 +19,6 @@ from app.services.analyzer import analyze
 from app.services.checklist import evaluate_checklist
 from app.services.risk import calculate_risk_levels, RiskConfig
 from app.services.vetoes import check_vetoes
-from tests.test_db import db_engine
 
 
 class TestVetoes:

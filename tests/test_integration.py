@@ -7,7 +7,6 @@ from sqlmodel import Session, select
 from app.db.models import PriceBar, Recommendation, Security
 from app.main import app
 from app.main import get_analysis_engine
-from tests.test_db import db_engine
 
 
 @pytest.fixture

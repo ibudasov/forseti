@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
+# Tests drop and recreate every table, so they must never point at the application database.
+POSTGRES_TEST_DB ?= forseti_test
+TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
 .PHONY: check-compose help migrate migration db-shell test ingest ingest-rag up down lint typecheck coverage check
 
@@ -39,7 +42,7 @@ db-shell: check-compose
 test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
-		-e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$${POSTGRES_DB:-forseti} \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-v "$$PWD/tests:/app/tests" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests \
@@ -69,7 +72,7 @@ typecheck: check-compose
 
 coverage: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
-		-e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$${POSTGRES_DB:-forseti} \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-v "$$PWD/tests:/app/tests" -v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=100
 

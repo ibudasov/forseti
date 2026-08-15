@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 
 from app.db.models import PriceBar, Security
 from app.ingestion.prices import ingest_prices, to_price_bars
-from tests.test_db import db_engine
 
 
 class TestPriceIngestion:
