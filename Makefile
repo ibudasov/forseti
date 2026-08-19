@@ -43,6 +43,7 @@ test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e PIPELINE_MODE=linear \
 		-v "$$PWD/tests:/app/tests" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests \
