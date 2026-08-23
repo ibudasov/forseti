@@ -20,10 +20,23 @@ def _flatten_columns(frame: pd.DataFrame) -> pd.DataFrame:
         return frame
 
     frame = frame.copy()
-    frame.columns = [
-        str(column[0]) if isinstance(column, tuple) and len(column) > 0 else str(column)
-        for column in frame.columns
-    ]
+    flattened_columns: list[str] = []
+    for column in frame.columns:
+        if not isinstance(column, tuple):
+            flattened_columns.append(str(column))
+            continue
+
+        labels = [str(label) for label in column if label is not None]
+        if any(label == "Close" for label in labels):
+            flattened_columns.append("Close")
+            continue
+        if any(label == "Open" for label in labels):
+            flattened_columns.append("Open")
+            continue
+
+        flattened_columns.append(str(labels[-1]) if labels else str(column))
+
+    frame.columns = flattened_columns
     return frame
 
 
