@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 import pandas as pd
-from app.ingestion.earnings import ingest_earnings
+from app.ingestion.earnings import MISSING_API_KEY_MARKER, ingest_earnings
 from app.ingestion import run
 from app.ingestion.vix import to_macro_rows
 
@@ -29,14 +29,14 @@ class TestIngestionRun:
         assert rows[1].obs_date == date(2026, 1, 3)
         assert rows[1].vix == Decimal("18.900")
 
-    def test_ingest_earnings_without_api_key_skips_successfully(self, monkeypatch):
+    def test_ingest_earnings_without_api_key_reports_a_failure(self, monkeypatch):
         monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "")
         monkeypatch.setattr("app.ingestion.earnings.get_settings", lambda: Namespace(ALPHA_VANTAGE_API_KEY=""))
 
         rows, failures = ingest_earnings()
 
         assert rows == 0
-        assert failures == []
+        assert failures == [MISSING_API_KEY_MARKER]
 
     def test_run_continues_after_source_failure_and_returns_non_zero(self, monkeypatch):
         execution_order: list[str] = []

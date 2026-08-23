@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-rag up down lint typecheck coverage check
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck coverage check
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -19,6 +19,7 @@ help:
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
 	@echo "  make ingest           # Run structured data ingestion pipeline"
+	@echo "  make ingest-earnings  # Run earnings ingestion source only"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -51,10 +52,13 @@ test: check-compose
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
 ingest: check-compose
-	$(DOCKER_COMPOSE) run --rm \
+	$(DOCKER_COMPOSE) run --rm --build \
 		app python -m app.ingestion.run --source all
 	make ingest-rag
 
+
+ingest-earnings: check-compose
+	$(DOCKER_COMPOSE) run --rm --build app python -m app.ingestion.run --source earnings
 ingest-rag: check-compose
 	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
 
