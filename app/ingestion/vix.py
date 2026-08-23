@@ -21,7 +21,7 @@ def _flatten_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
     frame = frame.copy()
     frame.columns = [
-        str(column[1]) if isinstance(column, tuple) and len(column) > 1 else str(column)
+        str(column[0]) if isinstance(column, tuple) and len(column) > 0 else str(column)
         for column in frame.columns
     ]
     return frame

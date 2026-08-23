@@ -105,6 +105,10 @@ def _merge_token_usage(total: dict[str, int], event_usage: dict[str, int]) -> No
         total[field_name] = total.get(field_name, 0) + value
 
 
+def _first_line(detail: Any) -> str:
+    return str(detail).strip().splitlines()[0] if str(detail).strip() else str(detail)
+
+
 class AgenticAnalysisWorkflow:
     """Application-level port for linear and ADK-backed analysis execution."""
 
@@ -130,9 +134,11 @@ class AgenticAnalysisWorkflow:
         response = analyze_request(request, engine=self.engine)
 
         registry = build_agent_registry(config=self.config, engine=self.engine)
-        token_usage = self._run_adk(registry, resolved.ticker, run_id, steps, response)
+        adk_warnings: list[str] = []
+        token_usage = self._run_adk(registry, resolved.ticker, run_id, steps, response, adk_warnings)
         self._append_critic_step(steps, response)
 
+        response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
         total_latency_ms = (time.monotonic() - started_at) * 1000
         trace = AnalysisTrace(
@@ -172,6 +178,7 @@ class AgenticAnalysisWorkflow:
         run_id: str,
         steps: list[TraceStep],
         response: AnalyzeResponse,
+        warnings: list[str],
     ) -> dict[str, int]:
         if self.runner_factory is None:
             return {}
@@ -180,11 +187,13 @@ class AgenticAnalysisWorkflow:
         try:
             events = self.runner_factory(registry, ticker)
             for event in events:
+                # The narration layer never produces trade numbers, so a model-level
+                # error degrades the memo but must not fail the deterministic answer.
                 error_code = getattr(event, "error_code", None)
                 error_message = getattr(event, "error_message", None)
                 if error_code or error_message:
-                    detail = error_message or error_code
-                    raise GoogleWorkflowError(f"ADK unsuccessful response: {detail}")
+                    detail = _first_line(error_message or error_code)
+                    warnings.append(f"agent_narration_degraded: {detail}")
                 _merge_token_usage(token_usage, _token_usage_from_event(event))
             steps[6].token_usage = token_usage
             steps[6].output = {"deterministic_decision": response.decision, "ticker": ticker}
@@ -192,8 +201,6 @@ class AgenticAnalysisWorkflow:
             return token_usage
         except Exception as exc:
             logger.exception("google_adk_workflow_failed: ticker=%s", ticker)
-            if isinstance(exc, GoogleWorkflowError):
-                raise
             raise GoogleWorkflowError(f"ADK execution failed: {exc}") from exc
 
     @staticmethod

@@ -7,15 +7,14 @@ no LLM involved.
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
-from app.schemas.ticker import TickerProfileResponse
 from app.services.ticker_profile import build_ticker_profile
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
-CollectStructuredData = Callable[[str], Optional[TickerProfileResponse]]
+CollectStructuredData = Callable[[str], Dict[str, Any]]
 
 
 def build_structured_data_collector_tool(
@@ -29,12 +28,16 @@ def build_structured_data_collector_tool(
     injected collaborators rather than global state.
     """
 
-    def collect_structured_data(ticker: str) -> Optional[TickerProfileResponse]:
+    def collect_structured_data(ticker: str) -> Dict[str, Any]:
         """Fetch the structured data profile (prices, indicators, fundamentals,
         earnings) for a validated ticker, including data freshness warnings.
 
-        Returns `None` when the ticker is unknown to the system.
+        Returns `{"found": False}` when the ticker is unknown to the system.
         """
-        return build_ticker_profile(ticker, engine=engine, today=today)
+        profile = build_ticker_profile(ticker, engine=engine, today=today)
+        if profile is None:
+            return {"found": False, "ticker": ticker}
+        # mode="json" keeps dates/Decimals serializable for the ADK function response.
+        return {"found": True, **profile.model_dump(mode="json")}
 
     return collect_structured_data

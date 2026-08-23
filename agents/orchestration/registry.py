@@ -37,6 +37,13 @@ TECHNICAL_ANALYST_NAME = "technical_analyst"
 DECISION_SYNTHESIZER_NAME = "decision_synthesizer"
 CRITIC_NAME = "critic_guardrail"
 
+# Specialists have no tools of their own; without this the model invents function names
+# and the ADK run fails with "tool not found".
+NO_TOOLS_TEXT = (
+    "You have no tools available. Never emit a function call: answer in plain "
+    "text using only the information already present in the conversation."
+)
+
 
 @dataclass(frozen=True)
 class AgentRegistry:
@@ -110,7 +117,8 @@ def build_specialist_agents(
             f"{HARD_RULES_TEXT}\n\n"
             "You are the Fundamental Analyst. Given fundamentals data and retrieved "
             "evidence chunks, describe growth, cash flow, debt, and quality. Cite the "
-            "chunk id or metric name backing every claim."
+            "chunk id or metric name backing every claim.\n"
+            f"{NO_TOOLS_TEXT}"
         ),
         generate_content_config=generation_config,
     )
@@ -123,7 +131,8 @@ def build_specialist_agents(
             f"{HARD_RULES_TEXT}\n\n"
             "You are the Technical Analyst. Given the deterministic technical "
             "indicators, describe trend, momentum, and support/resistance. Do not "
-            "compute new indicator values; only interpret the ones provided."
+            "compute new indicator values; only interpret the ones provided.\n"
+            f"{NO_TOOLS_TEXT}"
         ),
         generate_content_config=generation_config,
     )
@@ -137,7 +146,9 @@ def build_specialist_agents(
             "You are the Decision Synthesizer. Combine the rules engine decision, "
             "the risk manager's trade levels, and the analyst views into a single "
             "human-readable memo. Reuse the risk manager's numbers verbatim; never "
-            "recompute them."
+            "recompute them.\n"
+            "The only function you may call is `calculate_risk`. Write your memo as "
+            "plain text; never invent any other function name."
         ),
         tools=[tools[RISK_MANAGER_TOOL_NAME]] if RISK_MANAGER_TOOL_NAME in tools else [],
         generate_content_config=generation_config,
@@ -153,7 +164,8 @@ def build_specialist_agents(
             "contradictions between the fundamental and technical views, claims "
             "without cited evidence, stale or incomplete data, and violated hard "
             "rules. You may only downgrade confidence or the decision label, "
-            "never upgrade them."
+            "never upgrade them.\n"
+            f"{NO_TOOLS_TEXT}"
         ),
         generate_content_config=generation_config,
     )
@@ -183,7 +195,12 @@ def build_root_agent(
             "structured data and evidence, delegate to the Fundamental and "
             "Technical Analysts, call the Risk Manager, delegate to the Decision "
             "Synthesizer, then have the Critic/Guardrail review the draft before "
-            "returning the final recommendation."
+            "returning the final recommendation.\n"
+            "Call only the functions that are registered for you. To reach a "
+            f"specialist ({FUNDAMENTAL_ANALYST_NAME}, {TECHNICAL_ANALYST_NAME}, "
+            f"{DECISION_SYNTHESIZER_NAME}, {CRITIC_NAME}) you must use "
+            "`transfer_to_agent` with its name as the argument; a specialist name "
+            "is never itself a callable function."
         ),
         tools=list(tools.values()),
         sub_agents=list(specialists.values()),

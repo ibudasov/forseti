@@ -1,12 +1,34 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from datetime import date
+from decimal import Decimal
 
+import pandas as pd
 from app.ingestion.earnings import ingest_earnings
 from app.ingestion import run
+from app.ingestion.vix import to_macro_rows
 
 
 class TestIngestionRun:
+    def test_to_macro_rows_maps_yfinance_multiindex_close_column(self):
+        index = pd.DatetimeIndex([pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-03")])
+        frame = pd.DataFrame(
+            {
+                ("Close", "^VIX"): [17.1234, 18.9],
+                ("Open", "^VIX"): [16.0, 18.0],
+            },
+            index=index,
+        )
+
+        rows = to_macro_rows(frame)
+
+        assert len(rows) == 2
+        assert rows[0].obs_date == date(2026, 1, 2)
+        assert rows[0].vix == Decimal("17.123")
+        assert rows[1].obs_date == date(2026, 1, 3)
+        assert rows[1].vix == Decimal("18.900")
+
     def test_ingest_earnings_without_api_key_skips_successfully(self, monkeypatch):
         monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", "")
         monkeypatch.setattr("app.ingestion.earnings.get_settings", lambda: Namespace(ALPHA_VANTAGE_API_KEY=""))

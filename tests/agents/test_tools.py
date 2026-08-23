@@ -1,12 +1,14 @@
 """Tests for ADK tool adapters: delegation, schema validation, error mapping."""
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from agents.tools.data_collector import build_structured_data_collector_tool
 from agents.tools.risk_engine import build_risk_manager_tool
 from agents.tools.rules_engine import build_rules_engine_tool
 from agents.tools.ticker_resolver import resolve_ticker
+from app.schemas.ticker import DataFreshness, TickerProfileResponse
 from app.services.risk import RiskConfig
 
 
@@ -32,7 +34,18 @@ class TestStructuredDataCollectorTool:
             captured["ticker"] = ticker
             captured["engine"] = engine
             captured["today"] = today
-            return "profile-for-" + ticker
+            return TickerProfileResponse(
+                ticker=ticker,
+                name="Test Corp",
+                exchange="NASDAQ",
+                sector_tag="tech",
+                currency="USD",
+                is_active=True,
+                price_bars_stored=0,
+                data_freshness=DataFreshness(stale_threshold_days=5, is_price_data_stale=False),
+                next_earnings_date=date(2024, 2, 1),
+                warnings=[],
+            )
 
         monkeypatch.setattr(
             "agents.tools.data_collector.build_ticker_profile", fake_build_ticker_profile
@@ -42,8 +55,20 @@ class TestStructuredDataCollectorTool:
 
         result = collect("NVDA")
 
-        assert result == "profile-for-NVDA"
+        assert result["found"] is True
+        assert result["ticker"] == "NVDA"
+        assert result["next_earnings_date"] == "2024-02-01"
+        json.dumps(result)
         assert captured == {"ticker": "NVDA", "engine": sentinel_engine, "today": date(2024, 1, 1)}
+
+    def test_unknown_ticker_reports_not_found(self, monkeypatch):
+        monkeypatch.setattr(
+            "agents.tools.data_collector.build_ticker_profile", lambda *a, **k: None
+        )
+
+        result = build_structured_data_collector_tool()("ZZZZ")
+
+        assert result == {"found": False, "ticker": "ZZZZ"}
 
 
 class TestRulesEngineTool:
