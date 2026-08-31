@@ -74,6 +74,7 @@ typecheck: check-compose
 coverage: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e PIPELINE_MODE=linear \
 		-v "$$PWD/tests:/app/tests" -v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70
 
