@@ -20,3 +20,5 @@
 **Typing integrity.** No new `# type: ignore`. No additions to the mypy override list in `pyproject.toml` — that list may only shrink.
 
 **Ask, don't improvise.** If a fact stated in an issue is stale, or two issues contradict each other, stop and report in a comment.
+
+**No bare localhost commands.** Never run lint, typecheck, test, migrations, or the app directly on the host — the host environment is too unstable to trust. Every one of those commands must run inside the `docker-compose` setup already provided (`make lint`, `make typecheck`, `make test`, `make migrate`, `make up`, etc.). If a Makefile target doesn't exist for what you need, add one that wraps `docker compose run`/`docker compose exec` rather than invoking the tool on the host.
