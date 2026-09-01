@@ -50,15 +50,13 @@ jobs:
           docker --version
           docker compose version
 
+      - name: Typecheck
+        run: make typecheck
+
       - name: Run tests
         env:
           DOCKER_COMPOSE: docker compose
         run: |
           make test
 
-      - name: Typecheck
-        run: make typecheck
-
-      - name: Coverage gate
-        run: make coverage
 

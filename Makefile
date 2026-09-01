@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck coverage check
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -23,8 +23,7 @@ help:
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
-	@echo "  make coverage         # Run the test suite with the coverage gate"
-	@echo "  make check            # Run lint, typecheck, and coverage"
+	@echo "  make check            # Run lint and typecheck"
 
 migrate: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
@@ -47,7 +46,7 @@ test: check-compose
 		-e PIPELINE_MODE=linear \
 		-v "$$PWD/tests:/app/tests" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		app python -m pytest tests \
+		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
@@ -75,10 +74,4 @@ lint: check-compose
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m mypy --explicit-package-bases --follow-imports=skip --ignore-missing-imports agents/orchestration/workflow.py app/schemas/analyze.py
 
-coverage: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
-		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
-		-v "$$PWD/tests:/app/tests" -v /var/run/docker.sock:/var/run/docker.sock \
-		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70
-
-check: lint typecheck coverage
+check: lint typecheck
