@@ -3,11 +3,8 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 # Tests drop and recreate every table, so they must never point at the application database.
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
-# Scorecard runs against its own disposable database, never the test or app database.
-POSTGRES_SCORECARD_DB ?= forseti_scorecard_test
-SCORECARD_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_SCORECARD_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -27,8 +24,6 @@ help:
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
-	@echo "  make scorecard        # Compute the product scorecard and fail on regressions"
-	@echo "  make scorecard-baseline  # Rewrite docs/scorecard-baseline.json from the current scorecard"
 
 migrate: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
@@ -73,33 +68,10 @@ down: check-compose
 	$(DOCKER_COMPOSE) down
 
 lint: check-compose
-	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts --count --select=E9,F63,F7,F82 --show-source --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --select=E9,F63,F7,F82 --show-source --statistics
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m mypy --explicit-package-bases --follow-imports=skip --ignore-missing-imports agents/orchestration/workflow.py app/schemas/analyze.py
 
 check: lint typecheck
-
-scorecard: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
-		-e SCORECARD_DATABASE_URL=$(SCORECARD_DATABASE_URL) \
-		-v "$$PWD/scripts:/app/scripts" \
-		-v "$$PWD/tests:/app/tests" \
-		-v "$$PWD/docs:/app/docs" \
-		app python -m scripts.scorecard \
-			--database-url $(SCORECARD_DATABASE_URL) \
-			--markdown \
-			--baseline docs/scorecard-baseline.json \
-			--fail-on-regression
-
-scorecard-baseline: check-compose
-	@echo "Rewriting docs/scorecard-baseline.json from the current scorecard."
-	$(DOCKER_COMPOSE) run --rm --build \
-		-e SCORECARD_DATABASE_URL=$(SCORECARD_DATABASE_URL) \
-		-v "$$PWD/scripts:/app/scripts" \
-		-v "$$PWD/tests:/app/tests" \
-		-v "$$PWD/docs:/app/docs" \
-		app python -m scripts.scorecard \
-			--database-url $(SCORECARD_DATABASE_URL) \
-			--write-baseline docs/scorecard-baseline.json

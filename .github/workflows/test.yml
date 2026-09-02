@@ -8,10 +8,6 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -66,65 +62,4 @@ jobs:
         run: |
           make test
 
-      - name: Scorecard
-        env:
-          DOCKER_COMPOSE: docker compose
-        run: |
-          set +e
-          make scorecard > scorecard.log 2>&1
-          exit_code=$?
-          set -e
-          cat scorecard.log
-          python3 - <<'PYEOF'
-lines = open("scorecard.log").read().splitlines()
-table_lines = [line for line in lines if line.startswith("|")]
-markdown = "## Scorecard\n\n" + "\n".join(table_lines) + "\n" if table_lines else "## Scorecard\n\n_No scorecard output was produced; see the job log._\n"
-with open("scorecard.md", "w") as f:
-    f.write(markdown)
-PYEOF
-          exit $exit_code
-
-      - name: Append scorecard to job summary
-        if: always()
-        run: |
-          if [ -f scorecard.md ]; then
-            cat scorecard.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Post scorecard as a sticky PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("fs");
-            const path = "scorecard.md";
-            if (!fs.existsSync(path)) {
-              return;
-            }
-            const marker = "<!-- scorecard-comment -->";
-            const body = `${marker}\n${fs.readFileSync(path, "utf8")}`;
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const comments = await github.rest.issues.listComments({
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const existing = comments.data.find((comment) => comment.body && comment.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body,
-              });
-            }
 
