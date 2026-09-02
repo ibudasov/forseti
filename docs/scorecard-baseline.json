@@ -1,0 +1,15 @@
+{
+  "engine_version": "v1.rules.0",
+  "universe_size": 6,
+  "analyzed_count": 6,
+  "failed_count": 0,
+  "trade_count": 1,
+  "watchlist_count": 3,
+  "no_trade_count": 2,
+  "zero_confidence_count": 1,
+  "warning_counts": {
+    "no_earnings_data": 3,
+    "no_fundamentals": 1,
+    "stale_price_data": 1
+  }
+}
