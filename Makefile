@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -24,6 +24,8 @@ help:
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
+	@echo "  make scorecard        # Compute the product scorecard and fail on regression"
+	@echo "  make scorecard-baseline  # Rewrite docs/scorecard-baseline.json (explicit, reviewable diff)"
 
 migrate: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
@@ -45,6 +47,7 @@ test: check-compose
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e PIPELINE_MODE=linear \
 		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
@@ -75,3 +78,29 @@ typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m mypy --explicit-package-bases --follow-imports=skip --ignore-missing-imports agents/orchestration/workflow.py app/schemas/analyze.py
 
 check: lint typecheck
+
+scorecard: check-compose
+	@# Deliberately no --build: `make test`/`make typecheck` already build the
+	@# image earlier in the pipeline, and rebuilding here would reprint Docker's
+	@# build log into the scorecard output that gets posted as a PR comment.
+	@# `docker compose run` builds the image automatically if it is missing.
+	$(DOCKER_COMPOSE) run --rm \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/docs:/app/docs" \
+		app python -m scripts.scorecard \
+			--fixture tests/fixtures/scorecard/universe.json \
+			--markdown \
+			--baseline docs/scorecard-baseline.json \
+			--fail-on-regression
+
+scorecard-baseline: check-compose
+	$(DOCKER_COMPOSE) run --rm \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/docs:/app/docs" \
+		app python -m scripts.scorecard \
+			--fixture tests/fixtures/scorecard/universe.json \
+			--json > docs/scorecard-baseline.json
