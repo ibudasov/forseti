@@ -85,7 +85,7 @@ scorecard: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/docs:/app/docs" \
-		app python scripts/scorecard.py \
+		app python -m scripts.scorecard \
 			--fixture tests/fixtures/scorecard/universe.json \
 			--markdown \
 			--baseline docs/scorecard-baseline.json \
@@ -97,6 +97,6 @@ scorecard-baseline: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/docs:/app/docs" \
-		app python scripts/scorecard.py \
+		app python -m scripts.scorecard \
 			--fixture tests/fixtures/scorecard/universe.json \
 			--json > docs/scorecard-baseline.json
