@@ -80,7 +80,11 @@ typecheck: check-compose
 check: lint typecheck
 
 scorecard: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
+	@# Deliberately no --build: `make test`/`make typecheck` already build the
+	@# image earlier in the pipeline, and rebuilding here would reprint Docker's
+	@# build log into the scorecard output that gets posted as a PR comment.
+	@# `docker compose run` builds the image automatically if it is missing.
+	$(DOCKER_COMPOSE) run --rm \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
@@ -92,7 +96,7 @@ scorecard: check-compose
 			--fail-on-regression
 
 scorecard-baseline: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
