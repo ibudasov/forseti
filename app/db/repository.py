@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from sqlalchemy import func
 

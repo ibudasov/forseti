@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import create_engine, text, event
-from sqlalchemy.engine import Engine, create_mock_engine
-from sqlalchemy.pool import Pool
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from app.settings import get_settings
@@ -12,7 +11,7 @@ from app.settings import get_settings
 
 def _refresh_collation_version(dbapi_connection, connection_record):
     """Refresh database collation version on new connection.
-    
+
     This resolves PostgreSQL collation version mismatches that occur when
     the database was created with a different collation library version
     than the current OS provides.

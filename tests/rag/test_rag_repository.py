@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import inspect
 from sqlmodel import Session
 
-from app.db.models import DocumentChunk, Security, SourceType
+from app.db.models import DocumentChunk, SourceType
 from app.db.repository import upsert_document_chunks, similarity_search
 from app.rag.ingestion.base import compute_source_hash
 

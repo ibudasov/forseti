@@ -18,6 +18,7 @@ from app.db.models import (
 )
 from app.db.repository import (
     get_latest_fundamental,
+    get_latest_macro_daily,
     get_latest_technical_feature,
     get_next_earnings_event,
     list_active_securities,
@@ -30,7 +31,6 @@ from app.db.repository import (
     upsert_macro_daily,
     upsert_macro_daily_rows,
     upsert_price_bars,
-    get_latest_macro_daily,
     upsert_technical_feature,
 )
 
@@ -208,8 +208,14 @@ def test_count_price_bars(db_engine):
         session.refresh(security)
 
     bars = [
-        PriceBar(security_id=security.id, bar_date=date(2026, 1, 1), open=Decimal("10"), high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100),
-        PriceBar(security_id=security.id, bar_date=date(2026, 1, 2), open=Decimal("10"), high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100),
+        PriceBar(
+            security_id=security.id, bar_date=date(2026, 1, 1), open=Decimal("10"),
+            high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100,
+        ),
+        PriceBar(
+            security_id=security.id, bar_date=date(2026, 1, 2), open=Decimal("10"),
+            high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100,
+        ),
     ]
     upsert_price_bars(bars, engine=db_engine)
 
@@ -319,8 +325,6 @@ def test_list_active_securities_filters_inactive_rows(db_engine):
 
 
 def test_get_latest_macro_daily_returns_latest_vix(db_engine):
-    from app.db.repository import get_latest_macro_daily, upsert_macro_daily_rows
-
     rows = [
         MacroDaily(obs_date=date(2026, 1, 1), vix=Decimal("18.0")),
         MacroDaily(obs_date=date(2026, 1, 2), vix=Decimal("22.5")),
@@ -335,8 +339,6 @@ def test_get_latest_macro_daily_returns_latest_vix(db_engine):
 
 
 def test_upsert_technical_feature_idempotent(db_engine):
-    from app.db.repository import upsert_technical_feature
-
     security = Security(ticker="TECH2", name="Tech Two", exchange="NASDAQ", sector_tag="ai")
     with Session(db_engine) as session:
         session.add(security)
@@ -362,8 +364,6 @@ def test_upsert_technical_feature_idempotent(db_engine):
 
 
 def test_upsert_technical_feature_updates_existing(db_engine):
-    from app.db.repository import upsert_technical_feature
-
     security = Security(ticker="TECH3", name="Tech Three", exchange="NASDAQ", sector_tag="ai")
     with Session(db_engine) as session:
         session.add(security)

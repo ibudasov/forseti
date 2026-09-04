@@ -1,12 +1,11 @@
 """RAG ingestion pipeline: fetch → chunk → embed → store."""
 from __future__ import annotations
 
-import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from app.db.models import DocumentChunk, SourceType
+from app.db.models import DocumentChunk
 from app.db.repository import upsert_document_chunks
 from app.rag.chunking import chunk_text
 from app.rag.embedding import EmbeddingClient

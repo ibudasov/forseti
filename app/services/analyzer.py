@@ -7,7 +7,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
-from app.db.models import Decision, PriceBar, Recommendation
+from app.db.models import Recommendation
 from app.db.repository import (
     get_latest_bars,
     get_latest_fundamental,

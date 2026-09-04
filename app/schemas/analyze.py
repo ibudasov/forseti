@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from datetime import date, datetime
 from typing import Any, List, Literal, Optional, Tuple
 
@@ -76,4 +75,3 @@ class AnalyzeResponse(BaseModel):
     trace: Optional[AnalysisTrace] = None
 
     model_config = ConfigDict(populate_by_name=True)
-
