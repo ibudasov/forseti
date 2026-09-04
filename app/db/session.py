@@ -25,7 +25,6 @@ def _refresh_collation_version(dbapi_connection, connection_record):
                 cursor.execute("SELECT current_database();")
                 db_name = cursor.fetchone()[0]
                 cursor.close()
-                
                 # Refresh collation version (requires superuser or database owner)
                 cursor = dbapi_connection.cursor()
                 cursor.execute(f"ALTER DATABASE {db_name} REFRESH COLLATION VERSION;")
@@ -44,12 +43,10 @@ def get_engine(database_url: Optional[str] = None) -> Engine:
         connect_args = {"options": "-c timezone=utc"}
 
     engine = create_engine(url, echo=False, future=True, connect_args=connect_args)
-    
     # Register event listener to refresh collation on each new connection
     # This ensures collation version is always in sync with the OS
     if url.startswith("postgresql"):
         event.listen(engine.pool, "connect", _refresh_collation_version)
-    
     return engine
 
 

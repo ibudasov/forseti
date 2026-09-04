@@ -207,6 +207,28 @@ def analyze(
             trace_id="",
         )
 
+    return _evaluate_trade(
+        symbol,
+        bars,
+        latest_bar,
+        technical_feature,
+        fundamental,
+        vix_close,
+        gate_warnings,
+    )
+
+
+def _evaluate_trade(
+    symbol,
+    bars,
+    latest_bar,
+    technical_feature,
+    fundamental,
+    vix_close,
+    gate_warnings,
+):
+    from app.schemas.analyze import AnalyzeResponse
+
     # Step 2: Checklist scoring
     score, checklist_results = evaluate_checklist(
         latest_bar=latest_bar,
@@ -215,34 +237,8 @@ def analyze(
         vix_close=vix_close,
     )
 
-    # Step 3: Decision thresholds
-    if score >= SCORE_TRADE_MIN:
-        decision = "trade"
-    elif score >= SCORE_WATCHLIST_MIN:
-        decision = "watchlist"
-    else:
-        decision = "no_trade"
-
-    # Apply gate caps
-    if "stale_price_data" in gate_warnings or "no_fundamentals" in gate_warnings:
-        if decision == "trade":
-            decision = "watchlist"
-
-    # Step 4: Risk math (only for trade)
-    risk_levels = None
-    risk_downgrade = None
-    if decision == "trade" and latest_bar and bars:
-        settings = get_settings()
-        risk_config = RiskConfig(
-            capital_eur=Decimal(str(settings.ACCOUNT_CAPITAL_EUR)),
-            risk_per_trade_pct=Decimal(str(settings.RISK_PER_TRADE_PCT)),
-        )
-        result = calculate_risk_levels(bars, risk_config)
-        if isinstance(result, RiskDowngrade):
-            risk_downgrade = result
-            decision = "watchlist"
-        elif result:
-            risk_levels = result
+    decision = _decision_for_score(score, gate_warnings)
+    decision, risk_levels, risk_downgrade = _risk_decision(decision, latest_bar, bars)
 
     # Build reasons
     reasons = []
@@ -281,6 +277,35 @@ def analyze(
         engine_version=ENGINE_VERSION,
         trace_id="",
     )
+
+
+def _decision_for_score(score, gate_warnings):
+    if score >= SCORE_TRADE_MIN:
+        decision = "trade"
+    elif score >= SCORE_WATCHLIST_MIN:
+        decision = "watchlist"
+    else:
+        decision = "no_trade"
+
+    has_trade_cap = "stale_price_data" in gate_warnings or "no_fundamentals" in gate_warnings
+    if decision == "trade" and has_trade_cap:
+        return "watchlist"
+    return decision
+
+
+def _risk_decision(decision, latest_bar, bars):
+    if decision != "trade" or latest_bar is None or not bars:
+        return decision, None, None
+
+    settings = get_settings()
+    risk_config = RiskConfig(
+        capital_eur=Decimal(str(settings.ACCOUNT_CAPITAL_EUR)),
+        risk_per_trade_pct=Decimal(str(settings.RISK_PER_TRADE_PCT)),
+    )
+    result = calculate_risk_levels(bars, risk_config)
+    if isinstance(result, RiskDowngrade):
+        return "watchlist", None, result
+    return decision, result, None
 
 
 def _evaluate_data_gate(
