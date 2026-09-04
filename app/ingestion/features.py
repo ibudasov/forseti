@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional, Tuple
 
-from app.db.models import PriceBar, TechnicalFeature
+from app.db.models import TechnicalFeature
 from app.db.repository import (
     get_latest_bars,
     list_active_securities,
@@ -81,7 +81,7 @@ def compute_volume_trend(volumes: List[int]) -> Optional[Decimal]:
         return None
 
     recent_volumes = [Decimal(v) for v in volumes[-VOLUME_WINDOW:]]
-    prior_volumes = [Decimal(v) for v in volumes[-2 * VOLUME_WINDOW : -VOLUME_WINDOW]]
+    prior_volumes = [Decimal(v) for v in volumes[-2 * VOLUME_WINDOW:-VOLUME_WINDOW]]
 
     recent_mean = sum(recent_volumes) / VOLUME_WINDOW
     prior_mean = sum(prior_volumes) / VOLUME_WINDOW

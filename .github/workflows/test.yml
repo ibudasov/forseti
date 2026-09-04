@@ -7,6 +7,11 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -44,12 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[test]
       
-      - name: Lint with flake8
-        run: |
-          # stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Syntax errors
+        run: flake8 app agents tests --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Lint
+        run: make lint
 
       - name: Ensure Docker Compose is available
         run: |
@@ -59,7 +63,7 @@ jobs:
       - name: Typecheck
         run: make typecheck
 
-      - name: Run tests
+      - name: Tests
         env:
           DOCKER_COMPOSE: docker compose
         run: |
@@ -111,4 +115,3 @@ jobs:
                 body: commentBody,
               });
             }
-

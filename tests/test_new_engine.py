@@ -5,17 +5,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlmodel import Session
 
 from app.db.models import (
     EarningsEvent,
     Fundamental,
-    MacroDaily,
     PriceBar,
-    Security,
     TechnicalFeature,
 )
-from app.services.analyzer import analyze
 from app.services.checklist import evaluate_checklist
 from app.services.risk import calculate_risk_levels, RiskConfig
 from app.services.vetoes import check_vetoes

@@ -1,12 +1,12 @@
 """API tests for evidence endpoints."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, get_analysis_engine
+from app.main import app
 from app.rag.synthesis import SynthesisOutput
 
 
@@ -36,6 +36,7 @@ class TestEvidenceEndpoint:
             response = client.get("/ticker/nvda/evidence")
 
         assert response.status_code == 200
+        mock_build.assert_called_once()
 
     def test_evidence_endpoint_with_full_output(self, client):
         """Evidence endpoint maps SynthesisOutput fields to EvidenceBlock."""

@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Optional
 
-from app.db.models import EarningsEvent, PriceBar, TechnicalFeature
+from app.db.models import EarningsEvent, PriceBar
 
 # Frozen constants for vetoes
 RSI_OVERBOUGHT_VETO = 70

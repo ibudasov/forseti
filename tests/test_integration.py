@@ -2,9 +2,9 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from app.db.models import PriceBar, Recommendation, Security
+from app.db.models import PriceBar, Security
 from app.main import app
 from app.main import get_analysis_engine
 
@@ -49,7 +49,12 @@ class TestRootEndpoint:
 
 class TestAnalyzeEndpoint:
     def test_post_analyze_happy_path_persists_recommendation(self, db_client, db_engine):
-        security = Security(ticker="NVDA", name="NVIDIA Corporation", exchange="NASDAQ", sector_tag="ai")
+        security = Security(
+            ticker="NVDA",
+            name="NVIDIA Corporation",
+            exchange="NASDAQ",
+            sector_tag="ai",
+        )
         with Session(db_engine) as session:
             session.add(security)
             session.commit()
@@ -107,7 +112,12 @@ class TestAnalyzeEndpoint:
         assert response.status_code == 422
 
     def test_post_analyze_response_shape_for_watchlist(self, db_client, db_engine):
-        security = Security(ticker="AMD", name="Advanced Micro Devices", exchange="NASDAQ", sector_tag="ai")
+        security = Security(
+            ticker="AMD",
+            name="Advanced Micro Devices",
+            exchange="NASDAQ",
+            sector_tag="ai",
+        )
         with Session(db_engine) as session:
             session.add(security)
             session.commit()
@@ -222,13 +232,36 @@ class TestTickerEndpoint:
             today = date.today()
             bar1_date = today - timedelta(days=1)
             bar2_date = today
-            session.add_all([
-                PriceBar(security_id=security.id, bar_date=bar2_date, open=Decimal("101.0"), high=Decimal("104.0"), low=Decimal("100.0"), close=Decimal("102.5"), volume=1_100_000),
-                PriceBar(security_id=security.id, bar_date=bar1_date, open=Decimal("100.0"), high=Decimal("103.0"), low=Decimal("99.0"), close=Decimal("101.0"), volume=1_000_000),
-                TechnicalFeature(security_id=security.id, as_of_date=bar2_date, rsi_14=Decimal("58.1234"), sma_50=Decimal("99.5"), sma_200=Decimal("88.0"), volume_trend=Decimal("1.05")),
-                Fundamental(security_id=security.id, as_of_date=date(2025, 12, 31), revenue_growth=Decimal("0.62"), fcf=Decimal("21000000000.0"), debt_to_equity=Decimal("0.41"), eps_trend=Decimal("0.18"), margins=Decimal("0.55"), raw_payload={}),
-                EarningsEvent(security_id=security.id, report_date=today + timedelta(days=30), confirmed=False),
-            ])
+            session.add_all(
+                [
+                    PriceBar(
+                        security_id=security.id, bar_date=bar2_date, open=Decimal("101.0"),
+                        high=Decimal("104.0"), low=Decimal("100.0"), close=Decimal("102.5"),
+                        volume=1_100_000,
+                    ),
+                    PriceBar(
+                        security_id=security.id, bar_date=bar1_date, open=Decimal("100.0"),
+                        high=Decimal("103.0"), low=Decimal("99.0"), close=Decimal("101.0"),
+                        volume=1_000_000,
+                    ),
+                    TechnicalFeature(
+                        security_id=security.id, as_of_date=bar2_date, rsi_14=Decimal("58.1234"),
+                        sma_50=Decimal("99.5"), sma_200=Decimal("88.0"),
+                        volume_trend=Decimal("1.05"),
+                    ),
+                    Fundamental(
+                        security_id=security.id, as_of_date=date(2025, 12, 31),
+                        revenue_growth=Decimal("0.62"), fcf=Decimal("21000000000.0"),
+                        debt_to_equity=Decimal("0.41"), eps_trend=Decimal("0.18"),
+                        margins=Decimal("0.55"), raw_payload={},
+                    ),
+                    EarningsEvent(
+                        security_id=security.id,
+                        report_date=today + timedelta(days=30),
+                        confirmed=False,
+                    ),
+                ]
+            )
             session.commit()
 
         response = db_client.get("/ticker/NVDA")
@@ -285,7 +318,12 @@ class TestTickerEndpoint:
             session.commit()
             session.refresh(security)
             stale_date = date.today() - timedelta(days=30)
-            session.add(PriceBar(security_id=security.id, bar_date=stale_date, open=Decimal("10"), high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100))
+            session.add(
+                PriceBar(
+                    security_id=security.id, bar_date=stale_date, open=Decimal("10"),
+                    high=Decimal("11"), low=Decimal("9"), close=Decimal("10"), volume=100,
+                )
+            )
             session.commit()
 
         response = db_client.get("/ticker/STALE")

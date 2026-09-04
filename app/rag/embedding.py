@@ -34,7 +34,7 @@ class VertexAIEmbeddingClient:
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         results: List[List[float]] = []
         for batch_start in range(0, len(texts), _BATCH_SIZE):
-            batch = texts[batch_start : batch_start + _BATCH_SIZE]
+            batch = texts[batch_start:batch_start + _BATCH_SIZE]
             results.extend(self._embed_batch_with_retry(batch))
         return results
 

@@ -42,6 +42,28 @@ exclude_lines = [
 ]
 omit = ["migrations/*"]
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+# this list may only shrink; new files may never be added to it.
+[[tool.mypy.overrides]]
+module = [
+  "app.db.models",
+  "app.db.repository",
+  "app.ingestion.earnings",
+  "app.ingestion.features",
+  "app.ingestion.fundamentals",
+  "app.ingestion.prices",
+  "app.rag.evidence",
+  "app.rag.pipeline",
+  "app.services.analyzer",
+  "app.services.risk",
+  "app.services.screening",
+]
+ignore_errors = true
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"

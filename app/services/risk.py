@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional
 
 from app.db.models import PriceBar
@@ -109,9 +109,13 @@ def calculate_risk_levels(
     shares = int(shares_raw)  # floor
 
     if shares == 0:
+        detail = (
+            f"shares: {shares} (budget: {float(risk_budget):.2f} EUR, "
+            f"risk_per_share: {float(entry_risk_per_share):.2f})"
+        )
         return RiskDowngrade(
             reason="position_size_zero",
-            detail=f"shares: {shares} (budget: {float(risk_budget):.2f} EUR, risk_per_share: {float(entry_risk_per_share):.2f})",
+            detail=detail,
         )
 
     position_size_eur = _quantize(Decimal(shares) * entry_high)
