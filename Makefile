@@ -49,7 +49,7 @@ test: check-compose
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70
+		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70 \
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
@@ -72,10 +72,12 @@ down: check-compose
 
 lint: check-compose
 	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --select=E9,F63,F7,F82 --show-source --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --max-complexity=10 --max-line-length=127 --statistics
 
 typecheck: check-compose
-	$(DOCKER_COMPOSE) run --rm --build app python -m mypy --explicit-package-bases --follow-imports=skip --ignore-missing-imports agents/orchestration/workflow.py app/schemas/analyze.py
+	$(DOCKER_COMPOSE) run --rm --build \
+		-v "$$PWD/pyproject.toml:/app/pyproject.toml:ro" \
+		app python -m mypy --explicit-package-bases --follow-imports=skip app agents
 
 check: lint typecheck
 

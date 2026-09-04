@@ -42,6 +42,13 @@ exclude_lines = [
 ]
 omit = ["migrations/*"]
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+# this list may only shrink; new files may never be added to it.
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"

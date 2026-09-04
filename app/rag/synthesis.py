@@ -53,11 +53,13 @@ def _build_prompt(ticker: str, chunks: List[DocumentChunk]) -> str:
         f"[CHUNK {chunk.id}] ({chunk.source_type}) {chunk.text[:600]}"
         for chunk in chunks
     )
-    return f"""You are a financial research analyst. Your task is to analyse evidence about {ticker} and produce a structured JSON response.
-
-HARD RULE: You must NEVER output, suggest, or calculate entry prices, stop-loss levels, take-profit levels, position sizes, or risk/reward ratios. Any such output is forbidden and will be rejected.
-
-Evidence chunks:
+    return (
+        "You are a financial research analyst. Your task is to analyse evidence about "
+        f"{ticker} and produce a structured JSON response.\n\n"
+        "HARD RULE: You must NEVER output, suggest, or calculate entry prices, stop-loss "
+        "levels, take-profit levels, position sizes, or risk/reward ratios. Any such output "
+        "is forbidden and will be rejected.\n\n"
+        f"""Evidence chunks:
 {labeled_chunks}
 
 Answer the following five questions using ONLY the evidence above. Cite the chunk IDs that support each claim.
@@ -76,6 +78,7 @@ Respond with valid JSON matching this schema:
   "news_alignment": "...",
   "red_flags": [{{"claim": "...", "chunk_ids": [5]}}]
 }}"""
+    )
 
 
 def _parse_llm_json(
