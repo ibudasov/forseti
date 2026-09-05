@@ -33,3 +33,7 @@ if [ ! -f .env ]; then
 fi
 
 make up
+
+gcloud auth login
+
+gcloud auth application-default login

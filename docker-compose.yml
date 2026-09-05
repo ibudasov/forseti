@@ -29,7 +29,7 @@ services:
       - POSTGRES_HOST=postgresql
       - POSTGRES_PORT=5432
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
-      - "EDGAR_USER_AGENT=${EDGAR_USER_AGENT:-Forseti/0.1 (forseti-dev@example.com)}"
+      - "EDGAR_USER_AGENT=${EDGAR_USER_AGENT:-Forseti/0.1 (gazer-flair9o@icloud.com)}"
       - INGEST_PRICE_PERIOD=${INGEST_PRICE_PERIOD:-2y}
       - ACCOUNT_CAPITAL_EUR=${ACCOUNT_CAPITAL_EUR:-10000.0}
       - RISK_PER_TRADE_PCT=${RISK_PER_TRADE_PCT:-0.01}
