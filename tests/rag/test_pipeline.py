@@ -8,6 +8,7 @@ import pytest
 from app.db.models import SourceType
 from app.rag import pipeline
 from app.rag.ingestion.base import RawDocument
+from app.rag.ingestion.edgar import SECEdgarIngestor
 
 
 class _RaisingEmbeddingClient:
@@ -41,6 +42,15 @@ class _SingleDocIngestor:
 class _EmptyIngestor:
     def fetch(self, ticker: str):
         return []
+
+
+def test_sec_edgar_ingestor_uses_configured_user_agent():
+    ingestor = SECEdgarIngestor("Forseti/0.1 (gazer-flair9o@icloud.com)")
+
+    assert ingestor._session.headers["User-Agent"] == (
+        "Forseti/0.1 (gazer-flair9o@icloud.com)"
+    )
+    ingestor._session.close()
 
 
 def _settings(rag_fail_loud: bool) -> Namespace:

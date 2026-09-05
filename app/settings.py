@@ -30,7 +30,7 @@ class Settings(BaseSettings):
         validation_alias="ALPHA_VANTAGE_API_KEY",
     )
     EDGAR_USER_AGENT: str = Field(
-        default="Forseti/0.1 (forseti-dev@example.com)",
+        default="Forseti/0.1 (gazer-flair9o@icloud.com)",
         validation_alias="EDGAR_USER_AGENT",
     )
     INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")

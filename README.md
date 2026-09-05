@@ -61,7 +61,7 @@ Sources:
 
 Environment variables:
 
-- `EDGAR_USER_AGENT` (optional, default: `Forseti/0.1 (forseti-dev@example.com)`)
+- `EDGAR_USER_AGENT` (optional, default: `Forseti/0.1 (gazer-flair9o@icloud.com)`)
 - `ALPHA_VANTAGE_API_KEY` (optional; when unset earnings ingestion is skipped)
 - `INGEST_PRICE_PERIOD` (optional, default: `2y`)
 

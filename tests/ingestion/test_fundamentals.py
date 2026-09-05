@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from app.ingestion.fundamentals import to_fundamental
+from app.ingestion.fundamentals import EdgarClient, to_fundamental
 
 
 def _load_sample_payload() -> dict:
@@ -76,3 +76,12 @@ class TestFundamentalMapping:
         assert result.fcf is None
         assert result.eps_trend is None
         assert result.margins is None
+
+
+def test_edgar_client_uses_configured_user_agent():
+    client = EdgarClient("Forseti/0.1 (gazer-flair9o@icloud.com)")
+
+    assert client._http_client.headers["User-Agent"] == (
+        "Forseti/0.1 (gazer-flair9o@icloud.com)"
+    )
+    client._http_client.close()
