@@ -71,6 +71,15 @@ def enforce_downgrade_only(proposal: DecisionSynthesis, deterministic: AnalyzeRe
     if _decision_rank(proposal.decision) > _decision_rank(deterministic.decision):
         proposal.decision = deterministic.decision
     proposal.confidence = min(proposal.confidence, deterministic.confidence)
+    for field_name in (
+        "entry_range",
+        "stop_loss",
+        "take_profit",
+        "risk_reward",
+        "position_size_eur",
+    ):
+        if getattr(proposal, field_name) is None:
+            setattr(proposal, field_name, getattr(deterministic, field_name))
     return proposal
 
 
