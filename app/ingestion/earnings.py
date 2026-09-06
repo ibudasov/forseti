@@ -178,7 +178,7 @@ def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, lis
             active_tickers,
         )
     except Exception:
-        logger.exception("earnings_ingestion_failed: api_key=%s", mask_api_key(api_key))
+        logger.exception("earnings_ingestion_failed")
         events = _fallback_earnings_events(active_tickers)
         if events:
             upsert_earnings_events(events, engine=engine)
@@ -190,5 +190,5 @@ def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, lis
         return 0, [SOURCE_FAILURE_MARKER]
 
     upsert_earnings_events(events, engine=engine)
-    logger.info("earnings_ingested: rows=%s api_key=%s", len(events), mask_api_key(api_key))
+    logger.info("earnings_ingested: rows=%s", len(events))
     return len(events), []
