@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Optional
-
 from app.db.repository import (
     count_earnings_events,
     count_price_bars,

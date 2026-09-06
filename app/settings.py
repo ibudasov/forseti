@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         default="/tmp/forseti-ingest-report.json",
         validation_alias="INGEST_REPORT_PATH",
     )
+    EARNINGS_FALLBACK_ENABLED: bool = Field(
+        default=True,
+        validation_alias="EARNINGS_FALLBACK_ENABLED",
+    )
     INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")
     ACCOUNT_CAPITAL_EUR: float = Field(default=10000.0, validation_alias="ACCOUNT_CAPITAL_EUR")
     RISK_PER_TRADE_PCT: float = Field(default=0.01, validation_alias="RISK_PER_TRADE_PCT")

@@ -128,15 +128,49 @@ def _active_tickers(engine=None, ticker: Optional[str] = None) -> dict[str, int]
     return {security.ticker: security.id for security in active_securities}
 
 
+def _fallback_earnings_events(active_tickers: dict[str, int]) -> list[EarningsEvent]:
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.exception("earnings_fallback_unavailable")
+        return []
+
+    events: list[EarningsEvent] = []
+    for ticker, security_id in active_tickers.items():
+        try:
+            calendar = yf.Ticker(ticker).calendar
+            if calendar is None:
+                continue
+            report_date = calendar.get("Earnings Date") if hasattr(calendar, "get") else None
+            if hasattr(report_date, "iloc"):
+                report_date = report_date.iloc[0] if len(report_date) else None
+            if report_date is not None:
+                events.append(
+                    EarningsEvent(
+                        security_id=security_id,
+                        report_date=report_date.date() if hasattr(report_date, "date") else report_date,
+                        confirmed=False,
+                    )
+                )
+        except Exception:
+            logger.exception("earnings_fallback_failed: ticker=%s", ticker)
+    return events
+
+
 def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, list[str]]:
-    api_key = normalize_api_key(get_settings().ALPHA_VANTAGE_API_KEY)
+    settings = get_settings()
+    api_key = normalize_api_key(settings.ALPHA_VANTAGE_API_KEY)
+    active_tickers = _active_tickers(engine=engine, ticker=ticker)
     if api_key is None:
         logger.error("%s: set ALPHA_VANTAGE_API_KEY in .env", MISSING_API_KEY_MARKER)
+        if getattr(settings, "EARNINGS_FALLBACK_ENABLED", False):
+            events = _fallback_earnings_events(active_tickers)
+            if events:
+                upsert_earnings_events(events, engine=engine)
+                return len(events), []
         if getattr(get_settings(), "INGEST_ALLOW_MISSING_SOURCES", False):
             return 0, []
         return 0, [MISSING_API_KEY_MARKER]
-
-    active_tickers = _active_tickers(engine=engine, ticker=ticker)
 
     try:
         events = parse_earnings_calendar(
@@ -145,6 +179,10 @@ def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, lis
         )
     except Exception:
         logger.exception("earnings_ingestion_failed: api_key=%s", mask_api_key(api_key))
+        events = _fallback_earnings_events(active_tickers)
+        if events:
+            upsert_earnings_events(events, engine=engine)
+            return len(events), []
         return 0, [SOURCE_FAILURE_MARKER]
 
     if not events:
