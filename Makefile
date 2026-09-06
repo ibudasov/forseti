@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag analyze up down lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -21,6 +21,7 @@ help:
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
+	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
@@ -62,7 +63,16 @@ ingest-earnings: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m app.ingestion.run --source earnings
 
 ingest-rag: check-compose
-	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
+	$(if $(ticker),	$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
+
+analyze: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make analyze ticker=NVDA [mode=agentic|linear]'"; \
+		exit 1; \
+	fi
+	@curl -s -X POST "http://127.0.0.1:8000/analyze?include_trace=true$(if $(mode),&pipeline=$(mode),)" \
+		-H 'content-type: application/json' \
+		-d '{"ticker":"$(ticker)"}' | python3 -m json.tool
 
 up: check-compose
 	$(DOCKER_COMPOSE) up

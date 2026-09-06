@@ -65,6 +65,10 @@ class Settings(BaseSettings):
         default=30.0, validation_alias="AGENT_TIMEOUT_SECONDS"
     )
     AGENT_MAX_RETRIES: int = Field(default=1, validation_alias="AGENT_MAX_RETRIES")
+    ALLOW_PIPELINE_OVERRIDE: bool = Field(
+        default=False,
+        validation_alias="ALLOW_PIPELINE_OVERRIDE",
+    )
 
 
 @lru_cache(maxsize=1)
