@@ -33,3 +33,7 @@ assert_steps(response.trace, [
 
 Assert trajectory and deterministic numbers, not model prose. The scripted runner
 does not make network calls or require credentials.
+
+Golden cassettes live in `tests/fixtures/golden` and contain normalized event
+payloads plus deterministic expectations. Replay one without credentials or
+network access with `make replay RUN_ID=happy-path`.
