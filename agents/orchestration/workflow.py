@@ -17,6 +17,9 @@ from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.analyzer import analyze_request
+from agents.observability.llm_io_recorder import (
+    build_llm_io_recorder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,15 @@ def enforce_downgrade_only(proposal: DecisionSynthesis, deterministic: AnalyzeRe
     if _decision_rank(proposal.decision) > _decision_rank(deterministic.decision):
         proposal.decision = deterministic.decision
     proposal.confidence = min(proposal.confidence, deterministic.confidence)
+    for field_name in (
+        "entry_range",
+        "stop_loss",
+        "take_profit",
+        "risk_reward",
+        "position_size_eur",
+    ):
+        if getattr(proposal, field_name) is None:
+            setattr(proposal, field_name, getattr(deterministic, field_name))
     return proposal
 
 
@@ -109,6 +121,30 @@ def _first_line(detail: Any) -> str:
     return str(detail).strip().splitlines()[0] if str(detail).strip() else str(detail)
 
 
+def _event_author(event: Any) -> str:
+    return str(_event_value(event, "author") or "unknown_agent")
+
+
+def _event_status(event: Any) -> str:
+    if _event_value(event, "error_code"):
+        return "failed"
+    if _event_value(event, "error_message"):
+        return "degraded"
+    return "completed"
+
+
+def _event_tool_calls(event: Any) -> list[str]:
+    calls: list[str] = []
+    content = _event_value(event, "content")
+    parts = _event_value(content, "parts") or []
+    for part in parts:
+        function_call = _event_value(part, "function_call")
+        name = _event_value(function_call, "name")
+        if name:
+            calls.append(str(name))
+    return calls
+
+
 class AgenticAnalysisWorkflow:
     """Application-level port for linear and ADK-backed analysis execution."""
 
@@ -117,10 +153,12 @@ class AgenticAnalysisWorkflow:
         config: AgentWorkflowConfig,
         engine=None,
         runner_factory: Optional[RunnerFactory] = None,
+        llm_io_recorder=None,
     ) -> None:
         self.config = config
         self.engine = engine
         self.runner_factory = runner_factory or self._default_runner_factory
+        self.llm_io_recorder = llm_io_recorder
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         resolved = resolve_ticker(ticker_reference)
@@ -129,18 +167,49 @@ class AgenticAnalysisWorkflow:
 
         request = request or AnalyzeRequest(ticker=resolved.ticker)
         run_id = str(uuid4())
+        recorder = self.llm_io_recorder or build_llm_io_recorder(run_id, config=self.config)
         started_at = time.monotonic()
-        steps = self._initial_steps(resolved.ticker)
+        steps: list[TraceStep] = []
         response = analyze_request(request, engine=self.engine)
 
         registry = build_agent_registry(config=self.config, engine=self.engine)
+        recorder.record_run_config({
+            "run_id": run_id,
+            "ticker": resolved.ticker,
+            "model": self.config.model_name,
+            "temperature": self.config.temperature,
+            "timeout_seconds": self.config.timeout_seconds,
+            "pipeline_mode": self.config.pipeline_mode,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        })
+        recorder.record_agent_prompts(registry)
+        user_message = f"Analyze ticker {resolved.ticker}"
+        recorder.record_user_message(user_message)
         adk_warnings: list[str] = []
-        token_usage = self._run_adk(registry, resolved.ticker, run_id, steps, response, adk_warnings)
-        self._append_critic_step(steps, response)
-
+        try:
+            token_usage = self._run_adk(
+                registry, resolved.ticker, run_id, steps, response, adk_warnings, recorder
+            )
+        except Exception as exc:
+            recorder.record_summary({
+                "event_count": len(steps),
+                "total_token_usage": {},
+                "final_decision": response.decision,
+                "warnings": adk_warnings,
+                "error": str(exc),
+                "wall_clock_ms": (time.monotonic() - started_at) * 1000,
+            })
+            if getattr(recorder, "enabled", False):
+                logger.info(
+                    "llm_io_captured run_id=%s directory=%s",
+                    run_id,
+                    recorder.run_directory,
+                )
+            raise
         response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
         total_latency_ms = (time.monotonic() - started_at) * 1000
+        observed_agents = list(dict.fromkeys(step.agent_name for step in steps))
         trace = AnalysisTrace(
             run_id=run_id,
             ticker=resolved.ticker,
@@ -149,27 +218,26 @@ class AgenticAnalysisWorkflow:
             total_latency_ms=total_latency_ms,
             token_usage=token_usage,
             warnings=warning_list,
+            entered_agent_layer=bool(steps),
+            adk_event_count=len(steps),
+            observed_agents=observed_agents,
         )
         response.trace_id = run_id
         response.trace = trace
         self._persist_trace(trace)
+        recorder.record_summary({
+            "event_count": len(steps),
+            "total_token_usage": token_usage,
+            "final_decision": response.decision,
+            "warnings": warning_list,
+            "wall_clock_ms": total_latency_ms,
+        })
+        if getattr(recorder, "enabled", False):
+            logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
         return response
 
     def _initial_steps(self, ticker: str) -> list[TraceStep]:
-        return [
-            TraceStep(sequence=1, agent_name="input_resolver", status="completed", output={"ticker": ticker}),
-            TraceStep(
-                sequence=2,
-                agent_name="structured_data_collector",
-                status="completed",
-                tool_calls=["collect_structured_data"],
-            ),
-            TraceStep(sequence=3, agent_name="retriever", status="completed", tool_calls=["retrieve_evidence"]),
-            TraceStep(sequence=4, agent_name="fundamental_analyst", status="completed"),
-            TraceStep(sequence=5, agent_name="technical_analyst", status="completed"),
-            TraceStep(sequence=6, agent_name="risk_manager", status="completed", tool_calls=["calculate_risk"]),
-            TraceStep(sequence=7, agent_name="decision_synthesizer", status="completed"),
-        ]
+        return []
 
     def _run_adk(
         self,
@@ -179,6 +247,7 @@ class AgenticAnalysisWorkflow:
         steps: list[TraceStep],
         response: AnalyzeResponse,
         warnings: list[str],
+        recorder=None,
     ) -> dict[str, int]:
         if self.runner_factory is None:
             return {}
@@ -187,17 +256,35 @@ class AgenticAnalysisWorkflow:
         try:
             events = self.runner_factory(registry, ticker)
             for event in events:
+                if recorder is not None:
+                    recorder.record_event(len(steps), event)
+                event_status = _event_status(event)
+                event_author = _event_author(event)
                 # The narration layer never produces trade numbers, so a model-level
                 # error degrades the memo but must not fail the deterministic answer.
-                error_code = getattr(event, "error_code", None)
-                error_message = getattr(event, "error_message", None)
+                error_code = _event_value(event, "error_code")
+                error_message = _event_value(event, "error_message")
                 if error_code or error_message:
                     detail = _first_line(error_message or error_code)
                     warnings.append(f"agent_narration_degraded: {detail}")
                 _merge_token_usage(token_usage, _token_usage_from_event(event))
-            steps[6].token_usage = token_usage
-            steps[6].output = {"deterministic_decision": response.decision, "ticker": ticker}
-            steps[6].latency_ms = (time.monotonic() - started_at) * 1000
+                steps.append(
+                    TraceStep(
+                        sequence=len(steps) + 1,
+                        agent_name=event_author,
+                        status=event_status,
+                        tool_calls=_event_tool_calls(event),
+                        token_usage=_token_usage_from_event(event),
+                        output={
+                            "error_code": error_code,
+                            "error_message": _first_line(error_message) if error_message else None,
+                        }
+                        if error_code or error_message
+                        else None,
+                    )
+                )
+            if steps:
+                steps[-1].latency_ms = (time.monotonic() - started_at) * 1000
             return token_usage
         except Exception as exc:
             logger.exception("google_adk_workflow_failed: ticker=%s", ticker)
@@ -225,17 +312,6 @@ class AgenticAnalysisWorkflow:
             new_message=Content(role="user", parts=[Part(text=f"Analyze ticker {ticker}")]),
         )
 
-    @staticmethod
-    def _append_critic_step(steps: list[TraceStep], response: AnalyzeResponse) -> None:
-        steps.append(
-            TraceStep(
-                sequence=len(steps) + 1,
-                agent_name="critic_guardrail",
-                status="completed",
-                output={"decision": response.decision, "warnings": response.warnings},
-            )
-        )
-
     def _persist_trace(self, trace: AnalysisTrace) -> None:
         run = AgentRun(
             run_id=trace.run_id,
@@ -255,6 +331,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
     if run is None:
         return None
     steps = [TraceStep(**step.model_dump(exclude={"id", "run_id"})) for step in get_agent_run_steps(run_id, engine=engine)]
+    observed_agents = list(dict.fromkeys(step.agent_name for step in steps))
     return AnalysisTrace(
         run_id=run.run_id,
         ticker=run.ticker,
@@ -263,4 +340,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         total_latency_ms=run.total_latency_ms,
         token_usage=run.token_usage,
         warnings=run.warnings,
+        entered_agent_layer=bool(steps),
+        adk_event_count=len(steps),
+        observed_agents=observed_agents,
     )

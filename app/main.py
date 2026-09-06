@@ -1,6 +1,6 @@
 import os
 import socket
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
@@ -9,9 +9,17 @@ from agents.orchestration.workflow import GoogleWorkflowError
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
 from app.schemas.screening import ScreeningResponse
+from app.schemas.diagnostics import UniverseDiagnosticsResponse
 from app.schemas.ticker import TickerProfileResponse
-from app.services.analyzer import analyze_request, validate_and_normalize_ticker
+from app.services.analyzer import validate_and_normalize_ticker
+from app.services.pipeline import (
+    PipelineOverrideNotAllowedError,
+    log_pipeline_override,
+    override_warning,
+    select_pipeline,
+)
 from app.services.screening import run_screening
+from app.services.universe_diagnostics import build_universe_diagnostics
 from app.services.ticker_profile import build_ticker_profile
 from app.settings import get_settings
 
@@ -100,6 +108,10 @@ def get_analysis_engine():
     return get_engine()
 
 
+def get_pipeline_override_allowed() -> bool:
+    return get_settings().ALLOW_PIPELINE_OVERRIDE
+
+
 def validated_symbol(symbol: str = Path(...)) -> str:
     try:
         return validate_and_normalize_ticker(symbol)
@@ -111,21 +123,29 @@ def validated_symbol(symbol: str = Path(...)) -> str:
 def analyze(
     request: AnalyzeRequest,
     include_trace: bool = Query(default=False),
+    pipeline: Optional[Literal["linear", "agentic"]] = Query(default=None),
     engine=Depends(get_analysis_engine),
+    override_allowed: bool = Depends(get_pipeline_override_allowed),
 ):
     try:
         from agents.config import load_agent_config
 
-        if load_agent_config().is_agentic():
-            from agents.orchestration.workflow import AgenticAnalysisWorkflow
-
-            response = AgenticAnalysisWorkflow(load_agent_config(), engine=engine).analyze(
-                request.ticker, request=request
-            )
-            if not include_trace:
-                response.trace = None
-            return response
-        return analyze_request(request, engine=engine)
+        selected_pipeline = select_pipeline(
+            pipeline,
+            load_agent_config(),
+            override_allowed=override_allowed,
+            engine=engine,
+        )
+        response = selected_pipeline.analyze(request)
+        warning = override_warning(pipeline)
+        if warning is not None:
+            response.warnings.append(warning)
+            log_pipeline_override(request.ticker, pipeline)
+        if not include_trace:
+            response.trace = None
+        return response
+    except PipelineOverrideNotAllowedError as exc:
+        raise HTTPException(status_code=403, detail="pipeline_override_disabled") from exc
     except GoogleWorkflowError as exc:
         raise HTTPException(status_code=502, detail=f"google_workflow_failed: {exc}") from exc
     except HTTPException:
@@ -135,8 +155,13 @@ def analyze(
 
 
 @app.get("/screening", response_model=ScreeningResponse)
-def read_screening(engine=Depends(get_analysis_engine)):
-    return run_screening(engine=engine)
+def read_screening(verbose: bool = Query(default=False), engine=Depends(get_analysis_engine)):
+    return run_screening(engine=engine, verbose=verbose)
+
+
+@app.get("/diagnostics/universe", response_model=UniverseDiagnosticsResponse)
+def read_universe_diagnostics(engine=Depends(get_analysis_engine)):
+    return build_universe_diagnostics(engine=engine)
 
 
 @app.get("/runs/{run_id}")

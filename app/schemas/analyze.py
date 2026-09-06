@@ -39,12 +39,13 @@ class EvidenceBlock(BaseModel):
 class TraceStep(BaseModel):
     sequence: int
     agent_name: str
-    status: str
+    status: Literal["completed", "degraded", "failed", "skipped"]
     tool_calls: List[str] = Field(default_factory=list)
     latency_ms: float = 0.0
     token_usage: dict[str, int] = Field(default_factory=dict)
     retries: int = 0
     output: Optional[dict[str, Any]] = None
+    skip_reason: Optional[str] = None
 
 
 class AnalysisTrace(BaseModel):
@@ -55,6 +56,19 @@ class AnalysisTrace(BaseModel):
     total_latency_ms: float = 0.0
     token_usage: dict[str, int] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+    entered_agent_layer: bool = False
+    adk_event_count: int = 0
+    observed_agents: List[str] = Field(default_factory=list)
+
+
+class DecisionDiagnosis(BaseModel):
+    stage: Literal["unknown_security", "data_gate", "hard_veto", "checklist", "risk_math"]
+    rule_id: str
+    detail: str
+    checklist_score: Optional[int] = Field(default=None, ge=0, le=11)
+    checklist_max: int = 11
+    missing_data: List[str] = Field(default_factory=list)
+    debug_reason: str
 
 
 class AnalyzeResponse(BaseModel):
@@ -73,5 +87,6 @@ class AnalyzeResponse(BaseModel):
     trace_id: str
     evidence: Optional[EvidenceBlock] = None
     trace: Optional[AnalysisTrace] = None
+    diagnosis: Optional[DecisionDiagnosis] = None
 
     model_config = ConfigDict(populate_by_name=True)

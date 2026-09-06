@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 _DECISION_RANK = {"trade": 0, "watchlist": 1, "no_trade": 2}
 
 
-def _to_screening_item(security, response: AnalyzeResponse) -> ScreeningItem:
+def _to_screening_item(security, response: AnalyzeResponse, verbose: bool = False) -> ScreeningItem:
     return ScreeningItem(
         ticker=response.ticker,
         sector_tag=security.sector_tag.value if hasattr(security.sector_tag, "value") else str(security.sector_tag),
@@ -30,6 +30,9 @@ def _to_screening_item(security, response: AnalyzeResponse) -> ScreeningItem:
         confidence=float(response.confidence),
         warnings=list(response.warnings),
         error=None,
+        checklist_score=response.diagnosis.checklist_score if response.diagnosis else None,
+        debug_reason=response.diagnosis.debug_reason if response.diagnosis else None,
+        diagnosis=response.diagnosis if verbose else None,
     )
 
 
@@ -47,6 +50,7 @@ def _to_error_item(security, exc: Exception) -> ScreeningItem:
         confidence=None,
         warnings=[],
         error=str(exc),
+        debug_reason=f"error/{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else type(exc).__name__}",
     )
 
 
@@ -60,7 +64,7 @@ def _sort_items(items: list[ScreeningItem]) -> list[ScreeningItem]:
     return sorted(items, key=_sort_key)
 
 
-def run_screening(engine=None, today: Optional[date] = None) -> ScreeningResponse:
+def run_screening(engine=None, today: Optional[date] = None, verbose: bool = False) -> ScreeningResponse:
     if today is None:
         today = datetime.now(timezone.utc).date()
 
@@ -71,7 +75,7 @@ def run_screening(engine=None, today: Optional[date] = None) -> ScreeningRespons
     for security in securities:
         try:
             response = analyzer_module.analyze(security.ticker, engine=engine, today=today)
-            items.append(_to_screening_item(security, response))
+            items.append(_to_screening_item(security, response, verbose=verbose))
         except Exception as exc:
             logger.exception("screening_ticker_failed", extra={"ticker": security.ticker})
             items.append(_to_error_item(security, exc))

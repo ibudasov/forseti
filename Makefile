@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag up down lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -18,9 +18,12 @@ help:
 	@echo "  make migration name=...  # Generate a new Alembic revision"
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
+	@echo "  make replay RUN_ID=... # Replay an offline golden cassette"
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
+	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
+	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
@@ -53,6 +56,13 @@ test: check-compose
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
+replay: check-compose
+	@if [ -z "$(RUN_ID)" ]; then echo "Error: RUN_ID is required (for example RUN_ID=happy-path)"; exit 1; fi
+	$(DOCKER_COMPOSE) run --rm \
+		-v "$$PWD/agents:/app/agents:ro" \
+		-v "$$PWD/tests/fixtures/golden:/app/tests/fixtures/golden:ro" \
+		app python -m agents.observability.cassette --run-id "$(RUN_ID)"
+
 ingest: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		app python -m app.ingestion.run --source all
@@ -62,10 +72,22 @@ ingest-earnings: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m app.ingestion.run --source earnings
 
 ingest-rag: check-compose
-	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
+	$(if $(ticker),	$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
+
+analyze: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make analyze ticker=NVDA [mode=agentic|linear]'"; \
+		exit 1; \
+	fi
+	@curl -s -X POST "http://127.0.0.1:8000/analyze?include_trace=true$(if $(mode),&pipeline=$(mode),)" \
+		-H 'content-type: application/json' \
+		-d '{"ticker":"$(ticker)"}' | python3 -m json.tool
 
 up: check-compose
 	$(DOCKER_COMPOSE) up
+
+adk-web: check-compose
+	$(DOCKER_COMPOSE) run --rm --build -p 8010:8010 app python -m google.adk.cli web agents --host 0.0.0.0 --port 8010
 
 down: check-compose
 	$(DOCKER_COMPOSE) down

@@ -1,0 +1,30 @@
+{
+  "run_id": "happy-path",
+  "ticker": "NVDA",
+  "events": [
+    {
+      "author": "trade_analyst_supervisor",
+      "function_calls": ["structured_data_collector", "transfer_to_agent"],
+      "text": ""
+    },
+    {"author": "fundamental_analyst", "function_calls": [], "text": "bullish"},
+    {"author": "technical_analyst", "function_calls": [], "text": "constructive"},
+    {
+      "author": "decision_synthesizer",
+      "function_calls": ["calculate_risk"],
+      "text": ""
+    },
+    {"author": "critic_guardrail", "function_calls": [], "text": "clear"}
+  ],
+  "expected": {
+    "decision": "watchlist",
+    "confidence": 0.4,
+    "steps": [
+      ["trade_analyst_supervisor", "completed"],
+      ["fundamental_analyst", "completed"],
+      ["technical_analyst", "completed"],
+      ["decision_synthesizer", "completed"],
+      ["critic_guardrail", "completed"]
+    ]
+  }
+}
