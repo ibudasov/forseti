@@ -65,7 +65,7 @@ ingest-rag: check-compose
 	$(if $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
 
 up: check-compose
-	$(DOCKER_COMPOSE) up
+	$(DOCKER_COMPOSE) up --force-recreate app
 
 down: check-compose
 	$(DOCKER_COMPOSE) down
