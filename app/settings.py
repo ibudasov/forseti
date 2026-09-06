@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         validation_alias="INGEST_REPORT_PATH",
     )
     EARNINGS_FALLBACK_ENABLED: bool = Field(
-        default=True,
+        default=False,
         validation_alias="EARNINGS_FALLBACK_ENABLED",
     )
     INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")

@@ -144,6 +144,8 @@ def _fallback_earnings_events(active_tickers: dict[str, int]) -> list[EarningsEv
             report_date = calendar.get("Earnings Date") if hasattr(calendar, "get") else None
             if hasattr(report_date, "iloc"):
                 report_date = report_date.iloc[0] if len(report_date) else None
+            elif isinstance(report_date, (list, tuple)):
+                report_date = report_date[0] if report_date else None
             if report_date is not None:
                 events.append(
                     EarningsEvent(
