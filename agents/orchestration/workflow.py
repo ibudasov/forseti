@@ -109,6 +109,30 @@ def _first_line(detail: Any) -> str:
     return str(detail).strip().splitlines()[0] if str(detail).strip() else str(detail)
 
 
+def _event_author(event: Any) -> str:
+    return str(_event_value(event, "author") or "unknown_agent")
+
+
+def _event_status(event: Any) -> str:
+    if _event_value(event, "error_code"):
+        return "failed"
+    if _event_value(event, "error_message"):
+        return "degraded"
+    return "completed"
+
+
+def _event_tool_calls(event: Any) -> list[str]:
+    calls: list[str] = []
+    content = _event_value(event, "content")
+    parts = _event_value(content, "parts") or []
+    for part in parts:
+        function_call = _event_value(part, "function_call")
+        name = _event_value(function_call, "name")
+        if name:
+            calls.append(str(name))
+    return calls
+
+
 class AgenticAnalysisWorkflow:
     """Application-level port for linear and ADK-backed analysis execution."""
 
@@ -130,14 +154,12 @@ class AgenticAnalysisWorkflow:
         request = request or AnalyzeRequest(ticker=resolved.ticker)
         run_id = str(uuid4())
         started_at = time.monotonic()
-        steps = self._initial_steps(resolved.ticker)
+        steps: list[TraceStep] = []
         response = analyze_request(request, engine=self.engine)
 
         registry = build_agent_registry(config=self.config, engine=self.engine)
         adk_warnings: list[str] = []
         token_usage = self._run_adk(registry, resolved.ticker, run_id, steps, response, adk_warnings)
-        self._append_critic_step(steps, response)
-
         response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
         total_latency_ms = (time.monotonic() - started_at) * 1000
@@ -149,6 +171,9 @@ class AgenticAnalysisWorkflow:
             total_latency_ms=total_latency_ms,
             token_usage=token_usage,
             warnings=warning_list,
+            entered_agent_layer=True,
+            adk_event_count=len(steps),
+            observed_agents=list(dict.fromkeys(step.agent_name for step in steps)),
         )
         response.trace_id = run_id
         response.trace = trace
@@ -156,20 +181,7 @@ class AgenticAnalysisWorkflow:
         return response
 
     def _initial_steps(self, ticker: str) -> list[TraceStep]:
-        return [
-            TraceStep(sequence=1, agent_name="input_resolver", status="completed", output={"ticker": ticker}),
-            TraceStep(
-                sequence=2,
-                agent_name="structured_data_collector",
-                status="completed",
-                tool_calls=["collect_structured_data"],
-            ),
-            TraceStep(sequence=3, agent_name="retriever", status="completed", tool_calls=["retrieve_evidence"]),
-            TraceStep(sequence=4, agent_name="fundamental_analyst", status="completed"),
-            TraceStep(sequence=5, agent_name="technical_analyst", status="completed"),
-            TraceStep(sequence=6, agent_name="risk_manager", status="completed", tool_calls=["calculate_risk"]),
-            TraceStep(sequence=7, agent_name="decision_synthesizer", status="completed"),
-        ]
+        return []
 
     def _run_adk(
         self,
@@ -187,6 +199,8 @@ class AgenticAnalysisWorkflow:
         try:
             events = self.runner_factory(registry, ticker)
             for event in events:
+                event_status = _event_status(event)
+                event_author = _event_author(event)
                 # The narration layer never produces trade numbers, so a model-level
                 # error degrades the memo but must not fail the deterministic answer.
                 error_code = getattr(event, "error_code", None)
@@ -195,9 +209,23 @@ class AgenticAnalysisWorkflow:
                     detail = _first_line(error_message or error_code)
                     warnings.append(f"agent_narration_degraded: {detail}")
                 _merge_token_usage(token_usage, _token_usage_from_event(event))
-            steps[6].token_usage = token_usage
-            steps[6].output = {"deterministic_decision": response.decision, "ticker": ticker}
-            steps[6].latency_ms = (time.monotonic() - started_at) * 1000
+                steps.append(
+                    TraceStep(
+                        sequence=len(steps) + 1,
+                        agent_name=event_author,
+                        status=event_status,
+                        tool_calls=_event_tool_calls(event),
+                        token_usage=_token_usage_from_event(event),
+                        output={
+                            "error_code": error_code,
+                            "error_message": _first_line(error_message) if error_message else None,
+                        }
+                        if error_code or error_message
+                        else None,
+                    )
+                )
+            if steps:
+                steps[-1].latency_ms = (time.monotonic() - started_at) * 1000
             return token_usage
         except Exception as exc:
             logger.exception("google_adk_workflow_failed: ticker=%s", ticker)
@@ -223,17 +251,6 @@ class AgenticAnalysisWorkflow:
             user_id=ticker,
             session_id=session.id,
             new_message=Content(role="user", parts=[Part(text=f"Analyze ticker {ticker}")]),
-        )
-
-    @staticmethod
-    def _append_critic_step(steps: list[TraceStep], response: AnalyzeResponse) -> None:
-        steps.append(
-            TraceStep(
-                sequence=len(steps) + 1,
-                agent_name="critic_guardrail",
-                status="completed",
-                output={"decision": response.decision, "warnings": response.warnings},
-            )
         )
 
     def _persist_trace(self, trace: AnalysisTrace) -> None:
@@ -263,4 +280,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         total_latency_ms=run.total_latency_ms,
         token_usage=run.token_usage,
         warnings=run.warnings,
+        entered_agent_layer=True,
+        adk_event_count=len(steps),
+        observed_agents=list(dict.fromkeys(step.agent_name for step in steps)),
     )
