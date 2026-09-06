@@ -103,3 +103,17 @@ def test_failed_runner_event_is_recorded_with_reason():
         "error_message": "calculate_risk was not available",
     }
     assert warnings == ["agent_narration_degraded: calculate_risk was not available"]
+
+
+def test_mapping_runner_error_is_recorded_with_failed_status():
+    steps: list[TraceStep] = []
+    workflow = _workflow(lambda registry, ticker: [{
+        "author": "risk_manager",
+        "error_code": "TIMEOUT",
+        "error_message": "risk tool timed out",
+    }])
+
+    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), [])
+
+    assert steps[0].status == "failed"
+    assert steps[0].agent_name == "risk_manager"

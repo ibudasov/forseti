@@ -203,8 +203,8 @@ class AgenticAnalysisWorkflow:
                 event_author = _event_author(event)
                 # The narration layer never produces trade numbers, so a model-level
                 # error degrades the memo but must not fail the deterministic answer.
-                error_code = getattr(event, "error_code", None)
-                error_message = getattr(event, "error_message", None)
+                error_code = _event_value(event, "error_code")
+                error_message = _event_value(event, "error_message")
                 if error_code or error_message:
                     detail = _first_line(error_message or error_code)
                     warnings.append(f"agent_narration_degraded: {detail}")
