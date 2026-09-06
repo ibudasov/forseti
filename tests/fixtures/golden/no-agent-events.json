@@ -1,0 +1,10 @@
+{
+  "run_id": "no-agent-events",
+  "ticker": "AAPL",
+  "events": [],
+  "expected": {
+    "decision": "watchlist",
+    "confidence": 0.4,
+    "steps": []
+  }
+}

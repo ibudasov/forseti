@@ -18,3 +18,20 @@ def test_rag_fail_loud_env_var_parses_to_true(monkeypatch):
     monkeypatch.setenv("RAG_FAIL_LOUD", "true")
     settings = Settings(_env_file=None)
     assert settings.RAG_FAIL_LOUD is True
+
+
+def test_pipeline_override_defaults_to_false():
+    settings = Settings(_env_file=None)
+    assert settings.ALLOW_PIPELINE_OVERRIDE is False
+
+
+def test_pipeline_override_env_var_parses_to_true(monkeypatch):
+    monkeypatch.setenv("ALLOW_PIPELINE_OVERRIDE", "true")
+    settings = Settings(_env_file=None)
+    assert settings.ALLOW_PIPELINE_OVERRIDE is True
+
+
+def test_llm_io_debug_capture_defaults_off():
+    settings = Settings(_env_file=None)
+    assert settings.DEBUG_LLM_IO is False
+    assert settings.DEBUG_LLM_IO_DIR == "/tmp/forseti-llm-io"

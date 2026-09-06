@@ -231,3 +231,4 @@ class AgentRunStep(SQLModel, table=True):
     token_usage: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     retries: int = Field(default=0, nullable=False)
     output: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    skip_reason: Optional[str] = Field(default=None, sa_column=Column(sa.String(length=255), nullable=True))

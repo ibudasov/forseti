@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,7 @@ from app.db.models import (
     PriceBar,
     TechnicalFeature,
 )
+from app.services.analyzer import analyze
 from app.services.checklist import evaluate_checklist
 from app.services.risk import calculate_risk_levels, RiskConfig
 from app.services.vetoes import check_vetoes
@@ -204,6 +206,88 @@ class TestChecklist:
         )
         assert score == 11
         assert len(results) == 9
+
+    def test_analyze_uses_newest_bar_for_checklist_scoring(self, monkeypatch):
+        """Latest price data should drive the checklist and veto signals."""
+        bars = []
+        for index in range(250):
+            close_value = Decimal("90") + Decimal(index) * Decimal("0.01")
+            bars.append(
+                PriceBar(
+                    security_id=1,
+                    bar_date=date(2025, 1, 1) + timedelta(days=index),
+                    open=close_value,
+                    high=close_value + Decimal("1"),
+                    low=close_value - Decimal("1"),
+                    close=close_value,
+                    volume=1000,
+                )
+            )
+        bars[-1] = PriceBar(
+            security_id=1,
+            bar_date=date(2026, 1, 1),
+            open=Decimal("120"),
+            high=Decimal("121"),
+            low=Decimal("119"),
+            close=Decimal("120"),
+            volume=1000,
+        )
+
+        technical_feature = TechnicalFeature(
+            security_id=1,
+            as_of_date=date(2026, 1, 1),
+            rsi_14=Decimal("55"),
+            sma_50=Decimal("110"),
+            sma_200=Decimal("100"),
+            volume_trend=Decimal("1.5"),
+        )
+        fundamental = Fundamental(
+            security_id=1,
+            as_of_date=date(2026, 1, 1),
+            revenue_growth=Decimal("0.20"),
+            fcf=Decimal("1000000"),
+            debt_to_equity=Decimal("0.5"),
+            eps_trend=Decimal("0.1"),
+            margins=None,
+            raw_payload={},
+        )
+
+        monkeypatch.setattr(
+            "app.services.analyzer.get_security",
+            lambda symbol, engine=None: SimpleNamespace(id=1, is_active=True),
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_latest_bars",
+            lambda symbol, limit, engine=None: list(reversed(bars)),
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_latest_technical_feature",
+            lambda symbol, engine=None: technical_feature,
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_latest_fundamental",
+            lambda symbol, engine=None: fundamental,
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_latest_macro_daily",
+            lambda engine=None: SimpleNamespace(vix=Decimal("20")),
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_next_earnings_event",
+            lambda symbol, on_or_after, engine=None: None,
+        )
+        monkeypatch.setattr(
+            "app.services.analyzer.get_settings",
+            lambda: SimpleNamespace(
+                ACCOUNT_CAPITAL_EUR="10000",
+                RISK_PER_TRADE_PCT="0.01",
+            ),
+        )
+
+        response = analyze("TEST", today=date(2026, 1, 1))
+
+        assert response.decision in {"trade", "watchlist"}
+        assert any("close_vs_sma50" in reason for reason in response.reasons)
 
 
 class TestRiskMath:

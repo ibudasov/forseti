@@ -69,3 +69,51 @@ def test_token_usage_reads_mapping_metadata():
         "prompt_token_count": 3,
         "total_token_count": 3,
     }
+
+
+def test_runner_events_are_the_only_trace_steps():
+    class Event:
+        author = "technical_analyst"
+
+    steps: list[TraceStep] = []
+    workflow = _workflow(lambda registry, ticker: [Event()])
+
+    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), [])
+
+    assert [(step.agent_name, step.status) for step in steps] == [
+        ("technical_analyst", "completed")
+    ]
+
+
+def test_failed_runner_event_is_recorded_with_reason():
+    class Event:
+        author = "decision_synthesizer"
+        error_code = "TOOL_NOT_FOUND"
+        error_message = "calculate_risk was not available"
+
+    steps: list[TraceStep] = []
+    warnings: list[str] = []
+    workflow = _workflow(lambda registry, ticker: [Event()])
+
+    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), warnings)
+
+    assert steps[0].status == "failed"
+    assert steps[0].output == {
+        "error_code": "TOOL_NOT_FOUND",
+        "error_message": "calculate_risk was not available",
+    }
+    assert warnings == ["agent_narration_degraded: calculate_risk was not available"]
+
+
+def test_mapping_runner_error_is_recorded_with_failed_status():
+    steps: list[TraceStep] = []
+    workflow = _workflow(lambda registry, ticker: [{
+        "author": "risk_manager",
+        "error_code": "TIMEOUT",
+        "error_message": "risk tool timed out",
+    }])
+
+    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), [])
+
+    assert steps[0].status == "failed"
+    assert steps[0].agent_name == "risk_manager"
