@@ -201,6 +201,27 @@ def count_price_bars(ticker: str, engine=None) -> int:
         return session.exec(stmt).one()
 
 
+def count_earnings_events(ticker: str, engine=None) -> int:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    statement = (
+        select(func.count())
+        .select_from(EarningsEvent)
+        .join(Security)
+        .where(Security.ticker == ticker)
+    )
+    with get_session(engine) as session:
+        return session.exec(statement).one()
+
+
+def count_document_chunks(ticker: str, engine=None) -> int:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    statement = select(func.count()).select_from(DocumentChunk).where(DocumentChunk.ticker == ticker)
+    with get_session(engine) as session:
+        return session.exec(statement).one()
+
+
 def get_latest_technical_feature(ticker: str, engine=None) -> Optional[TechnicalFeature]:
     engine = engine or get_engine()
     ticker = _normalize_ticker(ticker)

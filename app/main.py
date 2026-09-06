@@ -9,6 +9,7 @@ from agents.orchestration.workflow import GoogleWorkflowError
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
 from app.schemas.screening import ScreeningResponse
+from app.schemas.diagnostics import UniverseDiagnosticsResponse
 from app.schemas.ticker import TickerProfileResponse
 from app.services.analyzer import validate_and_normalize_ticker
 from app.services.pipeline import (
@@ -18,6 +19,7 @@ from app.services.pipeline import (
     select_pipeline,
 )
 from app.services.screening import run_screening
+from app.services.universe_diagnostics import build_universe_diagnostics
 from app.services.ticker_profile import build_ticker_profile
 from app.settings import get_settings
 
@@ -153,8 +155,13 @@ def analyze(
 
 
 @app.get("/screening", response_model=ScreeningResponse)
-def read_screening(engine=Depends(get_analysis_engine)):
-    return run_screening(engine=engine)
+def read_screening(verbose: bool = Query(default=False), engine=Depends(get_analysis_engine)):
+    return run_screening(engine=engine, verbose=verbose)
+
+
+@app.get("/diagnostics/universe", response_model=UniverseDiagnosticsResponse)
+def read_universe_diagnostics(engine=Depends(get_analysis_engine)):
+    return build_universe_diagnostics(engine=engine)
 
 
 @app.get("/runs/{run_id}")

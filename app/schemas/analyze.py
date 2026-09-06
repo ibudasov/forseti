@@ -61,6 +61,16 @@ class AnalysisTrace(BaseModel):
     observed_agents: List[str] = Field(default_factory=list)
 
 
+class DecisionDiagnosis(BaseModel):
+    stage: Literal["unknown_security", "data_gate", "hard_veto", "checklist", "risk_math"]
+    rule_id: str
+    detail: str
+    checklist_score: Optional[int] = Field(default=None, ge=0, le=11)
+    checklist_max: int = 11
+    missing_data: List[str] = Field(default_factory=list)
+    debug_reason: str
+
+
 class AnalyzeResponse(BaseModel):
     ticker: str
     decision: Literal["trade", "watchlist", "no_trade"]
@@ -77,5 +87,6 @@ class AnalyzeResponse(BaseModel):
     trace_id: str
     evidence: Optional[EvidenceBlock] = None
     trace: Optional[AnalysisTrace] = None
+    diagnosis: Optional[DecisionDiagnosis] = None
 
     model_config = ConfigDict(populate_by_name=True)

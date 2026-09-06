@@ -20,6 +20,13 @@ from app.db.repository import (
 from app.services.checklist import evaluate_checklist
 from app.services.risk import RiskConfig, calculate_risk_levels, RiskDowngrade
 from app.services.vetoes import check_vetoes
+from app.services.decision_diagnosis import (
+    from_checklist,
+    from_data_gate,
+    from_risk_downgrade,
+    from_unknown_security,
+    from_veto,
+)
 from app.settings import get_settings
 
 if TYPE_CHECKING:
@@ -141,6 +148,7 @@ def analyze(
             warnings=[],
             engine_version=ENGINE_VERSION,
             trace_id="",
+            diagnosis=from_unknown_security(symbol),
         )
 
     gates = _evaluate_data_gate(symbol, security, today, engine)
@@ -164,6 +172,7 @@ def analyze(
             warnings=gate_warnings,
             engine_version=ENGINE_VERSION,
             trace_id="",
+            diagnosis=from_data_gate(gates["gate_reasons"], gate_warnings),
         )
 
     # Get all required data for evaluation
@@ -205,6 +214,7 @@ def analyze(
             warnings=gate_warnings,
             engine_version=ENGINE_VERSION,
             trace_id="",
+            diagnosis=from_veto(veto),
         )
 
     return _evaluate_trade(
@@ -239,6 +249,9 @@ def _evaluate_trade(
 
     decision = _decision_for_score(score, gate_warnings)
     decision, risk_levels, risk_downgrade = _risk_decision(decision, latest_bar, bars)
+    diagnosis = from_risk_downgrade(risk_downgrade) if risk_downgrade else from_checklist(
+        score, checklist_results, gate_warnings
+    )
 
     # Build reasons
     reasons = []
@@ -276,6 +289,7 @@ def _evaluate_trade(
         warnings=gate_warnings,
         engine_version=ENGINE_VERSION,
         trace_id="",
+        diagnosis=diagnosis,
     )
 
 
@@ -328,6 +342,7 @@ def _evaluate_data_gate(
             "warnings": warnings,
             "bars": [],
             "gate_reasons": ["security_inactive: security is inactive"],
+            "rule_id": "security_inactive",
         }
 
     # Get latest bars
@@ -339,6 +354,7 @@ def _evaluate_data_gate(
             "warnings": warnings,
             "bars": [],
             "gate_reasons": ["no_price_data: no price data available"],
+            "rule_id": "no_price_data",
         }
 
     # Check for insufficient bars for SMA_LONG
@@ -349,6 +365,7 @@ def _evaluate_data_gate(
             "warnings": warnings,
             "bars": bars,
             "gate_reasons": ["insufficient_price_data: fewer than 200 price bars available"],
+            "rule_id": "insufficient_price_data",
         }
 
     latest_bar = bars[-1]

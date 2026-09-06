@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.schemas.analyze import DecisionDiagnosis
 
 
 class ScreeningItem(BaseModel):
@@ -19,6 +20,9 @@ class ScreeningItem(BaseModel):
     confidence: Optional[float] = Field(default=None, ge=0, le=1)
     warnings: list[str] = Field(default_factory=list)
     error: Optional[str] = None
+    checklist_score: Optional[int] = None
+    debug_reason: Optional[str] = None
+    diagnosis: Optional[DecisionDiagnosis] = None
 
 
 class ScreeningResponse(BaseModel):
