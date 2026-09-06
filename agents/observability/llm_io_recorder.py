@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +13,31 @@ logger = logging.getLogger(__name__)
 MAX_DEBUG_FILE_BYTES = 1_048_576
 
 
+def _value(event: Any, name: str) -> Any:
+    if isinstance(event, dict):
+        return event.get(name)
+    return getattr(event, name, None)
+
+
 class NullLlmIoRecorder:
     """Null object used when debug capture is disabled."""
 
     enabled = False
 
-    def record_run_config(self, payload: dict[str, Any]) -> None: pass
-    def record_agent_prompts(self, registry: Any) -> None: pass
-    def record_user_message(self, text: str) -> None: pass
-    def record_event(self, index: int, event: Any) -> None: pass
-    def record_summary(self, payload: dict[str, Any]) -> None: pass
+    def record_run_config(self, payload: dict[str, Any]) -> None:
+        return None
+
+    def record_agent_prompts(self, registry: Any) -> None:
+        return None
+
+    def record_user_message(self, text: str) -> None:
+        return None
+
+    def record_event(self, index: int, event: Any) -> None:
+        return None
+
+    def record_summary(self, payload: dict[str, Any]) -> None:
+        return None
 
 
 class FileLlmIoRecorder:
@@ -60,10 +74,16 @@ class FileLlmIoRecorder:
             agents.append(registry.root_agent)
         prompts = []
         for agent in agents:
+            generation_config = getattr(agent, "generate_content_config", None) or {}
+            temperature = (
+                generation_config.get("temperature")
+                if isinstance(generation_config, dict)
+                else getattr(generation_config, "temperature", None)
+            )
             prompts.append({
                 "name": getattr(agent, "name", None),
                 "model": getattr(agent, "model", None),
-                "temperature": getattr(getattr(agent, "generate_content_config", None), "temperature", None),
+                "temperature": temperature,
                 "instruction": getattr(agent, "instruction", None),
                 "tool_names": [getattr(tool, "name", str(tool)) for tool in (getattr(agent, "tools", None) or [])],
                 "sub_agent_names": [getattr(child, "name", str(child)) for child in (getattr(agent, "sub_agents", None) or [])],
@@ -81,7 +101,19 @@ class FileLlmIoRecorder:
                 raw = repr(event)
         else:
             raw = event if isinstance(event, dict) else repr(event)
-        self._write(f"003-event-{index:03d}.json", {"raw": raw})
+        self._write(
+            f"003-event-{index:03d}.json",
+            {
+                "author": _value(event, "author"),
+                "text": _value(event, "text"),
+                "function_calls": _value(event, "function_calls"),
+                "function_responses": _value(event, "function_responses"),
+                "usage_metadata": _value(event, "usage_metadata"),
+                "error_code": _value(event, "error_code"),
+                "error_message": _value(event, "error_message"),
+                "raw": raw,
+            },
+        )
 
     def record_summary(self, payload: dict[str, Any]) -> None:
         self._write("999-summary.json", payload)

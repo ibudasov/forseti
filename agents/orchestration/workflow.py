@@ -18,7 +18,6 @@ from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.analyzer import analyze_request
 from agents.observability.llm_io_recorder import (
-    NullLlmIoRecorder,
     build_llm_io_recorder,
 )
 
@@ -150,9 +149,7 @@ class AgenticAnalysisWorkflow:
         self.config = config
         self.engine = engine
         self.runner_factory = runner_factory or self._default_runner_factory
-        self.llm_io_recorder = llm_io_recorder or build_llm_io_recorder(
-            str(uuid4()), config=config
-        )
+        self.llm_io_recorder = llm_io_recorder
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         resolved = resolve_ticker(ticker_reference)
@@ -161,12 +158,12 @@ class AgenticAnalysisWorkflow:
 
         request = request or AnalyzeRequest(ticker=resolved.ticker)
         run_id = str(uuid4())
+        recorder = self.llm_io_recorder or build_llm_io_recorder(run_id, config=self.config)
         started_at = time.monotonic()
         steps: list[TraceStep] = []
         response = analyze_request(request, engine=self.engine)
 
         registry = build_agent_registry(config=self.config, engine=self.engine)
-        recorder = self.llm_io_recorder
         recorder.record_run_config({
             "run_id": run_id,
             "ticker": resolved.ticker,
@@ -193,6 +190,12 @@ class AgenticAnalysisWorkflow:
                 "error": str(exc),
                 "wall_clock_ms": (time.monotonic() - started_at) * 1000,
             })
+            if getattr(recorder, "enabled", False):
+                logger.info(
+                    "llm_io_captured run_id=%s directory=%s",
+                    run_id,
+                    recorder.run_directory,
+                )
             raise
         response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
