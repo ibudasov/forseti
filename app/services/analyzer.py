@@ -176,7 +176,7 @@ def analyze(
         )
 
     # Get all required data for evaluation
-    latest_bar = bars[0] if bars else None
+    latest_bar = bars[-1] if bars else None
     technical_feature = get_latest_technical_feature(symbol, engine=engine)
     fundamental = get_latest_fundamental(symbol, engine=engine)
     vix_row = get_latest_macro_daily(engine=engine)
