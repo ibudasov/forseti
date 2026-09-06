@@ -86,7 +86,10 @@ class FileLlmIoRecorder:
                 "temperature": temperature,
                 "instruction": getattr(agent, "instruction", None),
                 "tool_names": [getattr(tool, "name", str(tool)) for tool in (getattr(agent, "tools", None) or [])],
-                "sub_agent_names": [getattr(child, "name", str(child)) for child in (getattr(agent, "sub_agents", None) or [])],
+                "sub_agent_names": [
+                    getattr(child, "name", str(child))
+                    for child in (getattr(agent, "sub_agents", None) or [])
+                ],
             })
         self._write("001-agent-prompts.json", {"agents": prompts})
 
