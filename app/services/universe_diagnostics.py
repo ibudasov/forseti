@@ -35,7 +35,7 @@ def build_universe_diagnostics(engine=None, today: date | None = None) -> Univer
     started = time.perf_counter()
     securities = list_active_securities(engine=engine)
     coverage = UniverseCoverage()
-    blocked_by: dict[str, Counter[str] | int] = defaultdict(Counter)
+    blocked_by: dict[str, Counter[str]] = defaultdict(Counter)
     items = []
     macro = get_latest_macro_daily(engine=engine)
 
@@ -58,7 +58,7 @@ def build_universe_diagnostics(engine=None, today: date | None = None) -> Univer
         try:
             response = analyze(ticker, engine=engine, today=today)
         except Exception as exc:
-            blocked_by["errors"] = int(blocked_by.get("errors", 0)) + 1
+            blocked_by["errors"]["count"] += 1
             items.append(
                 UniverseDiagnosticsItem(
                     ticker=ticker,
@@ -84,7 +84,7 @@ def build_universe_diagnostics(engine=None, today: date | None = None) -> Univer
 
         diagnosis = response.diagnosis
         if response.decision == "trade":
-            blocked_by["passed"] = int(blocked_by.get("passed", 0)) + 1
+            blocked_by["passed"]["count"] += 1
         elif diagnosis is not None:
             stage_counts = blocked_by.setdefault(diagnosis.stage, Counter())
             assert isinstance(stage_counts, Counter)
@@ -113,7 +113,7 @@ def build_universe_diagnostics(engine=None, today: date | None = None) -> Univer
 
     coverage.latest_macro_daily_date = macro.obs_date if macro else None
     blocked_by_payload = {
-        stage: (counts if isinstance(counts, int) else dict(counts))
+        stage: (counts["count"] if stage in {"errors", "passed"} else dict(counts))
         for stage, counts in blocked_by.items()
     }
     blocked_by_payload.setdefault("data_gate", {})

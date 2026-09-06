@@ -23,6 +23,7 @@ class NullLlmIoRecorder:
     """Null object used when debug capture is disabled."""
 
     enabled = False
+    run_directory: Path | None = None
 
     def record_run_config(self, payload: dict[str, Any]) -> None:
         return None
