@@ -209,6 +209,7 @@ class AgenticAnalysisWorkflow:
         response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
         total_latency_ms = (time.monotonic() - started_at) * 1000
+        observed_agents = list(dict.fromkeys(step.agent_name for step in steps))
         trace = AnalysisTrace(
             run_id=run_id,
             ticker=resolved.ticker,
@@ -217,9 +218,9 @@ class AgenticAnalysisWorkflow:
             total_latency_ms=total_latency_ms,
             token_usage=token_usage,
             warnings=warning_list,
-            entered_agent_layer=True,
+            entered_agent_layer=bool(steps),
             adk_event_count=len(steps),
-            observed_agents=list(dict.fromkeys(step.agent_name for step in steps)),
+            observed_agents=observed_agents,
         )
         response.trace_id = run_id
         response.trace = trace
@@ -330,6 +331,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
     if run is None:
         return None
     steps = [TraceStep(**step.model_dump(exclude={"id", "run_id"})) for step in get_agent_run_steps(run_id, engine=engine)]
+    observed_agents = list(dict.fromkeys(step.agent_name for step in steps))
     return AnalysisTrace(
         run_id=run.run_id,
         ticker=run.ticker,
@@ -338,7 +340,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         total_latency_ms=run.total_latency_ms,
         token_usage=run.token_usage,
         warnings=run.warnings,
-        entered_agent_layer=True,
+        entered_agent_layer=bool(steps),
         adk_event_count=len(steps),
-        observed_agents=list(dict.fromkeys(step.agent_name for step in steps)),
+        observed_agents=observed_agents,
     )
