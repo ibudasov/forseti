@@ -40,6 +40,8 @@ class AgentWorkflowConfig:
     temperature: float
     timeout_seconds: float
     max_retries: int
+    debug_llm_io: bool = False
+    debug_llm_io_dir: str = "/tmp/forseti-llm-io"
 
     def is_agentic(self) -> bool:
         """Whether the agentic (ADK) pipeline should run instead of the linear one."""
@@ -61,4 +63,6 @@ def load_agent_config(settings: Settings | None = None) -> AgentWorkflowConfig:
         temperature=settings.AGENT_MODEL_TEMPERATURE,
         timeout_seconds=settings.AGENT_TIMEOUT_SECONDS,
         max_retries=settings.AGENT_MAX_RETRIES,
+        debug_llm_io=settings.DEBUG_LLM_IO,
+        debug_llm_io_dir=settings.DEBUG_LLM_IO_DIR,
     )

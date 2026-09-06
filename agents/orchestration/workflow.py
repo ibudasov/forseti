@@ -17,6 +17,10 @@ from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.analyzer import analyze_request
+from agents.observability.llm_io_recorder import (
+    NullLlmIoRecorder,
+    build_llm_io_recorder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,10 +145,14 @@ class AgenticAnalysisWorkflow:
         config: AgentWorkflowConfig,
         engine=None,
         runner_factory: Optional[RunnerFactory] = None,
+        llm_io_recorder=None,
     ) -> None:
         self.config = config
         self.engine = engine
         self.runner_factory = runner_factory or self._default_runner_factory
+        self.llm_io_recorder = llm_io_recorder or build_llm_io_recorder(
+            str(uuid4()), config=config
+        )
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         resolved = resolve_ticker(ticker_reference)
@@ -158,8 +166,34 @@ class AgenticAnalysisWorkflow:
         response = analyze_request(request, engine=self.engine)
 
         registry = build_agent_registry(config=self.config, engine=self.engine)
+        recorder = self.llm_io_recorder
+        recorder.record_run_config({
+            "run_id": run_id,
+            "ticker": resolved.ticker,
+            "model": self.config.model_name,
+            "temperature": self.config.temperature,
+            "timeout_seconds": self.config.timeout_seconds,
+            "pipeline_mode": self.config.pipeline_mode,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        })
+        recorder.record_agent_prompts(registry)
+        user_message = f"Analyze ticker {resolved.ticker}"
+        recorder.record_user_message(user_message)
         adk_warnings: list[str] = []
-        token_usage = self._run_adk(registry, resolved.ticker, run_id, steps, response, adk_warnings)
+        try:
+            token_usage = self._run_adk(
+                registry, resolved.ticker, run_id, steps, response, adk_warnings, recorder
+            )
+        except Exception as exc:
+            recorder.record_summary({
+                "event_count": len(steps),
+                "total_token_usage": {},
+                "final_decision": response.decision,
+                "warnings": adk_warnings,
+                "error": str(exc),
+                "wall_clock_ms": (time.monotonic() - started_at) * 1000,
+            })
+            raise
         response.warnings = list(response.warnings) + adk_warnings
         warning_list = list(response.warnings)
         total_latency_ms = (time.monotonic() - started_at) * 1000
@@ -178,6 +212,15 @@ class AgenticAnalysisWorkflow:
         response.trace_id = run_id
         response.trace = trace
         self._persist_trace(trace)
+        recorder.record_summary({
+            "event_count": len(steps),
+            "total_token_usage": token_usage,
+            "final_decision": response.decision,
+            "warnings": warning_list,
+            "wall_clock_ms": total_latency_ms,
+        })
+        if getattr(recorder, "enabled", False):
+            logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
         return response
 
     def _initial_steps(self, ticker: str) -> list[TraceStep]:
@@ -191,6 +234,7 @@ class AgenticAnalysisWorkflow:
         steps: list[TraceStep],
         response: AnalyzeResponse,
         warnings: list[str],
+        recorder=None,
     ) -> dict[str, int]:
         if self.runner_factory is None:
             return {}
@@ -199,6 +243,8 @@ class AgenticAnalysisWorkflow:
         try:
             events = self.runner_factory(registry, ticker)
             for event in events:
+                if recorder is not None:
+                    recorder.record_event(len(steps), event)
                 event_status = _event_status(event)
                 event_author = _event_author(event)
                 # The narration layer never produces trade numbers, so a model-level

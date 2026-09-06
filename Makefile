@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag analyze up down lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test ingest ingest-earnings ingest-rag analyze up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -22,6 +22,7 @@ help:
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
+	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
@@ -76,6 +77,9 @@ analyze: check-compose
 
 up: check-compose
 	$(DOCKER_COMPOSE) up
+
+adk-web: check-compose
+	$(DOCKER_COMPOSE) run --rm --build -p 8010:8010 app python -m google.adk.cli web agents --host 0.0.0.0 --port 8010
 
 down: check-compose
 	$(DOCKER_COMPOSE) down

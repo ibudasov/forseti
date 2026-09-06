@@ -33,6 +33,18 @@ class Settings(BaseSettings):
         default="Forseti/0.1 (gazer-flair9o@icloud.com)",
         validation_alias="EDGAR_USER_AGENT",
     )
+    INGEST_ALLOW_MISSING_SOURCES: bool = Field(
+        default=False,
+        validation_alias="INGEST_ALLOW_MISSING_SOURCES",
+    )
+    INGEST_MIN_COVERAGE_PCT: float = Field(
+        default=0.9,
+        validation_alias="INGEST_MIN_COVERAGE_PCT",
+    )
+    INGEST_REPORT_PATH: str = Field(
+        default="/tmp/forseti-ingest-report.json",
+        validation_alias="INGEST_REPORT_PATH",
+    )
     INGEST_PRICE_PERIOD: str = Field(default="2y", validation_alias="INGEST_PRICE_PERIOD")
     ACCOUNT_CAPITAL_EUR: float = Field(default=10000.0, validation_alias="ACCOUNT_CAPITAL_EUR")
     RISK_PER_TRADE_PCT: float = Field(default=0.01, validation_alias="RISK_PER_TRADE_PCT")
@@ -68,6 +80,11 @@ class Settings(BaseSettings):
     ALLOW_PIPELINE_OVERRIDE: bool = Field(
         default=False,
         validation_alias="ALLOW_PIPELINE_OVERRIDE",
+    )
+    DEBUG_LLM_IO: bool = Field(default=False, validation_alias="DEBUG_LLM_IO")
+    DEBUG_LLM_IO_DIR: str = Field(
+        default="/tmp/forseti-llm-io",
+        validation_alias="DEBUG_LLM_IO_DIR",
     )
 
 

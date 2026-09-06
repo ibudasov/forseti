@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
+from pathlib import Path
 from typing import Callable
 
+from app.ingestion.coverage import build_coverage_report
 from app.ingestion.earnings import ingest_earnings
 from app.ingestion.features import compute_technical_features
 from app.ingestion.fundamentals import ingest_fundamentals
 from app.ingestion.prices import ingest_prices
 from app.ingestion.universe import seed_universe
 from app.ingestion.vix import ingest_vix
+from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,19 @@ def _source_handlers() -> dict[str, Callable[[str | None], tuple[int, list[str]]
     }
 
 
+def _write_coverage_report() -> bool:
+    report = build_coverage_report()
+    payload = {"sources": [source.as_dict() for source in report]}
+    report_path = Path(get_settings().INGEST_REPORT_PATH)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    minimum = get_settings().INGEST_MIN_COVERAGE_PCT
+    insufficient = [source.source for source in report if not source.is_sufficient(minimum)]
+    if insufficient:
+        logger.error("ingestion_coverage_below_minimum: sources=%s minimum=%s", insufficient, minimum)
+    return not insufficient
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _build_parser().parse_args()
@@ -88,6 +105,14 @@ def main() -> int:
             failed_sources.append(source_name)
             logger.exception("source_ingestion_failed: source=%s", source_name)
 
+    coverage_ok = True
+    if args.source == "all" and args.ticker is None:
+        try:
+            coverage_ok = _write_coverage_report()
+        except Exception:
+            coverage_ok = False
+            logger.exception("ingestion_coverage_report_failed")
+
     duration_seconds = round(time.monotonic() - start_time, 2)
     logger.info(
         "ingestion_summary: seed_inserted=%s rows=%s failed_tickers=%s failed_sources=%s duration_seconds=%s",
@@ -99,7 +124,7 @@ def main() -> int:
     )
 
     any_failed_tickers = any(tickers for tickers in failed_tickers_by_source.values())
-    if failed_sources or any_failed_tickers:
+    if failed_sources or any_failed_tickers or not coverage_ok:
         return 1
     return 0
 

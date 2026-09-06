@@ -132,6 +132,8 @@ def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, lis
     api_key = normalize_api_key(get_settings().ALPHA_VANTAGE_API_KEY)
     if api_key is None:
         logger.error("%s: set ALPHA_VANTAGE_API_KEY in .env", MISSING_API_KEY_MARKER)
+        if getattr(get_settings(), "INGEST_ALLOW_MISSING_SOURCES", False):
+            return 0, []
         return 0, [MISSING_API_KEY_MARKER]
 
     active_tickers = _active_tickers(engine=engine, ticker=ticker)
