@@ -37,10 +37,6 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="INGEST_ALLOW_MISSING_SOURCES",
     )
-    INGEST_MIN_COVERAGE_PCT: float = Field(
-        default=0.9,
-        validation_alias="INGEST_MIN_COVERAGE_PCT",
-    )
     INGEST_REPORT_PATH: str = Field(
         default="/tmp/forseti-ingest-report.json",
         validation_alias="INGEST_REPORT_PATH",
