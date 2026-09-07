@@ -12,6 +12,7 @@ _RISK_FIELDS = (
     "take_profit",
     "risk_reward",
     "position_size_eur",
+    "time_stop_at",
 )
 
 

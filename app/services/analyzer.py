@@ -19,6 +19,7 @@ from app.db.repository import (
 )
 from app.services.checklist import evaluate_checklist
 from app.services.risk import RiskConfig, calculate_risk_levels, RiskDowngrade
+from app.services.time_stop import calculate_time_stop_at
 from app.services.vetoes import check_vetoes
 from app.services.decision_diagnosis import (
     from_checklist,
@@ -225,6 +226,7 @@ def analyze(
         fundamental,
         vix_close,
         gate_warnings,
+        today,
     )
 
 
@@ -236,6 +238,7 @@ def _evaluate_trade(
     fundamental,
     vix_close,
     gate_warnings,
+    recommendation_date,
 ):
     from app.schemas.analyze import AnalyzeResponse
 
@@ -268,6 +271,7 @@ def _evaluate_trade(
     take_profit = None
     risk_reward = None
     position_size_eur = None
+    time_stop_at = None
 
     if decision == "trade" and risk_levels:
         entry_range = (float(risk_levels.entry_low), float(risk_levels.entry_high))
@@ -275,10 +279,12 @@ def _evaluate_trade(
         take_profit = (float(risk_levels.take_profit_1), float(risk_levels.take_profit_2))
         risk_reward = float(risk_levels.risk_reward)
         position_size_eur = float(risk_levels.position_size_eur)
+        time_stop_at = calculate_time_stop_at(recommendation_date)
 
     return AnalyzeResponse(
         ticker=symbol,
         decision=decision,
+        time_stop_at=time_stop_at,
         entry_range=entry_range,
         stop_loss=stop_loss,
         take_profit=take_profit,
@@ -430,6 +436,7 @@ def _to_recommendation(security_id: int, response: "AnalyzeResponse", today: dat
             "ticker": response.ticker,
             "engine_version": ENGINE_VERSION,
             "decision": response.decision,
+            "time_stop_at": response.time_stop_at.isoformat() if response.time_stop_at else None,
         },
         engine_version=ENGINE_VERSION,
     )
