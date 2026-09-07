@@ -17,7 +17,8 @@ dependencies = [
   "python-dotenv>=1.0.0",
   "pydantic-settings>=2.0.0",
   "psycopg2-binary>=2.9.0",
-  "google-adk>=1.0.0,<3.0.0"
+  "google-adk>=1.0.0,<3.0.0",
+  "exchange-calendars>=4.5.0,<5.0.0"
 ]
 
 [project.optional-dependencies]

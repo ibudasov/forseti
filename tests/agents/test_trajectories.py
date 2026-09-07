@@ -165,3 +165,4 @@ def test_deterministic_fields_remain_identical_for_multiple_agent_trajectories(m
         assert response.take_profit == expected.take_profit
         assert response.risk_reward == expected.risk_reward
         assert response.position_size_eur == expected.position_size_eur
+        assert response.time_stop_at == expected.time_stop_at

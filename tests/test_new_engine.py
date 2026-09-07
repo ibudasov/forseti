@@ -287,6 +287,8 @@ class TestChecklist:
         response = analyze("TEST", today=date(2026, 1, 1))
 
         assert response.decision in {"trade", "watchlist"}
+        if response.decision == "trade":
+            assert response.time_stop_at is not None
         assert any("close_vs_sma50" in reason for reason in response.reasons)
 
 

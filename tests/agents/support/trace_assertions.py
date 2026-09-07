@@ -112,3 +112,9 @@ def assert_never_upgraded(response: Any, deterministic: Any) -> None:
                 f"risk value changed for {field_name}\n"
                 f"deterministic: {expected}\nresponse: {observed}"
             )
+    if getattr(response, "time_stop_at", None) != deterministic.time_stop_at:
+        raise AssertionError(
+            "deterministic value changed for time_stop_at\n"
+            f"deterministic: {deterministic.time_stop_at}\n"
+            f"response: {getattr(response, 'time_stop_at', None)}"
+        )

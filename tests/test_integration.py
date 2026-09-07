@@ -141,6 +141,7 @@ class TestAnalyzeEndpoint:
         for field in (
             "ticker",
             "decision",
+            "time_stop_at",
             "entry_range",
             "stop_loss",
             "take_profit",
@@ -155,6 +156,7 @@ class TestAnalyzeEndpoint:
         ):
             assert field in body
         assert body["decision"] == "watchlist"
+        assert body["time_stop_at"] is None
         assert body["warnings"] == ["insufficient_price_data"]
 
 

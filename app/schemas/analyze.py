@@ -74,6 +74,7 @@ class DecisionDiagnosis(BaseModel):
 class AnalyzeResponse(BaseModel):
     ticker: str
     decision: Literal["trade", "watchlist", "no_trade"]
+    time_stop_at: Optional[date] = None
     entry_range: Optional[Tuple[float, float]] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[Tuple[float, float]] = None
