@@ -12,7 +12,6 @@ _RISK_FIELDS = (
     "take_profit",
     "risk_reward",
     "position_size_eur",
-    "time_stop_at",
 )
 
 
@@ -113,3 +112,9 @@ def assert_never_upgraded(response: Any, deterministic: Any) -> None:
                 f"risk value changed for {field_name}\n"
                 f"deterministic: {expected}\nresponse: {observed}"
             )
+    if response.time_stop_at != deterministic.time_stop_at:
+        raise AssertionError(
+            "deterministic value changed for time_stop_at\n"
+            f"deterministic: {deterministic.time_stop_at}\n"
+            f"response: {response.time_stop_at}"
+        )
