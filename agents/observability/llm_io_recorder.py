@@ -179,13 +179,13 @@ def build_llm_io_recorder(
     settings: Settings | None = None,
     config: AgentWorkflowConfig | None = None,
 ) -> NullLlmIoRecorder | FileLlmIoRecorder:
-    resolved_settings = settings
-    if config is None and resolved_settings is None:
-        resolved_settings = get_settings()
-
-    assert config is not None or resolved_settings is not None
-    enabled = config.debug_llm_io if config is not None else resolved_settings.DEBUG_LLM_IO
-    directory = config.debug_llm_io_dir if config is not None else resolved_settings.DEBUG_LLM_IO_DIR
+    if config is not None:
+        enabled = config.debug_llm_io
+        directory = config.debug_llm_io_dir
+    else:
+        resolved_settings = settings or get_settings()
+        enabled = resolved_settings.DEBUG_LLM_IO
+        directory = resolved_settings.DEBUG_LLM_IO_DIR
     if not enabled:
         return NullLlmIoRecorder()
     run_directory = Path(directory) / run_id
