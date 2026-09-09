@@ -38,7 +38,9 @@ ifeq ($(strip $(name)),)
 	@echo "Error: name is required. Run 'make migration name=your_migration_name'"
 	@exit 1
 else
-	$(DOCKER_COMPOSE) run --rm --build app python -m alembic revision --autogenerate -m "$(name)"
+	$(DOCKER_COMPOSE) run --rm --build \
+		-v "$$PWD/migrations:/app/migrations" \
+		app python -m alembic revision --autogenerate -m "$(name)"
 endif
 
 db-shell: check-compose

@@ -1,119 +1,243 @@
-"""Tests for ADK workflow trace metadata."""
+"""Tests for observed ADK workflow trace metadata."""
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
+import agents.orchestration.workflow as workflow_module
 from agents.config import load_agent_config
-from agents.orchestration.workflow import (
-    AgenticAnalysisWorkflow,
-    GoogleWorkflowError,
-    _token_usage_from_event,
-)
-from app.schemas.analyze import TraceStep
+from agents.orchestration.registry import AgentRegistry
+from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
+from app.schemas.analyze import AnalyzeResponse
 from app.settings import Settings
 
 
-def _workflow(runner_factory):
-    return AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), runner_factory=runner_factory)
+class _NoopRecorder:
+    enabled = False
+
+    def record_run_config(self, config):
+        return None
+
+    def record_agent_prompts(self, registry):
+        return None
+
+    def record_user_message(self, message):
+        return None
+
+    def record_event(self, index, event):
+        return None
+
+    def record_summary(self, payload):
+        return None
 
 
-class _Response:
-    decision = "no_trade"
+class _Resolved:
+    is_valid = True
+    ticker = "NVDA"
+    error = None
 
 
-def _steps():
-    return [TraceStep(sequence=i + 1, agent_name=f"agent_{i}", status="completed") for i in range(7)]
+def _deterministic_response() -> AnalyzeResponse:
+    return AnalyzeResponse(
+        ticker="NVDA",
+        decision="no_trade",
+        confidence=0.0,
+        reasons=["deterministic"],
+        warnings=[],
+        engine_version="v1.rules.0",
+        trace_id="deterministic-trace",
+        entry_range=(100.0, 101.0),
+        stop_loss=95.0,
+        take_profit=(110.0, 115.0),
+        risk_reward=2.0,
+        position_size_eur=500.0,
+    )
 
 
-def test_model_error_event_degrades_to_warning_instead_of_failing():
-    class _ErrorEvent:
-        error_code = "NOT_FOUND"
-        error_message = "Tool 'analyze_fundamentals' not found.\nAvailable tools: transfer_to_agent"
-
-    warnings: list[str] = []
-    workflow = _workflow(lambda registry, ticker: [_ErrorEvent()])
-
-    workflow._run_adk(None, "NVDA", "run-1", _steps(), _Response(), warnings)
-
-    assert warnings == ["agent_narration_degraded: Tool 'analyze_fundamentals' not found."]
-
-
-def test_runner_exception_still_raises_google_workflow_error():
-    def _boom(registry, ticker):
-        raise RuntimeError("vertex unavailable")
-
-    with pytest.raises(GoogleWorkflowError):
-        _workflow(_boom)._run_adk(None, "NVDA", "run-1", _steps(), _Response(), [])
-
-
-def test_token_usage_reads_adk_usage_metadata_object():
-    class Usage:
-        prompt_token_count = 10
-        candidates_token_count = 4
-        total_token_count = 14
-
-    class Event:
-        usage_metadata = Usage()
-
-    assert _token_usage_from_event(Event()) == {
-        "prompt_token_count": 10,
-        "candidates_token_count": 4,
-        "total_token_count": 14,
-    }
+def _event(
+    author: str,
+    *,
+    tool_calls: tuple[str, ...] = (),
+    text: str = "",
+    token_usage: dict[str, int] | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+):
+    parts = []
+    if text:
+        parts.append(SimpleNamespace(text=text))
+    parts.extend(SimpleNamespace(function_call=SimpleNamespace(name=name)) for name in tool_calls)
+    return SimpleNamespace(
+        author=author,
+        content=SimpleNamespace(parts=parts),
+        usage_metadata=SimpleNamespace(**(token_usage or {})),
+        error_code=error_code,
+        error_message=error_message,
+    )
 
 
-def test_token_usage_reads_mapping_metadata():
-    event = {"usage_metadata": {"prompt_token_count": 3, "total_token_count": 3}}
+def _workflow(monkeypatch, *, events=(), raise_error: Exception | None = None, with_retriever: bool = False, engine=None):
+    monkeypatch.setattr(workflow_module, "resolve_ticker", lambda ticker_reference: _Resolved())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _deterministic_response().model_copy(deep=True),
+    )
+    tools = {"retriever": object()} if with_retriever else {}
+    monkeypatch.setattr(
+        workflow_module,
+        "build_agent_registry",
+        lambda config, engine=None: AgentRegistry(tools=tools, specialists={}, root_agent=None),
+    )
+    if engine is None:
+        monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
 
-    assert _token_usage_from_event(event) == {
-        "prompt_token_count": 3,
-        "total_token_count": 3,
-    }
+    def _runner(registry, ticker):
+        if raise_error is not None:
+            raise raise_error
+        return iter(events)
+
+    return AgenticAnalysisWorkflow(
+        load_agent_config(Settings(_env_file=None)),
+        engine=engine,
+        runner_factory=_runner,
+        llm_io_recorder=_NoopRecorder(),
+    )
 
 
-def test_runner_events_are_the_only_trace_steps():
-    class Event:
-        author = "technical_analyst"
+def test_happy_trajectory_records_observed_steps(monkeypatch):
+    events = [
+        _event("trade_analyst_supervisor", tool_calls=("structured_data_collector", "transfer_to_agent")),
+        _event("fundamental_analyst", text="bullish"),
+        _event("technical_analyst", text="constructive"),
+        _event(
+            "decision_synthesizer",
+            tool_calls=("calculate_risk",),
+            text='{"decision":"no_trade","confidence":0.0,"reasons":[]}',
+        ),
+        _event("critic_guardrail", text="clear"),
+    ]
+    response = _workflow(monkeypatch, events=events).analyze("NVDA")
 
-    steps: list[TraceStep] = []
-    workflow = _workflow(lambda registry, ticker: [Event()])
-
-    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), [])
-
-    assert [(step.agent_name, step.status) for step in steps] == [
-        ("technical_analyst", "completed")
+    assert [(step.agent_name, step.status) for step in response.trace.steps] == [
+        ("input_resolver", "completed"),
+        ("deterministic_pipeline", "completed"),
+        ("retriever", "skipped"),
+        ("trade_analyst_supervisor", "completed"),
+        ("fundamental_analyst", "completed"),
+        ("technical_analyst", "completed"),
+        ("decision_synthesizer", "completed"),
+        ("critic_guardrail", "completed"),
+    ]
+    assert response.trace.entered_agent_layer is True
+    assert response.trace.adk_event_count == 5
+    assert response.trace.observed_agents == [
+        "trade_analyst_supervisor",
+        "fundamental_analyst",
+        "technical_analyst",
+        "decision_synthesizer",
+        "critic_guardrail",
     ]
 
 
-def test_failed_runner_event_is_recorded_with_reason():
-    class Event:
-        author = "decision_synthesizer"
-        error_code = "TOOL_NOT_FOUND"
-        error_message = "calculate_risk was not available"
+def test_zero_events_marks_specialists_as_skipped(monkeypatch):
+    response = _workflow(monkeypatch, events=()).analyze("NVDA")
 
-    steps: list[TraceStep] = []
-    warnings: list[str] = []
-    workflow = _workflow(lambda registry, ticker: [Event()])
-
-    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), warnings)
-
-    assert steps[0].status == "failed"
-    assert steps[0].output == {
-        "error_code": "TOOL_NOT_FOUND",
-        "error_message": "calculate_risk was not available",
+    assert response.trace.entered_agent_layer is False
+    assert response.trace.adk_event_count == 0
+    skipped_reasons = {
+        step.agent_name: step.output["reason"]
+        for step in response.trace.steps
+        if step.status == "skipped"
     }
-    assert warnings == ["agent_narration_degraded: calculate_risk was not available"]
+    assert skipped_reasons == {
+        "retriever": "retriever_tool_unavailable",
+        "fundamental_analyst": "fundamental_analyst_never_reached",
+        "technical_analyst": "technical_analyst_never_reached",
+        "decision_synthesizer": "decision_synthesizer_never_reached",
+        "critic_guardrail": "critic_never_reached",
+    }
+    assert response.decision == _deterministic_response().decision
 
 
-def test_mapping_runner_error_is_recorded_with_failed_status():
-    steps: list[TraceStep] = []
-    workflow = _workflow(lambda registry, ticker: [{
-        "author": "risk_manager",
-        "error_code": "TIMEOUT",
-        "error_message": "risk tool timed out",
-    }])
+def test_missing_critic_is_recorded_as_skipped(monkeypatch):
+    events = [
+        _event("trade_analyst_supervisor"),
+        _event("decision_synthesizer", text='{"decision":"no_trade","confidence":0.0,"reasons":[]}'),
+    ]
+    response = _workflow(monkeypatch, events=events).analyze("NVDA")
 
-    workflow._run_adk(None, "NVDA", "run-1", steps, _Response(), [])
+    critic_steps = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"]
+    assert len(critic_steps) == 1
+    assert critic_steps[0].status == "skipped"
+    assert critic_steps[0].output == {"reason": "critic_never_reached"}
 
-    assert steps[0].status == "failed"
-    assert steps[0].agent_name == "risk_manager"
+
+def test_error_event_is_degraded_and_warned(monkeypatch):
+    events = [
+        _event(
+            "technical_analyst",
+            error_code="TOOL_ERROR",
+            error_message="Tool 'analyze_fundamentals' not found.\nAvailable tools: transfer_to_agent",
+        )
+    ]
+    response = _workflow(monkeypatch, events=events).analyze("NVDA")
+
+    assert response.warnings[-1] == "agent_narration_degraded: Tool 'analyze_fundamentals' not found."
+    degraded_step = [step for step in response.trace.steps if step.agent_name == "technical_analyst"][0]
+    assert degraded_step.status == "degraded"
+    assert degraded_step.output["reason"] == "agent_narration_degraded"
+
+
+def test_runner_exception_persists_failed_partial_trace(monkeypatch, db_engine):
+    run_id = "run-explode"
+    monkeypatch.setattr(workflow_module, "uuid4", lambda: run_id)
+
+    workflow = _workflow(monkeypatch, raise_error=RuntimeError("vertex unavailable"), engine=db_engine)
+    with pytest.raises(GoogleWorkflowError, match="vertex unavailable"):
+        workflow.analyze("NVDA")
+
+    trace = load_trace(run_id, engine=db_engine)
+    assert trace is not None
+    failed_steps = [step for step in trace.steps if step.status == "failed"]
+    assert len(failed_steps) == 1
+    assert failed_steps[0].output["reason"] == "adk_runner_exception"
+
+
+def test_guardrail_rejects_fabricated_risk_values(monkeypatch):
+    events = [
+        _event(
+            "decision_synthesizer",
+            text=(
+                '{"decision":"trade","confidence":0.9,"reasons":["upgrade"],'
+                '"stop_loss":1.0}'
+            ),
+        )
+    ]
+    deterministic = _deterministic_response()
+    response = _workflow(monkeypatch, events=events).analyze("NVDA")
+
+    assert response.decision == deterministic.decision
+    assert response.entry_range == deterministic.entry_range
+    assert response.stop_loss == deterministic.stop_loss
+    assert response.take_profit == deterministic.take_profit
+    assert response.position_size_eur == deterministic.position_size_eur
+
+    synthesis_step = [step for step in response.trace.steps if step.agent_name == "decision_synthesizer"][0]
+    assert synthesis_step.status == "degraded"
+    assert synthesis_step.output["reason"] == "guardrail_rejected"
+    assert any(warning.startswith("guardrail_rejected: agent_output_changed_risk_value") for warning in response.warnings)
+
+
+def test_completed_non_deterministic_steps_do_not_exceed_event_count(monkeypatch):
+    events = [_event("fundamental_analyst"), _event("technical_analyst")]
+    response = _workflow(monkeypatch, events=events).analyze("NVDA")
+
+    deterministic_names = {"input_resolver", "deterministic_pipeline"}
+    completed_non_deterministic = [
+        step
+        for step in response.trace.steps
+        if step.status == "completed" and step.agent_name not in deterministic_names
+    ]
+    assert len(completed_non_deterministic) <= len(events)

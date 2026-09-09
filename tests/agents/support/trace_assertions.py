@@ -68,11 +68,12 @@ def assert_skipped_reason(trace: Any, agent_name: str, reason: str) -> None:
     if not matching_steps:
         raise AssertionError(f"agent {agent_name!r} was not observed")
     step = matching_steps[0]
-    if step.status != "skipped" or step.skip_reason != reason:
+    observed_reason = step.output.get("reason") if step.output else None
+    if step.status != "skipped" or observed_reason != reason:
         raise AssertionError(
             f"skip for {agent_name!r} differs\n"
             f"expected: ('skipped', {reason!r})\n"
-            f"observed: ({step.status!r}, {step.skip_reason!r})"
+            f"observed: ({step.status!r}, {observed_reason!r})"
         )
 
 

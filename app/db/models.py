@@ -215,6 +215,18 @@ class AgentRun(SQLModel, table=True):
     total_latency_ms: float = Field(default=0.0, nullable=False)
     token_usage: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     warnings: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    entered_agent_layer: bool = Field(
+        default=False,
+        sa_column=Column(sa.Boolean(), nullable=False, server_default=sa.text("FALSE")),
+    )
+    adk_event_count: int = Field(
+        default=0,
+        sa_column=Column(sa.Integer(), nullable=False, server_default=sa.text("0")),
+    )
+    observed_agents: List[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
+    )
 
 
 class AgentRunStep(SQLModel, table=True):
