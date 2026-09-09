@@ -28,6 +28,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh api
-          --method POST
-          repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/ready_for_review
+          gh pr ready
+          ${{ github.event.pull_request.number }}
+          --repo ${{ github.repository }}
