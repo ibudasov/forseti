@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -422,6 +423,7 @@ class AgenticAnalysisWorkflow:
                 trace_recorder.record_skipped(agent_name, reason)
 
     def _record_run_metadata(self, recorder, run_id: str, ticker: str, registry: AgentRegistry) -> None:
+        git_sha = os.getenv("GITHUB_SHA")
         recorder.record_run_config(
             {
                 "run_id": run_id,
@@ -429,7 +431,9 @@ class AgenticAnalysisWorkflow:
                 "model": self.config.model_name,
                 "temperature": self.config.temperature,
                 "timeout_seconds": self.config.timeout_seconds,
+                "max_retries": self.config.max_retries,
                 "pipeline_mode": self.config.pipeline_mode,
+                "git_sha": git_sha,
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
         )

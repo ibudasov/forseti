@@ -26,6 +26,21 @@ def _content_parts(event: Any) -> list[Any]:
     return parts
 
 
+def _json_compatible(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_compatible(item) for item in value]
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(mode="json")
+        except Exception:
+            return repr(value)
+    return repr(value)
+
+
 def _first_line(value: Any) -> str:
     text = str(value).strip()
     if not text:
@@ -45,6 +60,15 @@ def event_function_calls(event: Any) -> list[str]:
         if name:
             calls.append(str(name))
     return calls
+
+
+def event_function_responses(event: Any) -> list[Any]:
+    responses: list[Any] = []
+    for part in _content_parts(event):
+        function_response = _event_value(part, "function_response")
+        if function_response is not None:
+            responses.append(_json_compatible(function_response))
+    return responses
 
 
 def event_text(event: Any) -> str:
