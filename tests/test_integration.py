@@ -4,9 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from agents.config import load_agent_config
+from agents.orchestration.workflow import AgenticAnalysisWorkflow
 from app.db.models import PriceBar, Security
 from app.main import app
 from app.main import get_analysis_engine
+from app.settings import Settings
 
 
 @pytest.fixture
@@ -158,6 +161,82 @@ class TestAnalyzeEndpoint:
         assert body["decision"] == "watchlist"
         assert body["time_stop_at"] is None
         assert body["warnings"] == ["insufficient_price_data"]
+
+
+class TestRunTraceEndpoint:
+    @staticmethod
+    def _seed_security(db_engine):
+        security = Security(
+            ticker="NVDA",
+            name="NVIDIA Corporation",
+            exchange="NASDAQ",
+            sector_tag="ai",
+        )
+        with Session(db_engine) as session:
+            session.add(security)
+            session.commit()
+            session.refresh(security)
+            session.add_all(
+                [
+                    PriceBar(
+                        security_id=security.id,
+                        bar_date="2026-01-01",
+                        open="100.0000",
+                        high="103.0000",
+                        low="99.0000",
+                        close="100.0000",
+                        volume=1_000_000,
+                    ),
+                    PriceBar(
+                        security_id=security.id,
+                        bar_date="2026-01-02",
+                        open="101.0000",
+                        high="104.0000",
+                        low="100.0000",
+                        close="102.5000",
+                        volume=1_100_000,
+                    ),
+                ]
+            )
+            session.commit()
+
+    def test_get_run_returns_persisted_observed_trace(self, db_client, db_engine):
+        from types import SimpleNamespace
+
+        self._seed_security(db_engine)
+        events = [
+            SimpleNamespace(author="trade_analyst_supervisor", content=SimpleNamespace(parts=[]), usage_metadata=None),
+            SimpleNamespace(author="fundamental_analyst", content=SimpleNamespace(parts=[]), usage_metadata=None),
+        ]
+        workflow = AgenticAnalysisWorkflow(
+            load_agent_config(Settings(_env_file=None)),
+            engine=db_engine,
+            runner_factory=lambda registry, ticker: iter(events),
+        )
+        response = workflow.analyze("NVDA")
+
+        run_response = db_client.get(f"/runs/{response.trace.run_id}")
+        assert run_response.status_code == 200
+        body = run_response.json()
+        assert body["run_id"] == response.trace.run_id
+        assert body["entered_agent_layer"] is True
+        assert body["adk_event_count"] == 2
+        assert body["observed_agents"] == ["trade_analyst_supervisor", "fundamental_analyst"]
+        assert [(step["agent_name"], step["status"]) for step in body["steps"]] == [
+            (step.agent_name, step.status) for step in response.trace.steps
+        ]
+
+    def test_get_run_returns_404_for_unknown_run_id(self, db_client):
+        response = db_client.get("/runs/does-not-exist")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "agent_run_not_found: does-not-exist"
+
+    def test_post_analyze_without_include_trace_returns_null_trace(self, db_client, db_engine):
+        self._seed_security(db_engine)
+        response = db_client.post("/analyze", json={"ticker": "NVDA"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["trace"] is None
 
 
 class TestScreeningEndpoint:

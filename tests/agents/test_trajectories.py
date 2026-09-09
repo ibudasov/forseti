@@ -5,6 +5,7 @@ import pytest
 
 import agents.orchestration.workflow as workflow_module
 from agents.config import load_agent_config
+from agents.orchestration.registry import AgentRegistry
 from agents.orchestration.workflow import (
     AgenticAnalysisWorkflow,
     DecisionSynthesis,
@@ -24,6 +25,7 @@ from tests.agents.support.trace_assertions import (
     assert_never_upgraded,
     assert_retries,
     assert_step_order,
+    assert_skipped_reason,
     assert_steps,
     assert_tool_calls,
 )
@@ -49,7 +51,11 @@ def _deterministic_response() -> AnalyzeResponse:
 def _workflow(monkeypatch, runner):
     response = _deterministic_response()
     monkeypatch.setattr(workflow_module, "analyze_request", lambda request, engine=None: response.model_copy(deep=True))
-    monkeypatch.setattr(workflow_module, "build_agent_registry", lambda config, engine=None: None)
+    monkeypatch.setattr(
+        workflow_module,
+        "build_agent_registry",
+        lambda config, engine=None: AgentRegistry(tools={}, specialists={}, root_agent=None),
+    )
     monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
     return AgenticAnalysisWorkflow(
         load_agent_config(Settings(_env_file=None)),
@@ -66,12 +72,17 @@ def test_happy_path_records_the_complete_scripted_trajectory(monkeypatch):
         Turn("trade_analyst_supervisor", ("structured_data_collector", "transfer_to_agent")),
         Turn("fundamental_analyst", text="bullish"),
         Turn("technical_analyst", text="constructive"),
-        Turn("decision_synthesizer", ("calculate_risk",)),
+        Turn("decision_synthesizer", ("calculate_risk",), text='{"decision":"watchlist","confidence":0.4,"reasons":[]}'),
         Turn("critic_guardrail", text="clear"),
     ]
     response = _run(monkeypatch, turns)
 
-    assert_steps(response.trace, [(turn.author, "completed") for turn in turns])
+    assert_steps(response.trace, [
+        ("input_resolver", "completed"),
+        ("deterministic_pipeline", "completed"),
+        ("retriever", "skipped"),
+        *((turn.author, "completed") for turn in turns),
+    ])
     assert response.trace.entered_agent_layer is True
     assert response.trace.adk_event_count == len(turns)
     assert response.trace.observed_agents == [turn.author for turn in turns]
@@ -79,13 +90,21 @@ def test_happy_path_records_the_complete_scripted_trajectory(monkeypatch):
 
 
 def test_critic_is_ordered_after_synthesizer(monkeypatch):
-    response = _run(monkeypatch, [Turn("decision_synthesizer"), Turn("critic_guardrail")])
+    synthesis_turn = Turn(
+        "decision_synthesizer",
+        text='{"decision":"watchlist","confidence":0.4,"reasons":[]}',
+    )
+    response = _run(
+        monkeypatch,
+        [synthesis_turn, Turn("critic_guardrail")],
+    )
     assert_step_order(response.trace, ["decision_synthesizer", "critic_guardrail"])
 
 
 def test_critic_not_reached_is_visible(monkeypatch):
-    response = _run(monkeypatch, [Turn("decision_synthesizer")])
+    response = _run(monkeypatch, [Turn("decision_synthesizer", text='{"decision":"watchlist","confidence":0.4,"reasons":[]}')])
     assert "critic_guardrail" not in response.trace.observed_agents
+    assert_skipped_reason(response.trace, "critic_guardrail", "critic_never_reached")
     assert response.decision == "watchlist"
 
 
@@ -93,6 +112,10 @@ def test_no_agent_activity_preserves_deterministic_response(monkeypatch):
     response = _workflow(monkeypatch, empty_runner()).analyze("NVDA")
     assert response.trace.entered_agent_layer is False
     assert response.trace.adk_event_count == 0
+    assert_skipped_reason(response.trace, "fundamental_analyst", "fundamental_analyst_never_reached")
+    assert_skipped_reason(response.trace, "technical_analyst", "technical_analyst_never_reached")
+    assert_skipped_reason(response.trace, "decision_synthesizer", "decision_synthesizer_never_reached")
+    assert_skipped_reason(response.trace, "critic_guardrail", "critic_never_reached")
     assert response.decision == "watchlist"
 
 
@@ -117,9 +140,13 @@ def test_contradictory_specialists_and_critic_are_all_traced(monkeypatch):
          Turn("critic_guardrail", text="contradiction")],
     )
     assert_steps(response.trace, [
+        ("input_resolver", "completed"),
+        ("deterministic_pipeline", "completed"),
+        ("retriever", "skipped"),
         ("fundamental_analyst", "completed"),
         ("technical_analyst", "completed"),
         ("critic_guardrail", "completed"),
+        ("decision_synthesizer", "skipped"),
     ])
     assert response.decision == "watchlist"
 
@@ -130,9 +157,9 @@ def test_model_error_degrades_one_step_and_later_turns_continue(monkeypatch):
         [Turn("technical_analyst", error_code="TOOL_ERROR", error_message="first line\nmore"),
          Turn("critic_guardrail")],
     )
-    assert response.trace.steps[0].status == "failed"
+    assert response.trace.steps[3].status == "degraded"
     assert response.warnings[-1] == "agent_narration_degraded: first line"
-    assert response.trace.steps[1].agent_name == "critic_guardrail"
+    assert response.trace.steps[4].agent_name == "critic_guardrail"
 
 
 def test_runner_failure_is_mapped_to_google_workflow_error(monkeypatch):
@@ -151,7 +178,7 @@ def test_token_usage_is_aggregated_across_turns(monkeypatch):
 
 
 def test_retries_remain_zero_until_retry_loop_exists(monkeypatch):
-    response = _run(monkeypatch, [Turn("decision_synthesizer")])
+    response = _run(monkeypatch, [Turn("decision_synthesizer", text='{"decision":"watchlist","confidence":0.4,"reasons":[]}')])
     assert_retries(response.trace, "decision_synthesizer", 0)
 
 
