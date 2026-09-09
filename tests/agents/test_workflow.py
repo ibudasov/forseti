@@ -7,7 +7,8 @@ import pytest
 
 import agents.orchestration.workflow as workflow_module
 from agents.config import load_agent_config
-from agents.orchestration.registry import AgentRegistry
+from agents.observability.llm_io_recorder import FileLlmIoRecorder, NullLlmIoRecorder
+from agents.orchestration.registry import AgentRegistry, build_agent_registry as build_real_agent_registry
 from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
 from app.schemas.analyze import AnalyzeResponse
 from app.settings import Settings
@@ -241,3 +242,56 @@ def test_completed_non_deterministic_steps_do_not_exceed_event_count(monkeypatch
         if step.status == "completed" and step.agent_name not in deterministic_names
     ]
     assert len(completed_non_deterministic) <= len(events)
+
+
+def test_explicit_file_recorder_writes_run_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow_module, "resolve_ticker", lambda ticker_reference: _Resolved())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _deterministic_response().model_copy(deep=True),
+    )
+    registry = build_real_agent_registry(load_agent_config(Settings(_env_file=None)))
+    monkeypatch.setattr(
+        workflow_module,
+        "build_agent_registry",
+        lambda config, engine=None: registry,
+    )
+    monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
+    recorder = FileLlmIoRecorder(tmp_path / "run-1")
+    recorder.run_directory.mkdir()
+    events = [_event("trade_analyst_supervisor"), _event("fundamental_analyst", text="bullish")]
+
+    workflow = AgenticAnalysisWorkflow(
+        load_agent_config(Settings(_env_file=None)),
+        runner_factory=lambda configured_registry, ticker: iter(events),
+        llm_io_recorder=recorder,
+    )
+
+    workflow.analyze("NVDA")
+
+    assert [path.name for path in sorted(recorder.run_directory.iterdir())] == [
+        "000-run-config.json",
+        "001-agent-prompts.json",
+        "002-user-message.json",
+        "003-event-000.json",
+        "003-event-001.json",
+        "999-summary.json",
+    ]
+
+
+def test_default_workflow_uses_null_recorder_when_capture_disabled(monkeypatch):
+    recorder_calls: list[str] = []
+
+    def fake_builder(run_id, config=None):
+        recorder_calls.append(run_id)
+        return NullLlmIoRecorder()
+
+    monkeypatch.setattr(workflow_module, "build_llm_io_recorder", fake_builder)
+
+    workflow = _workflow(monkeypatch, events=[_event("fundamental_analyst")])
+    workflow.llm_io_recorder = None
+    response = workflow.analyze("NVDA")
+
+    assert recorder_calls == [response.trace.run_id]
+    assert response.trace.adk_event_count == 1

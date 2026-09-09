@@ -3,33 +3,65 @@
 ## Decision tree
 
 - Wrong numbers: inspect the deterministic engine, not the agent layer.
-- No agent activity: check `entered_agent_layer` in the trace (#22).
-- Bad memo: enable `DEBUG_LLM_IO` and read the resolved prompts and events.
+- No agent activity: check `entered_agent_layer` in the trace before blaming the
+  model layer.
+- Bad memo: enable `DEBUG_LLM_IO` and read the resolved prompts and raw ADK
+  events for that `run_id`.
 - Tool-not-found errors: check the registry tool list and the
-  `transfer_to_agent` instructions.
+  `transfer_to_agent` instructions before changing prompts.
 
-## Reading a trace
+## How to read a trace
 
 The structured trace is described in [agent-trace.md](agent-trace.md). It records
 the run ID, event authors, warnings, token usage, and latency without storing
-prompts or model output in the database.
+prompts or model output in the database. Start there first: if
+`entered_agent_layer` is false, the agent never actually ran and LLM I/O capture
+will not explain the failure.
 
-## Capturing LLM I/O
+## How to capture LLM I/O
 
 Set `DEBUG_LLM_IO=true` and optionally set `DEBUG_LLM_IO_DIR` (default
-`/tmp/forseti-llm-io`). Each run gets a directory named for its trace run ID:
-`000-run-config.json`, `001-agent-prompts.json`, `002-user-message.json`, one
-`003-event-NNN.json` per ADK event, and `999-summary.json`. Files are bounded to
-1 MiB. They can contain full prompts and model output; keep capture local and
-remove directories when finished (`rm -rf /tmp/forseti-llm-io`).
+`/tmp/forseti-llm-io`). Each run gets a directory named for its trace `run_id`.
+Files may contain full prompts and model output, so keep this disabled outside
+local debugging and clean up when done:
 
-## ADK development UI
+```bash
+rm -rf /tmp/forseti-llm-io
+```
 
-Run `make adk-web`, then open http://127.0.0.1:8010. This invokes
-`python -m google.adk.cli web agents --host 0.0.0.0 --port 8010` in Docker and
-requires Vertex credentials in `.env`. The UI shows the configured agent
-topology and live ADK activity; it does not show the structured API trace or
-intercept raw Gemini HTTP traffic.
+Each directory contains:
+
+- `000-run-config.json`: ticker, model, temperature, timeout, retries,
+  pipeline mode, optional git SHA, and start time.
+- `001-agent-prompts.json`: the resolved instruction text for each agent,
+  including `HARD_RULES_TEXT`, tool names, and sub-agent names.
+- `002-user-message.json`: the exact `Runner.run(... new_message=...)` text.
+- `003-event-NNN.json`: one raw ADK event per file, with normalized author,
+  text, function calls, function responses, token usage, and the raw ADK event
+  payload.
+- `999-summary.json`: event count, total token usage, final decision, warnings,
+  and wall-clock timing. Failed runs still write a summary.
+
+Each file is bounded to 1 MiB and truncated with `"truncated": true` when
+necessary.
+
+## How to run the ADK dev UI
+
+Run `make adk-web`, then open http://127.0.0.1:8010.
+
+Verified CLI contract (`python -m google.adk.cli web --help` inside the app
+container): `web` expects an `AGENTS_DIR` whose subdirectories each contain an
+ADK-discoverable `agent.py`, `__init__.py`, or `root_agent.yaml`. Forseti uses
+`agents/adk_app/agent.py`, so the Make target runs:
+
+```bash
+python -m google.adk.cli web agents --host 0.0.0.0 --port 8010
+```
+
+This is a local-development-only UI. It requires the Vertex credentials from
+`.env`, shows the real `trade_analyst_supervisor` topology plus live transfers
+and tool calls, and does **not** show the structured API trace or intercept raw
+Gemini HTTP traffic.
 
 ## Known sharp edges
 
