@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from app.services.checklist import MAX_SCORE
 
@@ -50,12 +50,16 @@ def from_unknown_security(symbol: str):
     return _build("unknown_security", "ticker_not_found", f"security not found: {symbol}")
 
 
-def from_data_gate(gate_reasons: Iterable[str], warnings: Iterable[str]):
+def from_data_gate(
+    gate_reasons: Iterable[str],
+    warnings: Iterable[str],
+    rule_id: Optional[str] = None,
+):
     reason = next(iter(gate_reasons), "data_gate: data requirements not met")
-    rule_id, _, detail = reason.partition(":")
+    resolved_rule_id, _, detail = reason.partition(":")
     return _build(
         "data_gate",
-        rule_id,
+        rule_id or resolved_rule_id,
         detail.strip() or reason,
         missing_data=_missing_data(warnings),
     )

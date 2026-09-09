@@ -3,6 +3,8 @@
 ## Decision tree
 
 - Wrong numbers: inspect the deterministic engine, not the agent layer.
+- Wrong deterministic `/screening` or universe-coverage result: start with
+  [decision-diagnostics.md](decision-diagnostics.md).
 - No agent activity: check `entered_agent_layer` in the trace before blaming the
   model layer.
 - Bad memo: enable `DEBUG_LLM_IO` and read the resolved prompts and raw ADK

@@ -36,3 +36,10 @@ For example, many `data_gate/insufficient_price_data` entries indicate a data
 coverage problem. If coverage is complete but most entries are
 `checklist/score_below_watchlist`, the inputs are present and the result is a
 signal/checklist outcome instead.
+
+Worked example: if `NVDA` shows `checklist/score_below_watchlist: score 0/11,
+missing: none` and the universe histogram is dominated by checklist buckets,
+the data inputs are present and the strategy produced a weak signal. If the
+same ticker instead shows `data_gate/insufficient_price_data` and the
+histogram clusters there, debug ingestion and coverage before questioning the
+checklist thresholds.
