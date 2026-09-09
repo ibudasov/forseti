@@ -1,0 +1,9 @@
+{
+  "author": "fundamental_analyst",
+  "text": "The fundamentals are strong enough for a trade if the market data were fresher.",
+  "function_calls": [],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 13, "candidates_token_count": 10, "total_token_count": 23},
+  "error_code": null,
+  "error_message": null
+}

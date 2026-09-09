@@ -1,0 +1,9 @@
+{
+  "author": "critic_guardrail",
+  "text": "The deterministic no_trade outcome is supported by the weak checklist score.",
+  "function_calls": [],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 7, "candidates_token_count": 7, "total_token_count": 14},
+  "error_code": null,
+  "error_message": null
+}

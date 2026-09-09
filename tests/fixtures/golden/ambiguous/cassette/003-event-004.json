@@ -1,0 +1,9 @@
+{
+  "author": "critic_guardrail",
+  "text": "Keep this on the watchlist until the stale market data is refreshed.",
+  "function_calls": [],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 8, "candidates_token_count": 7, "total_token_count": 15},
+  "error_code": null,
+  "error_message": null
+}

@@ -1,0 +1,10 @@
+{
+  "ticker": "AMBIG",
+  "today": "2026-03-01",
+  "description": "A trade-worthy checklist score capped to watchlist by stale price data, making the case useful for replaying agent judgement without live model calls.",
+  "notes": [
+    "The trade_ready series ends at 168.00 with all nine checklist rules passing, so the ordered reasons list freezes the full scorecard evidence rather than a guessed memo.",
+    "Price bars intentionally stop on 2026-01-15 while the case runs on 2026-03-01, so stale_price_data is the lone warning and caps the would-be trade to watchlist before risk math runs.",
+    "A perfect score minus one warning yields confidence 0.95, and because the stale-data cap short-circuits trade execution every risk field remains null."
+  ]
+}

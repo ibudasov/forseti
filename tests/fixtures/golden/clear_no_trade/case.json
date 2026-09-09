@@ -1,0 +1,10 @@
+{
+  "ticker": "NOTRD",
+  "today": "2026-03-01",
+  "description": "Fresh complete data that stays below the watchlist threshold without triggering any hard veto or missing-data warning.",
+  "notes": [
+    "Revenue growth and positive free cash flow are the only passing checklist rules, so the reasons list freezes to those two entries in that order.",
+    "The latest close remains below SMA50 and SMA200, RSI is 40, volume_trend is 0.95, and VIX is 29.0, which keeps the checklist score at 4 and the decision at no_trade.",
+    "With score 4 and no warnings, the confidence formula clamps to 0.36 and every trade-specific field stays null."
+  ]
+}

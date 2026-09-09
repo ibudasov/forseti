@@ -1,0 +1,22 @@
+{
+  "decision": "watchlist",
+  "entry_range": null,
+  "stop_loss": null,
+  "take_profit": null,
+  "risk_reward": null,
+  "position_size_eur": null,
+  "confidence": 0.95,
+  "engine_version": "v1.rules.0",
+  "warnings": ["stale_price_data"],
+  "reasons": [
+    "revenue_growth: revenue_growth: 0.28 > 0.15 min",
+    "fcf: fcf: 17500000.00 > 0",
+    "debt_to_equity: debt_to_equity: 0.35 < 1.00 max",
+    "eps_trend: eps_trend: 0.14 > 0.00 min",
+    "close_vs_sma50: close: 168.00 > sma_50: 158.00",
+    "close_vs_sma200: close: 168.00 > sma_200: 132.00",
+    "rsi_healthy: rsi_14: 57.00 in [45, 65]",
+    "volume_trend: volume_trend: 1.1800 > 1.0",
+    "vix_calm: vix: 18.00 < 25 calm threshold"
+  ]
+}

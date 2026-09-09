@@ -1,0 +1,9 @@
+{
+  "author": "technical_analyst",
+  "text": "Price is lagging both moving averages and momentum is not healthy enough for a setup.",
+  "function_calls": [],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 13, "candidates_token_count": 10, "total_token_count": 23},
+  "error_code": null,
+  "error_message": null
+}

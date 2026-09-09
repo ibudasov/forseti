@@ -1,0 +1,9 @@
+{
+  "author": "decision_synthesizer",
+  "text": "{\"decision\":\"no_trade\",\"confidence\":0.36,\"reasons\":[]}",
+  "function_calls": ["calculate_risk"],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 15, "candidates_token_count": 8, "total_token_count": 23},
+  "error_code": null,
+  "error_message": null
+}

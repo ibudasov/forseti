@@ -1,0 +1,9 @@
+{
+  "author": "decision_synthesizer",
+  "text": "{\"decision\":\"watchlist\",\"confidence\":0.95,\"reasons\":[]}",
+  "function_calls": ["calculate_risk"],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 16, "candidates_token_count": 8, "total_token_count": 24},
+  "error_code": null,
+  "error_message": null
+}

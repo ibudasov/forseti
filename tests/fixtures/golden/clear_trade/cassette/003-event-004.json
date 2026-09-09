@@ -1,0 +1,9 @@
+{
+  "author": "critic_guardrail",
+  "text": "No contradictions found; keep the deterministic trade numbers unchanged.",
+  "function_calls": [],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 8, "candidates_token_count": 7, "total_token_count": 15},
+  "error_code": null,
+  "error_message": null
+}
