@@ -189,6 +189,7 @@ class AgenticAnalysisWorkflow:
         except _AdkExecutionError as exc:
             self._record_unreached_specialists(trace_recorder, exc.result.observed_agents)
             final_warnings = list(response.warnings) + warnings + exc.result.warnings
+            response.warnings = final_warnings
             partial_trace = self._build_trace(
                 run_id=run_id,
                 ticker=resolved_ticker,

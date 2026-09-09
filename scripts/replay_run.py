@@ -16,7 +16,7 @@ from sqlmodel import Session
 from sqlmodel import SQLModel
 
 from agents.config import load_agent_config
-from agents.orchestration.cassette_runner import build_cassette_runner_factory
+from agents.orchestration.cassette_runner import CassetteNotFoundError, build_cassette_runner_factory
 from agents.orchestration.workflow import AgenticAnalysisWorkflow
 from app.db.session import get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
@@ -84,6 +84,8 @@ def replay_golden_case(case_name: str) -> tuple[AnalyzeResponse, dict[str, Any]]
 def replay_recorded_run(run_id: str) -> tuple[AnalyzeResponse, dict[str, Any]]:
     debug_directory = Path(os.environ.get("DEBUG_LLM_IO_DIR", DEFAULT_DEBUG_DIR))
     run_directory = debug_directory / run_id
+    if not run_directory.is_dir():
+        raise CassetteNotFoundError(f"Cassette directory not found: {run_directory}")
     run_config = _load_json(run_directory / "000-run-config.json")
     _load_json(run_directory / "002-user-message.json")
     summary = _load_json(run_directory / "999-summary.json")

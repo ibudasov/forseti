@@ -18,7 +18,7 @@ help:
 	@echo "  make migration name=...  # Generate a new Alembic revision"
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
-	@echo "  make replay RUN_ID=... # Replay an offline golden cassette"
+	@echo "  make replay RUN_ID=... # Replay a recorded run offline"
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
