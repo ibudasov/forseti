@@ -299,6 +299,248 @@ class TestScreeningEndpoint:
         assert [item["decision"] for item in body["items"]] == ["trade", "watchlist", "no_trade"]
 
 
+class TestScreeningDiagnostics:
+    @staticmethod
+    def _seed_screening_securities(db_engine):
+        with Session(db_engine) as session:
+            session.add_all(
+                [
+                    Security(ticker="MSFT", name="Microsoft", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="AMD", name="AMD", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="AAPL", name="Apple", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="ERR1", name="Error One", exchange="NASDAQ", sector_tag="ai"),
+                    Security(ticker="QQQ", name="Nasdaq", exchange="NASDAQ", sector_tag="ai", is_active=False),
+                ]
+            )
+            session.commit()
+
+    @staticmethod
+    def _diagnosis(stage, rule_id, detail, checklist_score=None):
+        from app.schemas.analyze import DecisionDiagnosis
+
+        return DecisionDiagnosis(
+            stage=stage,
+            rule_id=rule_id,
+            detail=detail,
+            checklist_score=checklist_score,
+            debug_reason=f"{stage}/{rule_id}: {detail}",
+        )
+
+    def test_get_screening_verbose_false_keeps_diagnosis_null_and_populates_debug_reason(
+        self,
+        db_client,
+        db_engine,
+        monkeypatch,
+    ):
+        from app.schemas.analyze import AnalyzeResponse
+
+        self._seed_screening_securities(db_engine)
+
+        def fake_analyze(symbol, engine=None, today=None):
+            mapping = {
+                "MSFT": AnalyzeResponse(
+                    ticker="MSFT",
+                    decision="trade",
+                    confidence=0.9,
+                    reasons=["screened trade"],
+                    warnings=[],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                    diagnosis=self._diagnosis("checklist", "checklist_passed", "score 11/11, missing: none", 11),
+                ),
+                "AMD": AnalyzeResponse(
+                    ticker="AMD",
+                    decision="watchlist",
+                    confidence=0.5,
+                    reasons=["screened watchlist"],
+                    warnings=["insufficient_price_data"],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                    diagnosis=self._diagnosis(
+                        "data_gate",
+                        "insufficient_price_data",
+                        "fewer than 200 price bars available",
+                    ),
+                ),
+                "AAPL": AnalyzeResponse(
+                    ticker="AAPL",
+                    decision="no_trade",
+                    confidence=0.0,
+                    reasons=["screened no_trade"],
+                    warnings=[],
+                    engine_version="v1.rules.0",
+                    trace_id="",
+                    diagnosis=self._diagnosis(
+                        "checklist",
+                        "score_below_watchlist",
+                        "score 0/11, missing: none",
+                        0,
+                    ),
+                ),
+            }
+            if symbol == "ERR1":
+                raise RuntimeError("broken\nsecond line")
+            return mapping[symbol]
+
+        monkeypatch.setattr("app.services.analyzer.analyze", fake_analyze)
+
+        response = db_client.get("/screening")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["summary"] == {"total": 4, "trade": 1, "watchlist": 1, "no_trade": 1, "errors": 1}
+        assert [item["ticker"] for item in body["items"]] == ["MSFT", "AMD", "AAPL", "ERR1"]
+        assert [item["decision"] for item in body["items"]] == ["trade", "watchlist", "no_trade", None]
+        ok_items = [item for item in body["items"] if item["status"] == "ok"]
+        assert all(item["debug_reason"] for item in ok_items)
+        assert all(item["diagnosis"] is None for item in ok_items)
+        assert [item["checklist_score"] for item in ok_items] == [11, None, 0]
+        error_item = body["items"][-1]
+        assert error_item["status"] == "error"
+        assert error_item["debug_reason"] == "error/RuntimeError: broken"
+
+    def test_get_screening_verbose_true_includes_diagnosis(self, db_client, db_engine, monkeypatch):
+        from app.schemas.analyze import AnalyzeResponse
+
+        self._seed_screening_securities(db_engine)
+
+        def fake_analyze(symbol, engine=None, today=None):
+            if symbol == "ERR1":
+                raise RuntimeError("broken")
+            return AnalyzeResponse(
+                ticker=symbol,
+                decision="no_trade" if symbol == "AAPL" else "watchlist",
+                confidence=0.0 if symbol == "AAPL" else 0.5,
+                reasons=["screened"],
+                warnings=[],
+                engine_version="v1.rules.0",
+                trace_id="",
+                diagnosis=self._diagnosis(
+                    "checklist",
+                    "score_below_watchlist",
+                    "score 0/11, missing: none",
+                    0,
+                ),
+            )
+
+        monkeypatch.setattr("app.services.analyzer.analyze", fake_analyze)
+
+        response = db_client.get("/screening?verbose=true")
+
+        assert response.status_code == 200
+        body = response.json()
+        ok_items = [item for item in body["items"] if item["status"] == "ok"]
+        assert all(item["diagnosis"] is not None for item in ok_items)
+        assert ok_items[0]["diagnosis"]["stage"] == "checklist"
+        assert ok_items[0]["diagnosis"]["debug_reason"] == "checklist/score_below_watchlist: score 0/11, missing: none"
+        assert body["items"][-1]["diagnosis"] is None
+
+
+class TestUniverseDiagnosticsEndpoint:
+    def test_get_universe_diagnostics_empty_universe_returns_zeroed_report(self, db_client):
+        response = db_client.get("/diagnostics/universe")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["universe_size"] == 0
+        assert body["items"] == []
+        assert body["coverage"] == {
+            "tickers_with_price_bars": 0,
+            "tickers_with_200_bars": 0,
+            "tickers_with_technical_features": 0,
+            "tickers_with_fundamentals": 0,
+            "tickers_with_earnings_events": 0,
+            "tickers_with_document_chunks": 0,
+            "latest_macro_daily_date": None,
+        }
+        assert body["blocked_by"] == {
+            "data_gate": {},
+            "hard_veto": {},
+            "checklist": {},
+            "risk_math": {},
+            "passed": 0,
+        }
+
+    def test_get_universe_diagnostics_seeded_mix_is_read_only_and_reconciles(self, db_client, db_engine):
+        from datetime import date, datetime, timezone
+        from decimal import Decimal
+
+        from sqlalchemy import func
+        from sqlmodel import select
+
+        from app.db.models import DocumentChunk, MacroDaily, Recommendation, SourceType
+
+        today = date(2026, 1, 10)
+        with Session(db_engine) as session:
+            bare = Security(ticker="BARE1", name="Bare One", exchange="NYSE", sector_tag="ai")
+            one_bar = Security(ticker="ONEB1", name="One Bar", exchange="NYSE", sector_tag="ai")
+            inactive = Security(ticker="DEAD1", name="Dead One", exchange="NYSE", sector_tag="ai", is_active=False)
+            session.add_all([bare, one_bar, inactive])
+            session.commit()
+            session.refresh(bare)
+            session.refresh(one_bar)
+            session.add(
+                PriceBar(
+                    security_id=one_bar.id,
+                    bar_date=today,
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10"),
+                    volume=100,
+                )
+            )
+            session.add(
+                DocumentChunk(
+                    ticker="ONEB1",
+                    source_type=SourceType.company_news,
+                    source_url="https://example.invalid/oneb1",
+                    source_hash="oneb1-hash",
+                    published_at=datetime(2026, 1, 9, tzinfo=timezone.utc),
+                    chunk_index=0,
+                    text="ONEB1 coverage note",
+                )
+            )
+            session.add(MacroDaily(obs_date=today, vix=Decimal("19.0")))
+            session.commit()
+
+        with Session(db_engine) as session:
+            before_count = session.exec(select(func.count()).select_from(Recommendation)).one()
+
+        response = db_client.get("/diagnostics/universe")
+
+        with Session(db_engine) as session:
+            after_count = session.exec(select(func.count()).select_from(Recommendation)).one()
+
+        assert response.status_code == 200
+        assert before_count == after_count == 0
+        body = response.json()
+        assert body["universe_size"] == 2
+        assert [item["ticker"] for item in body["items"]] == ["BARE1", "ONEB1"]
+        assert "DEAD1" not in [item["ticker"] for item in body["items"]]
+        assert body["coverage"] == {
+            "tickers_with_price_bars": 1,
+            "tickers_with_200_bars": 0,
+            "tickers_with_technical_features": 0,
+            "tickers_with_fundamentals": 0,
+            "tickers_with_earnings_events": 0,
+            "tickers_with_document_chunks": 1,
+            "latest_macro_daily_date": "2026-01-10",
+        }
+        blocked_by = body["blocked_by"]
+        total = sum(sum(value.values()) if isinstance(value, dict) else value for value in blocked_by.values())
+        assert total == body["universe_size"]
+        assert blocked_by["data_gate"] == {"no_price_data": 1, "insufficient_price_data": 1}
+        assert blocked_by["hard_veto"] == {}
+        assert blocked_by["checklist"] == {}
+        assert blocked_by["risk_math"] == {}
+        assert blocked_by["passed"] == 0
+        assert body["items"][0]["debug_reason"] == "data_gate/no_price_data: no price data available"
+        assert body["items"][1]["debug_reason"] == (
+            "data_gate/insufficient_price_data: fewer than 200 price bars available"
+        )
+
+
 class TestTickerEndpoint:
     def test_get_ticker_happy_path_full_data(self, db_client, db_engine):
         from decimal import Decimal

@@ -39,6 +39,7 @@ def test_checklist_diagnosis_reports_score_band_and_missing_inputs():
 
 
 def test_checklist_score_boundaries():
+    assert from_checklist(4, [], []).rule_id == "score_below_watchlist"
     assert from_checklist(5, [], []).rule_id == "score_below_trade"
     assert from_checklist(7, [], []).rule_id == "score_below_trade"
     assert from_checklist(8, [], []).rule_id == "checklist_passed"

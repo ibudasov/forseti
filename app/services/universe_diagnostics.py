@@ -46,7 +46,7 @@ def build_universe_diagnostics(engine=None, today: date | None = None) -> Univer
         technical = get_latest_technical_feature(ticker, engine=engine)
         fundamental = get_latest_fundamental(ticker, engine=engine)
         earnings_count = count_earnings_events(ticker, engine=engine)
-        next_earnings = get_next_earnings_event(ticker, date.min, engine=engine)
+        next_earnings = get_next_earnings_event(ticker, today, engine=engine)
         document_count = count_document_chunks(ticker, engine=engine)
         coverage.tickers_with_price_bars += price_bar_count > 0
         coverage.tickers_with_200_bars += price_bar_count >= 200

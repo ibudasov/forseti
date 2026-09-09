@@ -173,7 +173,11 @@ def analyze(
             warnings=gate_warnings,
             engine_version=ENGINE_VERSION,
             trace_id="",
-            diagnosis=from_data_gate(gates["gate_reasons"], gate_warnings),
+            diagnosis=from_data_gate(
+                gates["gate_reasons"],
+                gate_warnings,
+                gates.get("rule_id"),
+            ),
         )
 
     # Get all required data for evaluation
@@ -400,6 +404,7 @@ def _evaluate_data_gate(
         "warnings": warnings,
         "bars": bars,
         "gate_reasons": gate_reasons,
+        "rule_id": None,
     }
 
 
