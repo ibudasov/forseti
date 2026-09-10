@@ -27,7 +27,6 @@ jobs:
       - name: Mark PR ready for review
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: >
-          gh api
-          --method PATCH
-          repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/ready_for_review
+          gh pr ready ${{ github.event.pull_request.number }}
