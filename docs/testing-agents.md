@@ -38,3 +38,5 @@ Golden cases live in `tests/fixtures/golden/<case-name>/` and freeze both the
 deterministic database inputs and the normalized `003-event-*.json` ADK event
 cassette used for offline replay. Re-run one recorded trace without credentials
 or network access with `make replay RUN_ID=<trace run id>`.
+
+<!-- Test PR marker for mark-as-ready workflow verification. -->
