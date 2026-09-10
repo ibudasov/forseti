@@ -76,7 +76,7 @@ def analyze_request(request: "AnalyzeRequest", engine: Optional["Engine"] = None
 
     normalized_ticker = validate_and_normalize_ticker(request.ticker)
     trace_id = str(uuid4())
-    today = datetime.now(timezone.utc).date()
+    today = request.as_of_date or datetime.now(timezone.utc).date()
 
     logger.info(
         "analyze_request_received",

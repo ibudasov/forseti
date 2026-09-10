@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Iterable, Literal, Optional
 from uuid import uuid4
 
@@ -129,6 +129,29 @@ def _merge_token_usage(total: dict[str, int], event_usage: dict[str, int]) -> No
         total[field_name] = total.get(field_name, 0) + value
 
 
+def _analysis_date(request: AnalyzeRequest) -> date | None:
+    return request.as_of_date
+
+
+def _deterministic_fields(response: AnalyzeResponse) -> dict[str, Any]:
+    return {
+        "decision": response.decision,
+        "entry_range": list(response.entry_range) if response.entry_range is not None else None,
+        "stop_loss": response.stop_loss,
+        "take_profit": list(response.take_profit) if response.take_profit is not None else None,
+        "risk_reward": response.risk_reward,
+        "position_size_eur": response.position_size_eur,
+        "confidence": response.confidence,
+        "engine_version": response.engine_version,
+        "warnings": sorted(set(response.warnings)),
+        "reasons": list(response.reasons),
+    }
+
+
+def _runner_ignores_registry(runner_factory: RunnerFactory) -> bool:
+    return bool(getattr(runner_factory, "ignores_registry", False))
+
+
 class AgenticAnalysisWorkflow:
     """Application-level port for linear and ADK-backed analysis execution."""
 
@@ -153,10 +176,11 @@ class AgenticAnalysisWorkflow:
 
         resolved_ticker = self._resolve_ticker(ticker_reference, trace_recorder)
         request = request or AnalyzeRequest(ticker=resolved_ticker)
+        analysis_date = _analysis_date(request)
         response = self._run_deterministic_pipeline(request, trace_recorder)
-        registry = self._build_registry(trace_recorder, warnings)
+        registry = self._build_registry(trace_recorder, warnings, today=analysis_date)
 
-        self._record_run_metadata(recorder, run_id, resolved_ticker, registry)
+        self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
         user_message = f"Analyze ticker {resolved_ticker}"
         recorder.record_user_message(user_message)
 
@@ -165,6 +189,7 @@ class AgenticAnalysisWorkflow:
         except _AdkExecutionError as exc:
             self._record_unreached_specialists(trace_recorder, exc.result.observed_agents)
             final_warnings = list(response.warnings) + warnings + exc.result.warnings
+            response.warnings = final_warnings
             partial_trace = self._build_trace(
                 run_id=run_id,
                 ticker=resolved_ticker,
@@ -182,6 +207,8 @@ class AgenticAnalysisWorkflow:
                     "event_count": exc.result.event_count,
                     "total_token_usage": exc.result.token_usage,
                     "final_decision": response.decision,
+                    "deterministic_fields": _deterministic_fields(response),
+                    "observed_agents": exc.result.observed_agents,
                     "warnings": final_warnings,
                     "error": str(exc),
                     "wall_clock_ms": partial_trace.total_latency_ms,
@@ -214,6 +241,8 @@ class AgenticAnalysisWorkflow:
                 "event_count": adk_result.event_count,
                 "total_token_usage": adk_result.token_usage,
                 "final_decision": response.decision,
+                "deterministic_fields": _deterministic_fields(response),
+                "observed_agents": adk_result.observed_agents,
                 "warnings": final_warnings,
                 "wall_clock_ms": total_latency_ms,
             }
@@ -254,8 +283,16 @@ class AgenticAnalysisWorkflow:
         )
         return response
 
-    def _build_registry(self, trace_recorder: TraceRecorder, warnings: list[str]) -> AgentRegistry:
-        registry = build_agent_registry(config=self.config, engine=self.engine)
+    def _build_registry(
+        self,
+        trace_recorder: TraceRecorder,
+        warnings: list[str],
+        *,
+        today: date | None,
+    ) -> AgentRegistry:
+        registry = build_agent_registry(config=self.config, engine=self.engine, today=today)
+        if _runner_ignores_registry(self.runner_factory):
+            return registry
         if RETRIEVER_TOOL_NAME not in registry.tools:
             trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
             warnings.append("retriever_tool_unavailable")
@@ -422,12 +459,21 @@ class AgenticAnalysisWorkflow:
             if agent_name not in observed:
                 trace_recorder.record_skipped(agent_name, reason)
 
-    def _record_run_metadata(self, recorder, run_id: str, ticker: str, registry: AgentRegistry) -> None:
+    def _record_run_metadata(
+        self,
+        recorder,
+        run_id: str,
+        ticker: str,
+        registry: AgentRegistry,
+        *,
+        today: date | None,
+    ) -> None:
         git_sha = os.getenv("GITHUB_SHA")
         recorder.record_run_config(
             {
                 "run_id": run_id,
                 "ticker": ticker,
+                "today": today.isoformat() if today is not None else None,
                 "model": self.config.model_name,
                 "temperature": self.config.temperature,
                 "timeout_seconds": self.config.timeout_seconds,

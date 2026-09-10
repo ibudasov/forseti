@@ -1,0 +1,37 @@
+{
+  "security": {
+    "ticker": "TRDUP",
+    "name": "Tradeup Robotics",
+    "exchange": "NASDAQ",
+    "sector_tag": "robotics"
+  },
+  "price_bar": {
+    "series": "trade_ready",
+    "bars": 250,
+    "start": 100.0,
+    "end_date": "2026-02-28"
+  },
+  "technical_feature": {
+    "as_of_date": "2026-02-28",
+    "rsi_14": 55.0,
+    "sma_50": 168.0,
+    "sma_200": 140.0,
+    "volume_trend": 1.12
+  },
+  "fundamental": {
+    "as_of_date": "2025-12-31",
+    "revenue_growth": 0.32,
+    "fcf": 21000000.0,
+    "debt_to_equity": 0.4,
+    "eps_trend": 0.18,
+    "margins": 0.29
+  },
+  "earnings_event": {
+    "report_date": "2026-04-30",
+    "confirmed": false
+  },
+  "macro_daily": {
+    "obs_date": "2026-03-01",
+    "vix": 19.0
+  }
+}

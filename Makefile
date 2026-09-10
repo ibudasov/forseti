@@ -18,7 +18,7 @@ help:
 	@echo "  make migration name=...  # Generate a new Alembic revision"
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
-	@echo "  make replay RUN_ID=... # Replay an offline golden cassette"
+	@echo "  make replay RUN_ID=... # Replay a recorded run offline"
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
@@ -59,11 +59,13 @@ test: check-compose
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
 
 replay: check-compose
-	@if [ -z "$(RUN_ID)" ]; then echo "Error: RUN_ID is required (for example RUN_ID=happy-path)"; exit 1; fi
+	@if [ -z "$(RUN_ID)" ]; then echo "Error: RUN_ID is required. Run 'make replay RUN_ID=<run id from the trace>'"; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm \
-		-v "$$PWD/agents:/app/agents:ro" \
-		-v "$$PWD/tests/fixtures/golden:/app/tests/fixtures/golden:ro" \
-		app python -m agents.observability.cassette --run-id "$(RUN_ID)"
+		-e DEBUG_LLM_IO_DIR=$${DEBUG_LLM_IO_DIR:-/tmp/forseti-llm-io} \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$${DEBUG_LLM_IO_DIR:-/tmp/forseti-llm-io}:$${DEBUG_LLM_IO_DIR:-/tmp/forseti-llm-io}" \
+		app python -m scripts.replay_run --run-id "$(RUN_ID)" --json
 
 ingest: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \

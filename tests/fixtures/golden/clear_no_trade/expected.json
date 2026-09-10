@@ -1,0 +1,15 @@
+{
+  "decision": "no_trade",
+  "entry_range": null,
+  "stop_loss": null,
+  "take_profit": null,
+  "risk_reward": null,
+  "position_size_eur": null,
+  "confidence": 0.36,
+  "engine_version": "v1.rules.0",
+  "warnings": [],
+  "reasons": [
+    "revenue_growth: revenue_growth: 0.20 > 0.15 min",
+    "fcf: fcf: 5000000.00 > 0"
+  ]
+}

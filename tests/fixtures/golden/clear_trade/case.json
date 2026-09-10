@@ -1,0 +1,10 @@
+{
+  "ticker": "TRDUP",
+  "today": "2026-03-01",
+  "description": "A clean trade candidate with fresh trend data, strong checklist inputs, and earnings far enough away to avoid vetoes.",
+  "notes": [
+    "The 250-bar trade_ready series ends at a 178.00 close after a recent swing high, so the risk engine computes entry_range [174.44, 181.56] from the ±2% entry buffer and anchors stop_loss at 170.00.",
+    "The same shape leaves the trailing 60-bar swing high at 199.00 and the 2R extension at 194.00, producing the frozen take_profit values [199.0, 194.0], risk_reward 2.63, and position_size_eur 1452.48.",
+    "Every checklist rule passes and there are no warnings, so confidence stays at 1.0 and the ordered reasons list records all nine passing rules."
+  ]
+}

@@ -1,6 +1,8 @@
 """Tests for observed ADK workflow trace metadata."""
 from __future__ import annotations
 
+import json
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +12,7 @@ from agents.config import load_agent_config
 from agents.observability.llm_io_recorder import FileLlmIoRecorder, NullLlmIoRecorder
 from agents.orchestration.registry import AgentRegistry, build_agent_registry as build_real_agent_registry
 from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
-from app.schemas.analyze import AnalyzeResponse
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
 from app.settings import Settings
 
 
@@ -89,7 +91,7 @@ def _workflow(monkeypatch, *, events=(), raise_error: Exception | None = None, w
     monkeypatch.setattr(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None: AgentRegistry(tools=tools, specialists={}, root_agent=None),
+        lambda config, engine=None, today=None: AgentRegistry(tools=tools, specialists={}, root_agent=None),
     )
     if engine is None:
         monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
@@ -255,7 +257,7 @@ def test_explicit_file_recorder_writes_run_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None: registry,
+        lambda config, engine=None, today=None: registry,
     )
     monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
     recorder = FileLlmIoRecorder(tmp_path / "run-1")
@@ -268,7 +270,7 @@ def test_explicit_file_recorder_writes_run_artifacts(monkeypatch, tmp_path):
         llm_io_recorder=recorder,
     )
 
-    workflow.analyze("NVDA")
+    workflow.analyze("NVDA", request=AnalyzeRequest(ticker="NVDA", as_of_date=date(2026, 3, 1)))
 
     assert [path.name for path in sorted(recorder.run_directory.iterdir())] == [
         "000-run-config.json",
@@ -278,6 +280,10 @@ def test_explicit_file_recorder_writes_run_artifacts(monkeypatch, tmp_path):
         "003-event-001.json",
         "999-summary.json",
     ]
+    run_config = json.loads((recorder.run_directory / "000-run-config.json").read_text(encoding="utf-8"))
+    summary = json.loads((recorder.run_directory / "999-summary.json").read_text(encoding="utf-8"))
+    assert run_config["today"] == "2026-03-01"
+    assert summary["deterministic_fields"]["decision"] == "no_trade"
 
 
 def test_default_workflow_uses_null_recorder_when_capture_disabled(monkeypatch):

@@ -54,7 +54,7 @@ def _workflow(monkeypatch, runner):
     monkeypatch.setattr(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None: AgentRegistry(tools={}, specialists={}, root_agent=None),
+        lambda config, engine=None, today=None: AgentRegistry(tools={}, specialists={}, root_agent=None),
     )
     monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
     return AgenticAnalysisWorkflow(

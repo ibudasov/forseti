@@ -47,6 +47,27 @@ Each directory contains:
 Each file is bounded to 1 MiB and truncated with `"truncated": true` when
 necessary.
 
+## Replay a failed run
+
+Once `DEBUG_LLM_IO=true` has captured a run, replay it offline with the saved
+event files instead of calling Gemini again:
+
+```bash
+make replay RUN_ID=<run_id_from_trace>
+```
+
+The replay target mounts `DEBUG_LLM_IO_DIR` (default `/tmp/forseti-llm-io`) into
+the app container, reads `000-run-config.json`, `002-user-message.json`, the
+`003-event-*.json` cassette files, and the expected deterministic snapshot from
+`999-summary.json`, then reruns the workflow through the existing
+`runner_factory` seam.
+
+- exit code `0`: deterministic fields matched the recorded run
+- exit code `1`: replay diverged and prints a field-by-field diff
+
+If replay fails with `CassetteNotFoundError`, double-check the `run_id` and the
+capture directory before debugging the workflow itself.
+
 ## How to run the ADK dev UI
 
 Run `make adk-web`, then open http://127.0.0.1:8010.

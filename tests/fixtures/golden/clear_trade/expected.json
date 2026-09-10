@@ -1,0 +1,22 @@
+{
+  "decision": "trade",
+  "entry_range": [174.44, 181.56],
+  "stop_loss": 170.0,
+  "take_profit": [199.0, 194.0],
+  "risk_reward": 2.63,
+  "position_size_eur": 1452.48,
+  "confidence": 1.0,
+  "engine_version": "v1.rules.0",
+  "warnings": [],
+  "reasons": [
+    "revenue_growth: revenue_growth: 0.32 > 0.15 min",
+    "fcf: fcf: 21000000.00 > 0",
+    "debt_to_equity: debt_to_equity: 0.40 < 1.00 max",
+    "eps_trend: eps_trend: 0.18 > 0.00 min",
+    "close_vs_sma50: close: 178.00 > sma_50: 168.00",
+    "close_vs_sma200: close: 178.00 > sma_200: 140.00",
+    "rsi_healthy: rsi_14: 55.00 in [45, 65]",
+    "volume_trend: volume_trend: 1.1200 > 1.0",
+    "vix_calm: vix: 19.00 < 25 calm threshold"
+  ]
+}

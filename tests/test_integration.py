@@ -1,15 +1,18 @@
 """High-level integration tests for Forseti API endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
+import pytest
 from sqlmodel import Session
+from sqlmodel import select
 
 from agents.config import load_agent_config
 from agents.orchestration.workflow import AgenticAnalysisWorkflow
-from app.db.models import PriceBar, Security
+from app.db.models import PriceBar, Recommendation, Security
 from app.main import app
 from app.main import get_analysis_engine
+from app.schemas.analyze import AnalyzeResponse
 from app.settings import Settings
+from tests.fixtures.golden.loader import load_golden_case
 
 
 @pytest.fixture
@@ -161,6 +164,28 @@ class TestAnalyzeEndpoint:
         assert body["decision"] == "watchlist"
         assert body["time_stop_at"] is None
         assert body["warnings"] == ["insufficient_price_data"]
+
+
+class TestGoldenCaseEndToEnd:
+    def test_post_analyze_clear_trade_matches_expected_and_persists_recommendation(self, db_client, db_engine):
+        case = load_golden_case("clear_trade")
+        with Session(db_engine) as session:
+            case.seed(session)
+
+        response = db_client.post(
+            "/analyze",
+            json={"ticker": case.ticker, "as_of_date": case.today.isoformat()},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        case.assert_matches(AnalyzeResponse(**body))
+
+        with Session(db_engine) as session:
+            recommendation = session.exec(select(Recommendation)).one()
+
+        assert recommendation.decision == case.expected["decision"]
+        assert recommendation.engine_version == case.expected["engine_version"]
 
 
 class TestRunTraceEndpoint:

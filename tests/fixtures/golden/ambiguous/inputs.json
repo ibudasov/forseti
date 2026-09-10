@@ -1,0 +1,37 @@
+{
+  "security": {
+    "ticker": "AMBIG",
+    "name": "Ambiguity Aerospace",
+    "exchange": "NASDAQ",
+    "sector_tag": "space"
+  },
+  "price_bar": {
+    "series": "trade_ready",
+    "bars": 250,
+    "start": 90.0,
+    "end_date": "2026-01-15"
+  },
+  "technical_feature": {
+    "as_of_date": "2026-01-15",
+    "rsi_14": 57.0,
+    "sma_50": 158.0,
+    "sma_200": 132.0,
+    "volume_trend": 1.18
+  },
+  "fundamental": {
+    "as_of_date": "2025-12-31",
+    "revenue_growth": 0.28,
+    "fcf": 17500000.0,
+    "debt_to_equity": 0.35,
+    "eps_trend": 0.14,
+    "margins": 0.27
+  },
+  "earnings_event": {
+    "report_date": "2026-05-30",
+    "confirmed": false
+  },
+  "macro_daily": {
+    "obs_date": "2026-03-01",
+    "vix": 18.0
+  }
+}

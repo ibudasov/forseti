@@ -1,0 +1,9 @@
+{
+  "author": "trade_analyst_supervisor",
+  "text": "",
+  "function_calls": ["structured_data_collector", "transfer_to_agent"],
+  "function_responses": [],
+  "usage_metadata": {"prompt_token_count": 18, "candidates_token_count": 7, "total_token_count": 25},
+  "error_code": null,
+  "error_message": null
+}

@@ -1,0 +1,38 @@
+{
+  "security": {
+    "ticker": "NOTRD",
+    "name": "Notrade Systems",
+    "exchange": "NYSE",
+    "sector_tag": "ai"
+  },
+  "price_bar": {
+    "series": "uptrend",
+    "bars": 250,
+    "start": 82.0,
+    "daily_gain": 0.08,
+    "end_date": "2026-02-28"
+  },
+  "technical_feature": {
+    "as_of_date": "2026-02-28",
+    "rsi_14": 40.0,
+    "sma_50": 103.0,
+    "sma_200": 105.0,
+    "volume_trend": 0.95
+  },
+  "fundamental": {
+    "as_of_date": "2025-12-31",
+    "revenue_growth": 0.2,
+    "fcf": 5000000.0,
+    "debt_to_equity": 1.2,
+    "eps_trend": -0.05,
+    "margins": 0.1
+  },
+  "earnings_event": {
+    "report_date": "2026-05-15",
+    "confirmed": false
+  },
+  "macro_daily": {
+    "obs_date": "2026-03-01",
+    "vix": 29.0
+  }
+}
