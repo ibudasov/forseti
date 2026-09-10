@@ -1,0 +1,2 @@
+Auto-merge validation throwaway marker.
+This no-op file exists only to verify that green checks can trigger automatic merge.
