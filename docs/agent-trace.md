@@ -1,5 +1,6 @@
 # Agent trace semantics
 
+
 `POST /analyze?include_trace=true` and `GET /runs/{run_id}` return an `AnalysisTrace` that records what actually happened during the run.
 
 ## Step statuses
