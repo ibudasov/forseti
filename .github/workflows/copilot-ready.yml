@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Mark PR ready for review
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PULL_REQUEST_WRITE_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: >
           gh pr ready ${{ github.event.pull_request.number }}
