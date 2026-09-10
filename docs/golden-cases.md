@@ -6,7 +6,7 @@ Golden cases freeze three things for one representative analysis:
 2. the run parameters (`ticker`, frozen `today`, and optional cassette)
 3. the expected deterministic output fields
 
-They live under `tests/fixtures/golden/<case-name>/` and are intentionally small:
+They live under `tests/fixtures/golden/<case-name>/` and are deliberately small:
 
 ```text
 tests/fixtures/golden/
