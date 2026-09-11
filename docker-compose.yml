@@ -2,10 +2,8 @@ services:
   postgresql:
     image: pgvector/pgvector:pg15
     restart: unless-stopped
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-      - POSTGRES_DB=${POSTGRES_DB:-forseti}
+    env_file:
+      - .env
     ports:
       - "5432:5432"
     volumes:
@@ -21,35 +19,8 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgresql:5432/${POSTGRES_DB:-forseti}}
-      - POSTGRES_USER=${POSTGRES_USER:-user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-      - POSTGRES_DB=${POSTGRES_DB:-forseti}
-      - POSTGRES_HOST=postgresql
-      - POSTGRES_PORT=5432
-      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
-      - "EDGAR_USER_AGENT=${EDGAR_USER_AGENT:-Forseti/0.1 (gazer-flair9o@icloud.com)}"
-      - INGEST_PRICE_PERIOD=${INGEST_PRICE_PERIOD:-2y}
-      - ACCOUNT_CAPITAL_EUR=${ACCOUNT_CAPITAL_EUR:-10000.0}
-      - RISK_PER_TRADE_PCT=${RISK_PER_TRADE_PCT:-0.01}
-      - CHUNK_SIZE_TOKENS=${CHUNK_SIZE_TOKENS:-800}
-      - CHUNK_OVERLAP_TOKENS=${CHUNK_OVERLAP_TOKENS:-100}
-      - VERTEX_AI_PROJECT=${VERTEX_AI_PROJECT:-}
-      - VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-us-central1}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-004}
-      - EMBEDDING_DIM=${EMBEDDING_DIM:-768}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-001}
-      - RAG_FAIL_LOUD=${RAG_FAIL_LOUD:-false}
-      - PIPELINE_MODE=${PIPELINE_MODE:-linear}
-      - AGENT_MODEL_TEMPERATURE=${AGENT_MODEL_TEMPERATURE:-0.2}
-      - AGENT_TIMEOUT_SECONDS=${AGENT_TIMEOUT_SECONDS:-30}
-      - AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-1}
-      - DEBUG_LLM_IO=${DEBUG_LLM_IO:-false}
-      - DEBUG_LLM_IO_DIR=${DEBUG_LLM_IO_DIR:-/tmp/forseti-llm-io}
-      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-TRUE}
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+    env_file:
+      - .env
     depends_on:
       postgresql:
         condition: service_healthy

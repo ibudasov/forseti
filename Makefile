@@ -49,8 +49,11 @@ db-shell: check-compose
 test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e PIPELINE_MODE=linear \
+		-e ALLOW_PIPELINE_OVERRIDE=false \
+		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
