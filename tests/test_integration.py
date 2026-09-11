@@ -1,16 +1,19 @@
 """High-level integration tests for Forseti API endpoints."""
 
+from datetime import datetime
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlmodel import Session
 from sqlmodel import select
 
-from agents.config import load_agent_config
+from agents.config import AGENTIC_PIPELINE_MODE, LINEAR_PIPELINE_MODE, AgentWorkflowConfig, load_agent_config
 from agents.orchestration.workflow import AgenticAnalysisWorkflow
 from app.db.models import PriceBar, Recommendation, Security
 from app.main import app
 from app.main import get_analysis_engine
-from app.schemas.analyze import AnalyzeResponse
+from app.main import get_pipeline_override_allowed
+from app.schemas.analyze import AnalysisTrace, AnalyzeResponse
 from app.settings import Settings
 from tests.fixtures.golden.loader import load_golden_case
 
@@ -186,6 +189,177 @@ class TestGoldenCaseEndToEnd:
 
         assert recommendation.decision == case.expected["decision"]
         assert recommendation.engine_version == case.expected["engine_version"]
+
+
+class TestPipelineOverride:
+    @staticmethod
+    def _config(mode: str) -> AgentWorkflowConfig:
+        return AgentWorkflowConfig(
+            pipeline_mode=mode,
+            model_name="test-model",
+            temperature=0.2,
+            timeout_seconds=30.0,
+            max_retries=1,
+        )
+
+    @staticmethod
+    def _seed_security(db_engine):
+        security = Security(
+            ticker="NVDA",
+            name="NVIDIA Corporation",
+            exchange="NASDAQ",
+            sector_tag="ai",
+        )
+        with Session(db_engine) as session:
+            session.add(security)
+            session.commit()
+            session.refresh(security)
+            session.add_all(
+                [
+                    PriceBar(
+                        security_id=security.id,
+                        bar_date="2026-01-01",
+                        open="100.0000",
+                        high="103.0000",
+                        low="99.0000",
+                        close="100.0000",
+                        volume=1_000_000,
+                    ),
+                    PriceBar(
+                        security_id=security.id,
+                        bar_date="2026-01-02",
+                        open="101.0000",
+                        high="104.0000",
+                        low="100.0000",
+                        close="102.5000",
+                        volume=1_100_000,
+                    ),
+                ]
+            )
+            session.commit()
+
+    @staticmethod
+    def _response(*, warnings=None, trace=None) -> AnalyzeResponse:
+        return AnalyzeResponse(
+            ticker="NVDA",
+            decision="trade",
+            confidence=0.8,
+            reasons=["ok"],
+            warnings=warnings or [],
+            engine_version="v1.rules.0",
+            trace_id="trace-123",
+            created_at=datetime(2026, 1, 1, 12, 0, 0),
+            entry_range=(10.0, 11.0),
+            stop_loss=9.0,
+            take_profit=(12.0, 13.0),
+            risk_reward=2.0,
+            position_size_eur=100.0,
+            trace=trace,
+        )
+
+    def test_post_analyze_refuses_pipeline_override_when_disabled(self, db_client, monkeypatch):
+        def unexpected_agentic_call(self, request):
+            pytest.fail("Agentic pipeline should not run when override is disabled.")
+
+        app.dependency_overrides[get_pipeline_override_allowed] = lambda: False
+        monkeypatch.setattr("app.services.pipeline.AgenticPipeline.analyze", unexpected_agentic_call)
+
+        response = db_client.post("/analyze?pipeline=agentic", json={"ticker": "NVDA"})
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "pipeline_override_disabled"}
+
+    def test_post_analyze_runs_agentic_pipeline_when_override_is_enabled(self, db_client, monkeypatch):
+        trace = AnalysisTrace(run_id="run-123", ticker="NVDA", entered_agent_layer=True)
+
+        app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
+        monkeypatch.setattr(
+            "app.services.pipeline.AgenticPipeline.analyze",
+            lambda _pipeline, request: self._response(trace=trace),
+        )
+
+        response = db_client.post("/analyze?pipeline=agentic&include_trace=true", json={"ticker": "NVDA"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["warnings"] == ["pipeline_override:agentic"]
+        assert body["trace"]["run_id"] == "run-123"
+        assert body["trace"]["entered_agent_layer"] is True
+
+    def test_post_analyze_linear_override_skips_agentic_pipeline(self, db_client, db_engine, monkeypatch):
+        def unexpected_agentic_call(self, request):
+            pytest.fail("Agentic pipeline should not run when pipeline=linear is requested.")
+
+        self._seed_security(db_engine)
+        app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
+        monkeypatch.setattr(
+            "agents.config.load_agent_config",
+            lambda: self._config(AGENTIC_PIPELINE_MODE),
+        )
+        monkeypatch.setattr("app.services.pipeline.AgenticPipeline.analyze", unexpected_agentic_call)
+
+        response = db_client.post("/analyze?pipeline=linear", json={"ticker": "NVDA"})
+
+        assert response.status_code == 200
+        assert "pipeline_override:linear" in response.json()["warnings"]
+
+    def test_post_analyze_rejects_unknown_pipeline_value(self, db_client):
+        response = db_client.post("/analyze?pipeline=nonsense", json={"ticker": "NVDA"})
+
+        assert response.status_code == 422
+
+    def test_post_analyze_without_pipeline_keeps_default_response(self, db_client, monkeypatch):
+        def unexpected_agentic_call(self, request):
+            pytest.fail("Agentic pipeline should not run on the default linear path.")
+
+        monkeypatch.setattr(
+            "agents.config.load_agent_config",
+            lambda: self._config(LINEAR_PIPELINE_MODE),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.LinearPipeline.analyze",
+            lambda _pipeline, request: self._response(),
+        )
+        monkeypatch.setattr("app.services.pipeline.AgenticPipeline.analyze", unexpected_agentic_call)
+
+        response = db_client.post("/analyze", json={"ticker": "NVDA"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ticker": "NVDA",
+            "decision": "trade",
+            "time_stop_at": None,
+            "entry_range": [10.0, 11.0],
+            "stop_loss": 9.0,
+            "take_profit": [12.0, 13.0],
+            "risk_reward": 2.0,
+            "position_size_eur": 100.0,
+            "confidence": 0.8,
+            "reasons": ["ok"],
+            "warnings": [],
+            "engine_version": "v1.rules.0",
+            "created_at": "2026-01-01T12:00:00",
+            "trace_id": "trace-123",
+            "evidence": None,
+            "trace": None,
+            "diagnosis": None,
+        }
+
+    def test_post_analyze_without_include_trace_strips_agentic_trace(self, db_client, monkeypatch):
+        trace = AnalysisTrace(run_id="run-123", ticker="NVDA", entered_agent_layer=True)
+
+        app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
+        monkeypatch.setattr(
+            "app.services.pipeline.AgenticPipeline.analyze",
+            lambda _pipeline, request: self._response(trace=trace),
+        )
+
+        response = db_client.post("/analyze?pipeline=agentic", json={"ticker": "NVDA"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["warnings"] == ["pipeline_override:agentic"]
+        assert body["trace"] is None
 
 
 class TestRunTraceEndpoint:

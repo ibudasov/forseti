@@ -12,6 +12,32 @@
 - Tool-not-found errors: check the registry tool list and the
   `transfer_to_agent` instructions before changing prompts.
 
+## Per-request pipeline override
+
+Keep `PIPELINE_MODE=linear` by default, then opt into one-off agent runs locally
+with:
+
+```bash
+ALLOW_PIPELINE_OVERRIDE=true
+```
+
+Restart the stack after changing `.env`. When the flag is off, any
+`POST /analyze?pipeline=...` request fails with `403` and
+`{"detail":"pipeline_override_disabled"}` instead of silently falling back to
+the configured mode.
+
+Use the local helper target to compare deterministic and agentic runs for the
+same ticker:
+
+```bash
+make analyze ticker=NVDA mode=linear
+make analyze ticker=NVDA mode=agentic
+```
+
+Every explicit override appends `pipeline_override:<mode>` to `warnings`. The
+agentic path can spend LLM quota, so use `mode=agentic` deliberately and only
+for single-ticker debugging.
+
 ## How to read a trace
 
 The structured trace is described in [agent-trace.md](agent-trace.md). It records

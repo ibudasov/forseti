@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 from agents.config import AGENTIC_PIPELINE_MODE, LINEAR_PIPELINE_MODE, AgentWorkflowConfig
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
@@ -41,6 +41,23 @@ class AgenticPipeline:
         )
 
 
+PipelineFactory = Callable[[AgentWorkflowConfig, object], AnalysisPipeline]
+
+
+def _build_linear_pipeline(_: AgentWorkflowConfig, engine: object) -> AnalysisPipeline:
+    return LinearPipeline(engine=engine)
+
+
+def _build_agentic_pipeline(config: AgentWorkflowConfig, engine: object) -> AnalysisPipeline:
+    return AgenticPipeline(config=config, engine=engine)
+
+
+PIPELINE_FACTORIES: dict[str, PipelineFactory] = {
+    LINEAR_PIPELINE_MODE: _build_linear_pipeline,
+    AGENTIC_PIPELINE_MODE: _build_agentic_pipeline,
+}
+
+
 def select_pipeline(
     requested_mode: Optional[str],
     config: AgentWorkflowConfig,
@@ -52,14 +69,7 @@ def select_pipeline(
         raise PipelineOverrideNotAllowedError
 
     mode = requested_mode or config.pipeline_mode
-    pipeline_types = {
-        LINEAR_PIPELINE_MODE: LinearPipeline,
-        AGENTIC_PIPELINE_MODE: AgenticPipeline,
-    }
-    pipeline_type = pipeline_types[mode]
-    if mode == LINEAR_PIPELINE_MODE:
-        return pipeline_type(engine=engine)
-    return pipeline_type(config=config, engine=engine)
+    return PIPELINE_FACTORIES[mode](config, engine)
 
 
 def override_warning(requested_mode: Optional[str]) -> Optional[str]:
