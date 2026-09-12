@@ -183,10 +183,14 @@ def project_latest_fundamental(
     payload: dict[str, Any],
     observations: list[FundamentalObservation],
 ) -> Optional[Fundamental]:
-    annual_observations_by_metric = _latest_annual_observations_by_metric(observations)
-    if not annual_observations_by_metric:
+    latest_annual_period = _latest_annual_period_end(observations)
+    if latest_annual_period is None:
         return None
 
+    annual_observations_by_metric = _annual_observations_for_period(
+        observations,
+        period_end=latest_annual_period,
+    )
     revenue = annual_observations_by_metric.get("revenue")
     if revenue is None:
         return None
@@ -702,17 +706,24 @@ def _derive_total_debt_from_components(
     debt_rows: list[RawFactRow],
     cik: str | None,
 ) -> list[ObservationSeed]:
-    rows_by_period: dict[tuple[int | None, str, date, str | None], list[RawFactRow]] = {}
+    rows_by_period: dict[tuple[int | None, str, date, str | None, str], list[RawFactRow]] = {}
     for row in debt_rows:
-        key = (row.fiscal_year, row.fiscal_period, row.period_end, row.unit)
+        key = (
+            row.fiscal_year,
+            row.fiscal_period,
+            row.period_end,
+            row.unit,
+            row.accession_number or "",
+        )
         rows_by_period.setdefault(key, []).append(row)
 
     observations: list[ObservationSeed] = []
     for rows in rows_by_period.values():
         if not rows:
             continue
-        latest_row = max(rows, key=_raw_row_sort_key)
-        value = sum((row.value for row in rows), Decimal("0"))
+        selected_rows = _select_debt_components(rows)
+        latest_row = max(selected_rows, key=_raw_row_sort_key)
+        value = sum((row.value for row in selected_rows), Decimal("0"))
         observations.append(
             ObservationSeed(
                 metric_name="total_debt",
@@ -725,12 +736,12 @@ def _derive_total_debt_from_components(
                 form_type=latest_row.form_type,
                 filed_at=latest_row.filed_at,
                 accession_number=latest_row.accession_number,
-                source_concept="+".join(sorted({row.source_concept for row in rows})),
+                source_concept="+".join(sorted({row.source_concept for row in selected_rows})),
                 source_url=latest_row.source_url if cik is None else latest_row.source_url,
                 is_derived=True,
                 derivation=(
                     "total_debt derived from "
-                    + ", ".join(sorted(_raw_row_key(row) for row in rows))
+                    + ", ".join(sorted(_raw_row_key(row) for row in selected_rows))
                 ),
             )
         )
@@ -770,6 +781,24 @@ def _derive_total_debt_from_liabilities(
             )
         )
     return observations
+
+
+def _select_debt_components(rows: list[RawFactRow]) -> list[RawFactRow]:
+    rows_by_concept = {row.source_concept: row for row in rows}
+    preferred_concept_sets = (
+        ("LongTermDebtNoncurrent", "DebtCurrent"),
+        ("LongTermDebt", "DebtCurrent"),
+        ("LongTermDebtNoncurrent", "LongTermDebtCurrent"),
+        ("LongTermDebt", "LongTermDebtCurrent"),
+        ("LongTermDebt",),
+        ("LongTermDebtNoncurrent",),
+        ("DebtCurrent",),
+        ("LongTermDebtCurrent",),
+    )
+    for concept_set in preferred_concept_sets:
+        if all(concept in rows_by_concept for concept in concept_set):
+            return [rows_by_concept[concept] for concept in concept_set]
+    return [max(rows, key=_raw_row_sort_key)]
 
 
 def _derive_growth_metric(
@@ -1009,12 +1038,27 @@ def _observation_value(observation: FundamentalObservation | None) -> Decimal | 
     return observation.value
 
 
-def _latest_annual_observations_by_metric(
+def _latest_annual_period_end(
     observations: list[FundamentalObservation],
+) -> date | None:
+    annual_periods = [
+        observation.period_end
+        for observation in observations
+        if observation.metric_name == "revenue" and observation.fiscal_period == "FY"
+    ]
+    if not annual_periods:
+        return None
+    return max(annual_periods)
+
+
+def _annual_observations_for_period(
+    observations: list[FundamentalObservation],
+    *,
+    period_end: date,
 ) -> dict[str, FundamentalObservation]:
     winners: dict[str, FundamentalObservation] = {}
     for observation in observations:
-        if observation.fiscal_period != "FY":
+        if observation.fiscal_period != "FY" or observation.period_end != period_end:
             continue
         current = winners.get(observation.metric_name)
         if current is None or _persisted_observation_sort_key(observation) > _persisted_observation_sort_key(current):

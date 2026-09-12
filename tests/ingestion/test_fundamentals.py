@@ -412,6 +412,17 @@ class TestFundamentalMapping:
         assert result.eps_trend is None
         assert result.margins is None
 
+    def test_to_fundamental_projects_only_metrics_from_latest_annual_period(self):
+        payload = _load_sample_payload()
+        payload["facts"]["us-gaap"]["NetCashProvidedByUsedInOperatingActivities"]["units"]["USD"] = [
+            {"end": "2023-12-31", "val": 400, "form": "10-K", "fp": "FY"},
+        ]
+
+        result = to_fundamental(22, payload)
+
+        assert result.as_of_date == date(2024, 12, 31)
+        assert result.fcf is None
+
 
 class TestObservationNormalization:
     def test_normalize_fundamental_observations_derives_standalone_quarters_and_provenance(self):
@@ -458,6 +469,35 @@ class TestObservationNormalization:
 
         assert revenue_observations[(2025, "Q2")].value == Decimal("180")
         assert revenue_observations[(2025, "Q2")].accession_number == "1002A"
+
+    def test_normalize_fundamental_observations_avoids_overlapping_debt_double_count(self):
+        payload = _quarterly_payload()
+        payload["facts"]["us-gaap"]["LongTermDebt"] = {
+            "units": {
+                "USD": [
+                    {
+                        "end": "2025-12-31",
+                        "val": 100,
+                        "form": "10-K",
+                        "fp": "FY",
+                        "fy": 2025,
+                        "filed": "2026-02-10",
+                        "accn": "1004",
+                    }
+                ]
+            }
+        }
+
+        observations = normalize_fundamental_observations(11, payload)
+        debt_observation = next(
+            observation
+            for observation in observations
+            if observation.metric_name == "total_debt"
+            and observation.fiscal_year == 2025
+            and observation.fiscal_period == "FY"
+        )
+
+        assert debt_observation.value == Decimal("130")
 
     def test_summarize_observation_coverage_reports_latest_periods(self):
         observations = normalize_fundamental_observations(11, _quarterly_payload())

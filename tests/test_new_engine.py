@@ -14,7 +14,7 @@ from app.db.models import (
     TechnicalFeature,
 )
 from app.services.analyzer import analyze
-from app.services.checklist import _to_fundamental_snapshot, evaluate_checklist
+from app.services.checklist import evaluate_checklist, to_fundamental_snapshot
 from app.services.risk import calculate_risk_levels, RiskConfig
 from app.services.vetoes import check_vetoes
 
@@ -231,7 +231,7 @@ class TestChecklist:
             },
         )
 
-        snapshot = _to_fundamental_snapshot(fundamental)
+        snapshot = to_fundamental_snapshot(fundamental)
 
         assert snapshot.currency == "USD"
 

@@ -42,7 +42,7 @@ def evaluate_checklist(
     # Rules 1-4: Deterministic fundamentals baseline (+6 max)
     fundamental_analysis = analyze_fundamentals(
         ticker="UNKNOWN",
-        snapshot=_to_fundamental_snapshot(fundamental),
+        snapshot=to_fundamental_snapshot(fundamental),
     )
     for rule_result in fundamental_analysis.rule_results:
         if rule_result.status != "passed":
@@ -88,7 +88,7 @@ def evaluate_checklist(
     return total_score, results
 
 
-def _to_fundamental_snapshot(
+def to_fundamental_snapshot(
     fundamental: Optional[Fundamental],
 ) -> FundamentalSnapshotData:
     if fundamental is None:
