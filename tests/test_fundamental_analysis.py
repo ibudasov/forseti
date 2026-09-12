@@ -51,6 +51,7 @@ def test_missing_metric_is_reported_as_unknown():
     assert revenue_growth_rule.status == "unknown"
     assert revenue_growth_rule.points_awarded == 0
     assert revenue_growth_rule.metric_ids == ["revenue_growth:2025-12-31"]
+    assert analysis.warnings == ["missing_metric:revenue_growth"]
 
 
 def test_all_pass_analysis_scores_six_of_six():
@@ -69,7 +70,17 @@ def test_all_pass_analysis_scores_six_of_six():
 
     assert analysis.score == MAX_FUNDAMENTAL_SCORE
     assert analysis.maximum_score == MAX_FUNDAMENTAL_SCORE
+    assert analysis.schema_version == "1.0"
+    assert analysis.warnings == []
     assert [rule.status for rule in analysis.rule_results] == ["passed"] * 4
+    metric_units = {metric.metric_id: metric.unit for metric in analysis.metrics}
+    assert metric_units == {
+        "revenue_growth:2025-12-31": "ratio",
+        "fcf:2025-12-31": "USD",
+        "debt_to_equity:2025-12-31": "ratio",
+        "eps_trend:2025-12-31": "currency_per_share_delta",
+        "margins:2025-12-31": "ratio",
+    }
 
 
 def test_all_fail_analysis_reports_four_explicit_failed_rules():

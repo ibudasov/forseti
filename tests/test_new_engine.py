@@ -152,6 +152,7 @@ class TestChecklist:
             fundamental=fundamental,
             technical_feature=None,
             vix_close=None,
+            ticker="NVDA",
         )
         assert any(r.rule_id == "revenue_growth" for r in results)
         assert score >= 2
@@ -163,6 +164,7 @@ class TestChecklist:
             fundamental=None,
             technical_feature=None,
             vix_close=None,
+            ticker="NVDA",
         )
         assert score == 0
         assert len(results) == 0
@@ -203,6 +205,7 @@ class TestChecklist:
             fundamental=fundamental,
             technical_feature=technical_feature,
             vix_close=vix_close,
+            ticker="NVDA",
         )
         assert score == 11
         assert len(results) == 9

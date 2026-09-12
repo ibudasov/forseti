@@ -264,6 +264,8 @@ def _evaluate_threshold_rule(
     comparison: Literal[">", "<"],
 ) -> FundamentalRuleResult:
     if metric is None:
+        if metric_value is not None:
+            raise ValueError(f"{rule_id} metric reference is missing for a present metric value.")
         return FundamentalRuleResult(
             rule_id=rule_id,
             status="unknown",
