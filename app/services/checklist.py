@@ -31,7 +31,6 @@ def evaluate_checklist(
     fundamental: Optional[Fundamental],
     technical_feature: Optional[TechnicalFeature],
     vix_close: Optional[Decimal],
-    *,
     ticker: Optional[str] = None,
     currency: Optional[str] = None,
 ) -> tuple[int, List[ChecklistResult]]:

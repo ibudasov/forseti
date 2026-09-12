@@ -210,7 +210,7 @@ def _metric_id(metric_key: str, period_end: date) -> str:
 def _metric_unit(metric_key: str, currency: str | None) -> str | None:
     definition = FUNDAMENTAL_METRIC_DEFINITIONS[metric_key]
     if metric_key == "fcf":
-        return currency or "currency"
+        return currency
     return definition.unit
 
 
