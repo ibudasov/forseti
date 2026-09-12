@@ -7,7 +7,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION: Literal["1.0"] = "1.0"
 MAX_FUNDAMENTAL_SCORE = 6
 RATIO_UNIT = "ratio"
 CURRENCY_PER_SHARE_DELTA_UNIT = "currency_per_share_delta"
