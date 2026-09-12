@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze fundamental-context assess-fundamentals up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze fundamental-context assess-fundamentals eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -25,6 +25,9 @@ help:
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
 	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make assess-fundamentals # Run one fundamental analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make eval-fundamental-agent # Run the frozen offline fundamental-agent evaluation suite"
+	@echo "  make eval-fundamental-agent-live CONFIRM_COST=yes # Run live model evaluation over the frozen suite"
+	@echo "  make fundamental-shadow-report # Aggregate persisted shadow-mode runs"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -111,6 +114,29 @@ assess-fundamentals: check-compose
 		--env-from-file .env \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.assess_fundamentals --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --shadow --json
+
+eval-fundamental-agent: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_fundamental_agent --json
+
+eval-fundamental-agent-live: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_fundamental_agent --live --confirm-cost "$(CONFIRM_COST)" --json
+
+fundamental-shadow-report: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_fundamental_agent --shadow-report --json
 
 up: check-compose
 	$(DOCKER_COMPOSE) up --force-recreate app

@@ -131,7 +131,7 @@ def build_fundamental_analysis_request(
         evidence_chunks=selected_chunks,
         coverage=coverage,
     )
-    return request.model_copy(update={"context_hash": _context_hash(request)})
+    return request.model_copy(update={"context_hash": compute_fundamental_context_hash(request)})
 
 
 def _build_deterministic_result(
@@ -443,7 +443,7 @@ def _is_stale(newest_published_at: datetime | None, *, snapshot_at: datetime) ->
     return newest_published_at < snapshot_at - timedelta(days=EVIDENCE_STALE_DAYS)
 
 
-def _context_hash(request: FundamentalAnalysisRequest) -> str:
+def compute_fundamental_context_hash(request: FundamentalAnalysisRequest) -> str:
     payload = request.model_dump(
         mode="json",
         exclude={"context_hash", "run_id"},

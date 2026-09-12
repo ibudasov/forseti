@@ -7,9 +7,11 @@ from app.schemas.fundamentals import (
     FundamentalAgentEffect,
     FundamentalAnalysisRequest,
     FundamentalAssessmentResult,
+    FundamentalAgentVersionStamp,
 )
 from app.services.analyzer import SCORE_TRADE_MIN, SCORE_WATCHLIST_MIN
 
+POLICY_VERSION = "1.0"
 HARD_BLOCKER_WARNINGS = {
     "security_inactive",
     "no_price_data",
@@ -72,7 +74,11 @@ def apply_fundamental_policy(
     return FundamentalAgentEffect(
         mode=mode,
         accepted=accepted,
+        assessment_status=assessment_result.response.status,
+        overall_signal=assessment_result.response.overall_signal,
         reason_codes=_deduplicated(reason_codes),
+        missing_information=list(assessment_result.response.missing_information),
+        source_types_missing=list(request.coverage.source_types_missing),
         raw_adjustment=raw_adjustment,
         applied_adjustment=applied_adjustment,
         baseline_fundamental_score=baseline_fundamental_score,
@@ -83,6 +89,13 @@ def apply_fundamental_policy(
         counterfactual_decision=counterfactual_decision,
         final_decision=final_decision,
         decision_changed=final_decision != deterministic_response.decision,
+        versions=FundamentalAgentVersionStamp(
+            context_schema_version=request.schema_version,
+            assessment_schema_version=assessment_result.response.schema_version,
+            prompt_version=assessment_result.prompt_version,
+            model_name=assessment_result.model_name,
+            policy_version=POLICY_VERSION,
+        ),
     )
 
 

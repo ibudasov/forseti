@@ -239,12 +239,32 @@ class FundamentalAssessmentResult(BaseModel):
     prompt_version: str
 
 
+class FundamentalAgentVersionStamp(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    context_schema_version: str
+    assessment_schema_version: str
+    prompt_version: str
+    model_name: str
+    policy_version: str
+
+
 class FundamentalAgentEffect(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["off", "shadow", "enforced"]
     accepted: bool
+    assessment_status: Literal["completed", "insufficient_data", "failed"]
+    overall_signal: Literal[
+        "strong_negative",
+        "negative",
+        "neutral",
+        "positive",
+        "strong_positive",
+    ]
     reason_codes: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    source_types_missing: list[str] = Field(default_factory=list)
     raw_adjustment: int
     applied_adjustment: int
     baseline_fundamental_score: int = Field(ge=0)
@@ -255,6 +275,7 @@ class FundamentalAgentEffect(BaseModel):
     counterfactual_decision: Literal["trade", "watchlist", "no_trade"]
     final_decision: Literal["trade", "watchlist", "no_trade"]
     decision_changed: bool
+    versions: FundamentalAgentVersionStamp
 
 
 def _assert_unique_metric_ids(points: list[MetricSeriesPoint]) -> None:
