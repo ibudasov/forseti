@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from app.schemas.analyze import AnalyzeResponse
 from app.schemas.fundamentals import (
     FundamentalAgentEffect,
@@ -24,7 +26,11 @@ def apply_fundamental_policy(
     request: FundamentalAnalysisRequest,
     assessment_result: FundamentalAssessmentResult,
 ) -> FundamentalAgentEffect:
-    baseline_total_score = deterministic_response.diagnosis.checklist_score if deterministic_response.diagnosis else 0
+    baseline_total_score = (
+        deterministic_response.diagnosis.checklist_score
+        if deterministic_response.diagnosis and deterministic_response.diagnosis.checklist_score is not None
+        else 0
+    )
     baseline_fundamental_score = request.deterministic_result.score
     raw_adjustment = assessment_result.response.proposed_score_adjustment
     reason_codes = list(assessment_result.validation.reason_codes)
@@ -101,10 +107,10 @@ def _has_duplicate_citations(response) -> bool:
 
 def _counterfactual_decision(
     *,
-    baseline_decision: str,
+    baseline_decision: Literal["trade", "watchlist", "no_trade"],
     adjusted_total_score: int,
     hard_blocker: bool,
-) -> str:
+) -> Literal["trade", "watchlist", "no_trade"]:
     if hard_blocker:
         return baseline_decision
     if adjusted_total_score >= SCORE_TRADE_MIN:

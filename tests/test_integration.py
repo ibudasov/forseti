@@ -343,6 +343,7 @@ class TestPipelineOverride:
             "evidence": None,
             "trace": None,
             "diagnosis": None,
+            "fundamental_agent_effect": None,
         }
 
     def test_post_analyze_without_include_trace_strips_agentic_trace(self, db_client, monkeypatch):
