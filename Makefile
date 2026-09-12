@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze fundamental-context up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -23,6 +23,7 @@ help:
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
+	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -89,6 +90,16 @@ analyze: check-compose
 	@curl -s -X POST "http://127.0.0.1:8000/analyze?include_trace=true$(if $(mode),&pipeline=$(mode),)" \
 		-H 'content-type: application/json' \
 		-d '{"ticker":"$(ticker)"}' | python3 -m json.tool
+
+fundamental-context: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make fundamental-context ticker=NVDA [as_of=2026-09-08]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.build_fundamental_context --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --json
 
 up: check-compose
 	$(DOCKER_COMPOSE) up --force-recreate app
