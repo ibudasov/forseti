@@ -160,8 +160,6 @@ def test_checklist_preserves_fundamental_rule_details():
         ),
         technical_feature=None,
         vix_close=None,
-        ticker="NVDA",
-        currency="USD",
     )
 
     assert score == 6
@@ -171,6 +169,23 @@ def test_checklist_preserves_fundamental_rule_details():
         ("debt_to_equity", 1, "debt_to_equity: 0.50 < 1.00 max"),
         ("eps_trend", 1, "eps_trend: 0.10 > 0.00 min"),
     ]
+
+
+def test_contract_omits_fcf_unit_when_currency_is_unknown():
+    analysis = analyze_fundamentals(
+        "NVDA",
+        FundamentalSnapshotData(
+            as_of_date=date(2025, 12, 31),
+            revenue_growth=Decimal("0.20"),
+            fcf=Decimal("1000"),
+            debt_to_equity=Decimal("0.50"),
+            eps_trend=Decimal("0.10"),
+            margins=Decimal("0.30"),
+        ),
+    )
+
+    metric_units = {metric.metric_id: metric.unit for metric in analysis.metrics}
+    assert metric_units["fcf:2025-12-31"] is None
 
 
 def test_validation_rejects_inconsistent_score_totals():

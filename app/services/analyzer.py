@@ -229,7 +229,6 @@ def analyze(
         technical_feature=technical_feature,
         fundamental=fundamental,
         vix_close=vix_close,
-        security_currency=getattr(security, "currency", None),
         gate_warnings=gate_warnings,
         recommendation_date=today,
     )
@@ -242,7 +241,6 @@ def _evaluate_trade(
     technical_feature,
     fundamental,
     vix_close,
-    security_currency,
     gate_warnings,
     recommendation_date,
 ):
@@ -254,8 +252,6 @@ def _evaluate_trade(
         fundamental=fundamental,
         technical_feature=technical_feature,
         vix_close=vix_close,
-        ticker=symbol,
-        currency=security_currency,
     )
 
     decision = _decision_for_score(score, gate_warnings)

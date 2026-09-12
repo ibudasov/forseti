@@ -11,7 +11,6 @@ from app.domain.fundamentals import (
 )
 
 # Frozen constants for checklist scoring
-DEFAULT_FUNDAMENTAL_TICKER = "UNKNOWN"
 RSI_HEALTHY_MIN = 45
 RSI_HEALTHY_MAX = 65
 VIX_CALM_MAX = 25
@@ -31,8 +30,6 @@ def evaluate_checklist(
     fundamental: Optional[Fundamental],
     technical_feature: Optional[TechnicalFeature],
     vix_close: Optional[Decimal],
-    ticker: Optional[str] = None,
-    currency: Optional[str] = None,
 ) -> tuple[int, List[ChecklistResult]]:
     """
     Evaluate all checklist rules.
@@ -44,8 +41,8 @@ def evaluate_checklist(
 
     # Rules 1-4: Deterministic fundamentals baseline (+6 max)
     fundamental_analysis = analyze_fundamentals(
-        ticker=ticker or DEFAULT_FUNDAMENTAL_TICKER,
-        snapshot=_to_fundamental_snapshot(fundamental, currency),
+        ticker="UNKNOWN",
+        snapshot=_to_fundamental_snapshot(fundamental),
     )
     for rule_result in fundamental_analysis.rule_results:
         if rule_result.status != "passed":
@@ -93,10 +90,9 @@ def evaluate_checklist(
 
 def _to_fundamental_snapshot(
     fundamental: Optional[Fundamental],
-    currency: Optional[str],
 ) -> FundamentalSnapshotData:
     if fundamental is None:
-        return FundamentalSnapshotData(has_snapshot=False, currency=currency)
+        return FundamentalSnapshotData(has_snapshot=False)
 
     return FundamentalSnapshotData(
         as_of_date=fundamental.as_of_date,
@@ -105,7 +101,6 @@ def _to_fundamental_snapshot(
         debt_to_equity=fundamental.debt_to_equity,
         eps_trend=fundamental.eps_trend,
         margins=fundamental.margins,
-        currency=currency,
     )
 
 

@@ -298,7 +298,7 @@ def _evaluate_threshold_rule(
         points_awarded=points_available if passed else 0,
         points_available=points_available,
         metric_ids=metric_ids,
-        explanation=f"{rule_id}: {float(metric_value):.2f} {operator} {threshold_label}",
+        explanation=f"{rule_id}: {metric_value:.2f} {operator} {threshold_label}",
     )
 
 
