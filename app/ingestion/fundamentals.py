@@ -465,11 +465,10 @@ class RawFactRow:
 
 
 def _authoritative_raw_rows(payload: dict[str, Any], tags: tuple[str, ...]) -> list[RawFactRow]:
+    rows: list[RawFactRow] = []
     for tag in tags:
-        rows = _raw_rows_for_tag(payload, tag)
-        if rows:
-            return _select_authoritative_raw_rows(rows)
-    return []
+        rows.extend(_raw_rows_for_tag(payload, tag))
+    return _select_authoritative_raw_rows(rows)
 
 
 def _raw_rows_for_tag(payload: dict[str, Any], tag: str) -> list[RawFactRow]:

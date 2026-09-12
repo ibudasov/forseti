@@ -56,9 +56,10 @@ Replay stored payloads and then refetch fresh SEC data:
 docker compose run --rm app python -m app.ingestion.run --source fundamentals-backfill --ticker NVDA --refetch-fundamentals
 ```
 
-The backfill path is idempotent because inserts use the observation uniqueness
-constraint and update the same logical row when the exact observation is seen
-again.
+The backfill path is idempotent for the exact same observation payload because
+inserts use the observation uniqueness constraint. Amended filings, alternate
+concepts, and derived rows are stored as separate observations, then
+authoritative reads deterministically resolve the winning metric-period row.
 
 ## Rollback
 

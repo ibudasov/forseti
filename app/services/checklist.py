@@ -95,6 +95,7 @@ def _to_fundamental_snapshot(
         return FundamentalSnapshotData(has_snapshot=False)
 
     return FundamentalSnapshotData(
+        has_snapshot=fundamental.as_of_date is not None,
         as_of_date=fundamental.as_of_date,
         revenue_growth=fundamental.revenue_growth,
         fcf=fundamental.fcf,
