@@ -34,12 +34,15 @@ def build_fundamental_history(
                 metric_name=metric_name,
                 annual=[
                     _to_point(observation)
-                    for observation in metric_observations
+                    for observation in _sorted_history(metric_observations, fiscal_periods={"FY"})
                     if observation.fiscal_period == "FY"
                 ],
                 quarterly=[
                     _to_point(observation)
-                    for observation in metric_observations
+                    for observation in _sorted_history(
+                        metric_observations,
+                        fiscal_periods={"Q1", "Q2", "Q3", "Q4"},
+                    )
                     if observation.fiscal_period in {"Q1", "Q2", "Q3", "Q4"}
                 ],
             )
@@ -64,4 +67,20 @@ def _to_point(observation: FundamentalObservation) -> FundamentalObservationPoin
         source_url=observation.source_url,
         is_derived=observation.is_derived,
         derivation=observation.derivation,
+    )
+
+
+def _sorted_history(
+    observations: list[FundamentalObservation],
+    *,
+    fiscal_periods: set[str],
+) -> list[FundamentalObservation]:
+    return sorted(
+        [observation for observation in observations if observation.fiscal_period in fiscal_periods],
+        key=lambda observation: (
+            observation.period_end,
+            observation.filed_at,
+            observation.accession_number or "",
+            observation.id or 0,
+        ),
     )

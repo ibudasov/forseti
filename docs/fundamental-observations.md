@@ -62,13 +62,7 @@ again.
 
 ## Rollback
 
-Rollback the schema change with Alembic:
-
-```bash
-make migrate
-```
-
-Then downgrade manually to the previous revision if needed:
+Downgrade the schema to the previous revision if needed:
 
 ```bash
 docker compose run --rm app alembic downgrade 0006_trace_observability

@@ -183,25 +183,22 @@ def project_latest_fundamental(
     payload: dict[str, Any],
     observations: list[FundamentalObservation],
 ) -> Optional[Fundamental]:
-    annual_observations = [
-        observation for observation in observations if observation.fiscal_period == "FY"
-    ]
-    if not annual_observations:
+    annual_observations_by_metric = _latest_annual_observations_by_metric(observations)
+    if not annual_observations_by_metric:
         return None
 
-    metrics_by_name = {observation.metric_name: observation for observation in annual_observations}
-    revenue = metrics_by_name.get("revenue")
+    revenue = annual_observations_by_metric.get("revenue")
     if revenue is None:
         return None
 
     return Fundamental(
         security_id=security_id,
         as_of_date=revenue.period_end,
-        revenue_growth=_observation_value(metrics_by_name.get("revenue_growth_yoy")),
-        fcf=_observation_value(metrics_by_name.get("free_cash_flow")),
-        debt_to_equity=_observation_value(metrics_by_name.get("debt_to_equity")),
-        eps_trend=_observation_value(metrics_by_name.get("diluted_eps_growth_delta")),
-        margins=_observation_value(metrics_by_name.get("net_margin")),
+        revenue_growth=_observation_value(annual_observations_by_metric.get("revenue_growth_yoy")),
+        fcf=_observation_value(annual_observations_by_metric.get("free_cash_flow")),
+        debt_to_equity=_observation_value(annual_observations_by_metric.get("debt_to_equity")),
+        eps_trend=_observation_value(annual_observations_by_metric.get("diluted_eps_growth_delta")),
+        margins=_observation_value(annual_observations_by_metric.get("net_margin")),
         raw_payload=payload,
     )
 
@@ -1006,6 +1003,30 @@ def _observation_value(observation: FundamentalObservation | None) -> Decimal | 
     if observation is None:
         return None
     return observation.value
+
+
+def _latest_annual_observations_by_metric(
+    observations: list[FundamentalObservation],
+) -> dict[str, FundamentalObservation]:
+    winners: dict[str, FundamentalObservation] = {}
+    for observation in observations:
+        if observation.fiscal_period != "FY":
+            continue
+        current = winners.get(observation.metric_name)
+        if current is None or _persisted_observation_sort_key(observation) > _persisted_observation_sort_key(current):
+            winners[observation.metric_name] = observation
+    return winners
+
+
+def _persisted_observation_sort_key(
+    observation: FundamentalObservation,
+) -> tuple[date, date, str, str]:
+    return (
+        observation.period_end,
+        observation.filed_at or date.min,
+        observation.accession_number or "",
+        observation.source_url,
+    )
 
 
 def _resolve_cik(payload: dict[str, Any]) -> str | None:
