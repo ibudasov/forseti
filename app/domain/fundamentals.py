@@ -120,12 +120,14 @@ def analyze_fundamentals(
     ticker: str,
     snapshot: FundamentalSnapshotData,
 ) -> DeterministicFundamentalAnalysis:
-    metrics = _build_metric_refs(snapshot)
+    metric_values = _metric_values(snapshot)
+    metrics = _build_metric_refs(snapshot, metric_values)
     metrics_by_key = {metric.metric_id.split(":")[0]: metric for metric in metrics}
     rule_results = [
         _evaluate_minimum_rule(
             rule_id="revenue_growth",
             metric=metrics_by_key.get("revenue_growth"),
+            metric_value=metric_values["revenue_growth"],
             threshold=REVENUE_GROWTH_MIN,
             points_available=2,
             threshold_label=f"{float(REVENUE_GROWTH_MIN):.2f} min",
@@ -133,6 +135,7 @@ def analyze_fundamentals(
         _evaluate_minimum_rule(
             rule_id="fcf",
             metric=metrics_by_key.get("fcf"),
+            metric_value=metric_values["fcf"],
             threshold=FCF_MIN,
             points_available=2,
             threshold_label="0",
@@ -140,6 +143,7 @@ def analyze_fundamentals(
         _evaluate_maximum_rule(
             rule_id="debt_to_equity",
             metric=metrics_by_key.get("debt_to_equity"),
+            metric_value=metric_values["debt_to_equity"],
             threshold=DEBT_TO_EQUITY_MAX,
             points_available=1,
             threshold_label=f"{float(DEBT_TO_EQUITY_MAX):.2f} max",
@@ -147,6 +151,7 @@ def analyze_fundamentals(
         _evaluate_minimum_rule(
             rule_id="eps_trend",
             metric=metrics_by_key.get("eps_trend"),
+            metric_value=metric_values["eps_trend"],
             threshold=EPS_TREND_MIN,
             points_available=1,
             threshold_label=f"{float(EPS_TREND_MIN):.2f} min",
@@ -165,17 +170,23 @@ def analyze_fundamentals(
     )
 
 
-def _build_metric_refs(snapshot: FundamentalSnapshotData) -> list[FundamentalMetricRef]:
-    if snapshot.as_of_date is None:
-        return []
-
-    metric_values = {
+def _metric_values(snapshot: FundamentalSnapshotData) -> dict[str, Optional[Decimal]]:
+    return {
         "revenue_growth": snapshot.revenue_growth,
         "fcf": snapshot.fcf,
         "debt_to_equity": snapshot.debt_to_equity,
         "eps_trend": snapshot.eps_trend,
         "margins": snapshot.margins,
     }
+
+
+def _build_metric_refs(
+    snapshot: FundamentalSnapshotData,
+    metric_values: dict[str, Optional[Decimal]],
+) -> list[FundamentalMetricRef]:
+    if snapshot.as_of_date is None:
+        return []
+
     refs: list[FundamentalMetricRef] = []
     for metric_key, value in metric_values.items():
         definition = FUNDAMENTAL_METRIC_DEFINITIONS[metric_key]
@@ -206,6 +217,7 @@ def _evaluate_minimum_rule(
     *,
     rule_id: str,
     metric: FundamentalMetricRef | None,
+    metric_value: Decimal | None,
     threshold: Decimal,
     points_available: int,
     threshold_label: str,
@@ -213,6 +225,7 @@ def _evaluate_minimum_rule(
     return _evaluate_threshold_rule(
         rule_id=rule_id,
         metric=metric,
+        metric_value=metric_value,
         threshold=threshold,
         points_available=points_available,
         threshold_label=threshold_label,
@@ -224,6 +237,7 @@ def _evaluate_maximum_rule(
     *,
     rule_id: str,
     metric: FundamentalMetricRef | None,
+    metric_value: Decimal | None,
     threshold: Decimal,
     points_available: int,
     threshold_label: str,
@@ -231,6 +245,7 @@ def _evaluate_maximum_rule(
     return _evaluate_threshold_rule(
         rule_id=rule_id,
         metric=metric,
+        metric_value=metric_value,
         threshold=threshold,
         points_available=points_available,
         threshold_label=threshold_label,
@@ -242,6 +257,7 @@ def _evaluate_threshold_rule(
     *,
     rule_id: str,
     metric: FundamentalMetricRef | None,
+    metric_value: Decimal | None,
     threshold: Decimal,
     points_available: int,
     threshold_label: str,
@@ -268,8 +284,10 @@ def _evaluate_threshold_rule(
             explanation=f"{rule_id}: missing",
         )
 
-    value = Decimal(str(metric.value))
-    passed = value > threshold if comparison == ">" else value < threshold
+    if metric_value is None:
+        raise ValueError(f"{rule_id} metric value cannot be null when the metric reference has a value.")
+
+    passed = metric_value > threshold if comparison == ">" else metric_value < threshold
     operator = comparison if passed else _inverse_operator(comparison)
     return FundamentalRuleResult(
         rule_id=rule_id,
@@ -277,7 +295,7 @@ def _evaluate_threshold_rule(
         points_awarded=points_available if passed else 0,
         points_available=points_available,
         metric_ids=metric_ids,
-        explanation=f"{rule_id}: {metric.value:.2f} {operator} {threshold_label}",
+        explanation=f"{rule_id}: {float(metric_value):.2f} {operator} {threshold_label}",
     )
 
 

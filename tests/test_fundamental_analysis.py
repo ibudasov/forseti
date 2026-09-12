@@ -159,7 +159,7 @@ def _assert_rule_threshold(
     assert above_rule.status == "passed"
 
 
-def _analysis_with_metric(metric_name: str, value: Decimal):
+def _analysis_with_metric(metric_name: str, value: Decimal) -> DeterministicFundamentalAnalysis:
     values = {
         "revenue_growth": Decimal("0.2"),
         "fcf": Decimal("1000"),
