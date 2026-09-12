@@ -157,6 +157,88 @@ class FundamentalAnalysisRequest(BaseModel):
         return self
 
 
+class CitedFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    finding_id: str
+    category: Literal[
+        "growth_quality",
+        "cash_flow_quality",
+        "balance_sheet",
+        "profitability",
+        "competitive_position",
+        "management_guidance",
+        "concentration",
+        "accounting_quality",
+        "other",
+    ]
+    direction: Literal["positive", "negative", "mixed"]
+    materiality: Literal["low", "medium", "high"]
+    claim: str
+    metric_ids: list[str] = Field(default_factory=list)
+    chunk_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> "CitedFinding":
+        if not self.claim.strip():
+            raise ValueError("Finding claim must not be empty.")
+        if self.materiality in {"medium", "high"} and not (self.metric_ids or self.chunk_ids):
+            raise ValueError("Medium/high-materiality findings must include at least one citation.")
+        return self
+
+
+class FundamentalAssessmentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["1.0"] = SCHEMA_VERSION
+    run_id: str
+    context_hash: str
+    agent_name: Literal["fundamental_analyst"] = "fundamental_analyst"
+    status: Literal["completed", "insufficient_data", "failed"]
+    overall_signal: Literal[
+        "strong_negative",
+        "negative",
+        "neutral",
+        "positive",
+        "strong_positive",
+    ]
+    proposed_score_adjustment: int
+    findings: list[CitedFinding] = Field(default_factory=list)
+    contradictions: list[CitedFinding] = Field(default_factory=list)
+    material_red_flags: list[CitedFinding] = Field(default_factory=list)
+    evidence_coverage: float = Field(ge=0, le=1)
+    missing_information: list[str] = Field(default_factory=list)
+    summary: str
+
+    @model_validator(mode="after")
+    def _validate_response(self) -> "FundamentalAssessmentResponse":
+        if self.status in {"insufficient_data", "failed"} and self.proposed_score_adjustment != 0:
+            raise ValueError("Insufficient-data and failed responses must propose adjustment 0.")
+        if not self.summary.strip():
+            raise ValueError("Assessment summary must not be empty.")
+        _assert_unique_finding_ids(self.findings, self.contradictions, self.material_red_flags)
+        return self
+
+
+class FundamentalAssessmentValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    accepted: bool
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class FundamentalAssessmentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    response: FundamentalAssessmentResponse
+    validation: FundamentalAssessmentValidation
+    raw_output: str = ""
+    latency_ms: float = Field(ge=0, default=0.0)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    model_name: str
+    prompt_version: str
+
+
 def _assert_unique_metric_ids(points: list[MetricSeriesPoint]) -> None:
     metric_ids = [point.metric_id for point in points]
     if len(metric_ids) != len(set(metric_ids)):
@@ -197,3 +279,9 @@ def _assert_unique_metric_series_ids(series_list: list[MetricSeries]) -> None:
     ]
     if len(metric_ids) != len(set(metric_ids)):
         raise ValueError("Metric series point IDs must be unique across the request.")
+
+
+def _assert_unique_finding_ids(*groups: list[CitedFinding]) -> None:
+    finding_ids = [finding.finding_id for group in groups for finding in group]
+    if len(finding_ids) != len(set(finding_ids)):
+        raise ValueError("Finding IDs must be unique across the full assessment response.")
