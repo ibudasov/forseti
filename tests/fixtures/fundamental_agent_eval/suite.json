@@ -5,7 +5,7 @@
     {
       "case_id": "clear-strong-fundamentals",
       "category": "clear strong fundamentals",
-      "notes": "Borderline watchlist candidate with strong cited narrative support.",
+      "notes": "Trade candidate with strong cited narrative support.",
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:NVDA:10",
@@ -145,13 +145,19 @@
       },
       "deterministic_response": {
         "ticker": "NVDA",
-        "decision": "watchlist",
+        "decision": "trade",
         "time_stop_at": null,
-        "entry_range": null,
-        "stop_loss": null,
-        "take_profit": null,
-        "risk_reward": null,
-        "position_size_eur": null,
+        "entry_range": [
+          10.0,
+          11.0
+        ],
+        "stop_loss": 9.0,
+        "take_profit": [
+          12.0,
+          13.0
+        ],
+        "risk_reward": 2.0,
+        "position_size_eur": 100.0,
         "confidence": 0.7,
         "reasons": [
           "deterministic baseline"
@@ -166,7 +172,7 @@
           "stage": "checklist",
           "rule_id": "frozen_case",
           "detail": "frozen evaluation baseline",
-          "checklist_score": 7,
+          "checklist_score": 8,
           "checklist_max": 11,
           "missing_data": [],
           "debug_reason": "fixture"
@@ -378,13 +384,19 @@
       },
       "deterministic_response": {
         "ticker": "SNOW",
-        "decision": "watchlist",
+        "decision": "trade",
         "time_stop_at": null,
-        "entry_range": null,
-        "stop_loss": null,
-        "take_profit": null,
-        "risk_reward": null,
-        "position_size_eur": null,
+        "entry_range": [
+          10.0,
+          11.0
+        ],
+        "stop_loss": 9.0,
+        "take_profit": [
+          12.0,
+          13.0
+        ],
+        "risk_reward": 2.0,
+        "position_size_eur": 100.0,
         "confidence": 0.7,
         "reasons": [
           "deterministic baseline"
@@ -399,7 +411,7 @@
           "stage": "checklist",
           "rule_id": "frozen_case",
           "detail": "frozen evaluation baseline",
-          "checklist_score": 7,
+          "checklist_score": 8,
           "checklist_max": 11,
           "missing_data": [],
           "debug_reason": "fixture"
@@ -459,7 +471,7 @@
         "acceptable_signals": [
           "negative"
         ],
-        "expected_counterfactual_decision": "no_trade",
+        "expected_counterfactual_decision": "watchlist",
         "appropriate_abstention": false,
         "required_claim_keywords": [],
         "forbidden_claim_keywords": [],
@@ -1380,7 +1392,7 @@
               "materiality": "medium",
               "claim": "Cash conversion weakened.",
               "metric_ids": [
-                "revenue_growth:2026-06-30"
+                "margin:Q2:2026-06-30:ratio:margin-1"
               ],
               "chunk_ids": [
                 15

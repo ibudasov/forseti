@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.db.models import AgentRun
@@ -15,7 +15,12 @@ from app.schemas.fundamental_evaluation import (
     FundamentalReviewSample,
     FundamentalShadowReport,
 )
-from app.schemas.fundamentals import FundamentalAssessmentResult, FundamentalAssessmentValidation, SCHEMA_VERSION
+from app.schemas.fundamentals import (
+    FundamentalAgentEffect,
+    FundamentalAssessmentResult,
+    FundamentalAssessmentValidation,
+    SCHEMA_VERSION,
+)
 from app.services.fundamental_analyst import FundamentalAnalyst, validate_fundamental_assessment
 from app.services.fundamental_context import compute_fundamental_context_hash
 from app.services.fundamental_policy import apply_fundamental_policy
@@ -32,6 +37,35 @@ STRUCTURED_OUTPUT_FAILURES = {
 }
 PROVIDER_FAILURE_PREFIXES = ("provider_error:", "model_failure")
 FALLBACK_SUMMARY = "Fundamental Analyst returned a neutral fallback."
+
+
+@dataclass
+class _MetricTally:
+    structured_valid_cases: int = 0
+    supported_citation_count: int = 0
+    total_citation_count: int = 0
+    cited_material_claim_count: int = 0
+    total_material_claim_count: int = 0
+    unsupported_claim_count: int = 0
+    total_claim_count: int = 0
+    abstention_count: int = 0
+    appropriate_abstention_count: int = 0
+    agreement_count: int = 0
+    duplicate_rejection_count: int = 0
+    hard_blocker_violation_count: int = 0
+    risk_field_mutation_count: int = 0
+    provider_failure_count: int = 0
+    neutral_fallback_count: int = 0
+    adjustment_distribution: Counter[str] = field(
+        default_factory=lambda: Counter({str(value): 0 for value in range(-2, 3)})
+    )
+    outcome_counts: Counter[str] = field(default_factory=Counter)
+    status_counts: Counter[str] = field(default_factory=Counter)
+    confusion_matrix: Counter[str] = field(default_factory=Counter)
+    latencies: list[float] = field(default_factory=list)
+    total_prompt_tokens: int = 0
+    total_candidate_tokens: int = 0
+    total_tokens: int = 0
 
 
 def load_fundamental_evaluation_suite(path: Path = DEFAULT_EVALUATION_FIXTURE) -> FundamentalEvaluationSuite:
@@ -65,12 +99,12 @@ def build_shadow_report(runs: list[AgentRun]) -> FundamentalShadowReport:
         if run.fundamental_agent_effect is not None
         and run.fundamental_agent_effect.get("mode") == "shadow"
     ]
-    outcome_counts = Counter()
-    status_counts = Counter()
-    rejection_reason_counts = Counter()
-    missing_information_counts = Counter()
-    version_breakdown = Counter()
-    baseline_counterfactual_matrix = Counter()
+    outcome_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    rejection_reason_counts: Counter[str] = Counter()
+    missing_information_counts: Counter[str] = Counter()
+    version_breakdown: Counter[str] = Counter()
+    baseline_counterfactual_matrix: Counter[str] = Counter()
     latencies = [run.total_latency_ms for run in effects if run.total_latency_ms > 0]
     total_prompt_tokens = 0
     total_candidate_tokens = 0
@@ -169,32 +203,10 @@ def _evaluate_suite(
     result_provider,
 ) -> FundamentalEvaluationReport:
     validate_fundamental_evaluation_suite(suite)
+    tally = _MetricTally()
     case_reports: list[FundamentalEvaluationCaseReport] = []
     review_samples: list[FundamentalReviewSample] = []
-    structured_valid_cases = 0
-    supported_citation_count = 0
-    total_citation_count = 0
-    cited_material_claim_count = 0
-    total_material_claim_count = 0
-    unsupported_claim_count = 0
-    total_claim_count = 0
-    abstention_count = 0
-    appropriate_abstention_count = 0
-    agreement_count = 0
-    duplicate_rejection_count = 0
-    hard_blocker_violation_count = 0
-    risk_field_mutation_count = 0
-    provider_failure_count = 0
-    neutral_fallback_count = 0
-    adjustment_distribution = Counter({str(value): 0 for value in range(-2, 3)})
-    outcome_counts = Counter()
-    status_counts = Counter()
-    confusion_matrix = Counter()
-    latencies: list[float] = []
-    total_prompt_tokens = 0
-    total_candidate_tokens = 0
-    total_tokens = 0
-    gate_context: list[tuple[FundamentalEvaluationCase, FundamentalAssessmentResult, object]] = []
+    gate_context: list[tuple[FundamentalEvaluationCase, FundamentalAssessmentResult, FundamentalAgentEffect]] = []
 
     for case in suite.cases:
         result = _effective_result(case, result_provider(case))
@@ -205,46 +217,8 @@ def _evaluate_suite(
             assessment_result=result,
         )
         gate_context.append((case, result, effect))
-
-        if _is_structured_output_valid(result):
-            structured_valid_cases += 1
-        citations = _citation_counts(result, case)
-        supported_citation_count += citations["supported"]
-        total_citation_count += citations["total"]
-        material_claims = _material_claim_counts(result)
-        cited_material_claim_count += material_claims["cited"]
-        total_material_claim_count += material_claims["total"]
-        unsupported_claim_count += _unsupported_claim_count(result, case)
-        total_claim_count += len(_all_claims(result))
-        if result.response.status != "completed":
-            abstention_count += 1
-            if case.label.appropriate_abstention:
-                appropriate_abstention_count += 1
-        agreement = _matches_label(case, result, effect)
-        if agreement:
-            agreement_count += 1
-        if "duplicate_evidence_detected" in effect.reason_codes:
-            duplicate_rejection_count += 1
-        if _has_hard_blocker_violation(case, effect):
-            hard_blocker_violation_count += 1
-        if _risk_fields_mutated(case, effect):
-            risk_field_mutation_count += 1
-        if _is_provider_failure(result):
-            provider_failure_count += 1
-        if _is_neutral_fallback(result):
-            neutral_fallback_count += 1
-
-        adjustment_distribution[str(result.response.proposed_score_adjustment)] += 1
+        agreement = _record_case_metrics(tally, case, result, effect)
         outcome = _outcome(case.deterministic_response.decision, effect.counterfactual_decision)
-        outcome_counts[outcome] += 1
-        status_counts[result.response.status] += 1
-        confusion_matrix[f"{case.deterministic_response.decision}->{effect.counterfactual_decision}"] += 1
-        if result.latency_ms > 0:
-            latencies.append(result.latency_ms)
-        prompt_tokens, candidate_tokens, observed_total = _token_totals(result.token_usage)
-        total_prompt_tokens += prompt_tokens
-        total_candidate_tokens += candidate_tokens
-        total_tokens += observed_total
         case_reports.append(
             FundamentalEvaluationCaseReport(
                 case_id=case.case_id,
@@ -265,24 +239,37 @@ def _evaluate_suite(
     case_count = len(suite.cases)
     metrics = FundamentalEvaluationMetrics(
         case_count=case_count,
-        structured_output_validity_rate=_rate(structured_valid_cases, case_count),
-        citation_validity_rate=_rate(supported_citation_count, total_citation_count, default=1.0),
-        material_claim_citation_coverage=_rate(cited_material_claim_count, total_material_claim_count, default=1.0),
-        unsupported_claim_rate=_rate(unsupported_claim_count, total_claim_count, default=0.0),
-        abstention_rate=_rate(abstention_count, case_count),
-        appropriate_abstention_precision=_rate(appropriate_abstention_count, abstention_count, default=1.0),
-        agreement_rate=_rate(agreement_count, case_count),
-        duplicate_evidence_rejection_rate=_rate(duplicate_rejection_count, case_count),
-        hard_blocker_violation_count=hard_blocker_violation_count,
-        risk_field_mutation_count=risk_field_mutation_count,
-        provider_failure_rate=_rate(provider_failure_count, case_count),
-        neutral_fallback_rate=_rate(neutral_fallback_count, case_count),
-        adjustment_distribution=dict(adjustment_distribution),
-        outcome_counts=_sorted_counter(outcome_counts),
-        status_counts=_sorted_counter(status_counts),
-        counterfactual_confusion_matrix=_sorted_counter(confusion_matrix),
-        latency_ms=_latency_summary(latencies),
-        token_usage=_token_summary(total_prompt_tokens, total_candidate_tokens, total_tokens, case_count),
+        structured_output_validity_rate=_rate(tally.structured_valid_cases, case_count),
+        citation_validity_rate=_rate(tally.supported_citation_count, tally.total_citation_count, default=1.0),
+        material_claim_citation_coverage=_rate(
+            tally.cited_material_claim_count,
+            tally.total_material_claim_count,
+            default=1.0,
+        ),
+        unsupported_claim_rate=_rate(tally.unsupported_claim_count, tally.total_claim_count, default=0.0),
+        abstention_rate=_rate(tally.abstention_count, case_count),
+        appropriate_abstention_precision=_rate(
+            tally.appropriate_abstention_count,
+            tally.abstention_count,
+            default=1.0,
+        ),
+        agreement_rate=_rate(tally.agreement_count, case_count),
+        duplicate_evidence_rejection_rate=_rate(tally.duplicate_rejection_count, case_count),
+        hard_blocker_violation_count=tally.hard_blocker_violation_count,
+        risk_field_mutation_count=tally.risk_field_mutation_count,
+        provider_failure_rate=_rate(tally.provider_failure_count, case_count),
+        neutral_fallback_rate=_rate(tally.neutral_fallback_count, case_count),
+        adjustment_distribution=dict(tally.adjustment_distribution),
+        outcome_counts=_sorted_counter(tally.outcome_counts),
+        status_counts=_sorted_counter(tally.status_counts),
+        counterfactual_confusion_matrix=_sorted_counter(tally.confusion_matrix),
+        latency_ms=_latency_summary(tally.latencies),
+        token_usage=_token_summary(
+            tally.total_prompt_tokens,
+            tally.total_candidate_tokens,
+            tally.total_tokens,
+            case_count,
+        ),
     )
     gates = _gate_result(gate_context)
     return FundamentalEvaluationReport(
@@ -318,6 +305,76 @@ def _effective_result(
             )
         }
     )
+
+
+def _record_case_metrics(
+    tally: _MetricTally,
+    case: FundamentalEvaluationCase,
+    result: FundamentalAssessmentResult,
+    effect: FundamentalAgentEffect,
+) -> bool:
+    _record_validation_metrics(tally, case, result, effect)
+    agreement = _matches_label(case, result, effect)
+    if agreement:
+        tally.agreement_count += 1
+
+    outcome = _outcome(case.deterministic_response.decision, effect.counterfactual_decision)
+    tally.adjustment_distribution[str(result.response.proposed_score_adjustment)] += 1
+    tally.outcome_counts[outcome] += 1
+    tally.status_counts[result.response.status] += 1
+    tally.confusion_matrix[f"{case.deterministic_response.decision}->{effect.counterfactual_decision}"] += 1
+
+    _record_runtime_metrics(tally, result)
+    return agreement
+
+
+def _record_validation_metrics(
+    tally: _MetricTally,
+    case: FundamentalEvaluationCase,
+    result: FundamentalAssessmentResult,
+    effect: FundamentalAgentEffect,
+) -> None:
+    if _is_structured_output_valid(result):
+        tally.structured_valid_cases += 1
+
+    citations = _citation_counts(result, case)
+    tally.supported_citation_count += citations["supported"]
+    tally.total_citation_count += citations["total"]
+
+    material_claims = _material_claim_counts(result)
+    tally.cited_material_claim_count += material_claims["cited"]
+    tally.total_material_claim_count += material_claims["total"]
+
+    tally.unsupported_claim_count += _unsupported_claim_count(result, case)
+    tally.total_claim_count += len(_all_claims(result))
+
+    if result.response.status != "completed":
+        tally.abstention_count += 1
+        if case.label.appropriate_abstention:
+            tally.appropriate_abstention_count += 1
+
+    if "duplicate_evidence_detected" in effect.reason_codes:
+        tally.duplicate_rejection_count += 1
+    if _has_hard_blocker_violation(case, effect):
+        tally.hard_blocker_violation_count += 1
+    if _risk_fields_mutated(case, effect):
+        tally.risk_field_mutation_count += 1
+    if _is_provider_failure(result):
+        tally.provider_failure_count += 1
+    if _is_neutral_fallback(result):
+        tally.neutral_fallback_count += 1
+
+
+def _record_runtime_metrics(
+    tally: _MetricTally,
+    result: FundamentalAssessmentResult,
+) -> None:
+    if result.latency_ms > 0:
+        tally.latencies.append(result.latency_ms)
+    prompt_tokens, candidate_tokens, observed_total = _token_totals(result.token_usage)
+    tally.total_prompt_tokens += prompt_tokens
+    tally.total_candidate_tokens += candidate_tokens
+    tally.total_tokens += observed_total
 
 
 def _citation_counts(result: FundamentalAssessmentResult, case: FundamentalEvaluationCase) -> dict[str, int]:
@@ -375,7 +432,7 @@ def _unsupported_claim_count(result: FundamentalAssessmentResult, case: Fundamen
 def _matches_label(
     case: FundamentalEvaluationCase,
     result: FundamentalAssessmentResult,
-    effect,
+    effect: FundamentalAgentEffect,
 ) -> bool:
     label = case.label
     claims = [finding.claim.lower() for finding in _all_claims(result)]
@@ -425,7 +482,10 @@ def _is_structured_output_valid(result: FundamentalAssessmentResult) -> bool:
     )
 
 
-def _has_hard_blocker_violation(case: FundamentalEvaluationCase, effect) -> bool:
+def _has_hard_blocker_violation(
+    case: FundamentalEvaluationCase,
+    effect: FundamentalAgentEffect,
+) -> bool:
     if not _has_hard_blocker(case):
         return False
     return _decision_rank(effect.counterfactual_decision) > _decision_rank(case.deterministic_response.decision)
@@ -441,7 +501,10 @@ def _has_hard_blocker(case: FundamentalEvaluationCase) -> bool:
     )
 
 
-def _risk_fields_mutated(case: FundamentalEvaluationCase, effect) -> bool:
+def _risk_fields_mutated(
+    case: FundamentalEvaluationCase,
+    effect: FundamentalAgentEffect,
+) -> bool:
     if effect.counterfactual_decision == case.deterministic_response.decision:
         return False
     return False
@@ -510,47 +573,45 @@ def _rate(numerator: int, denominator: int, *, default: float = 0.0) -> float:
     return numerator / denominator
 
 
-def _gate_result(gate_context: list[tuple[FundamentalEvaluationCase, FundamentalAssessmentResult, object]]) -> FundamentalEvaluationGateResult:
-    failures: list[str] = []
-    hard_blocker_violations = 0
-    risk_field_mutations = 0
-    accepted_unknown_citations = 0
-    accepted_schema_failures = 0
-    provider_failures_changed_baseline = 0
-
-    for case, result, effect in gate_context:
-        if _has_hard_blocker_violation(case, effect):
-            hard_blocker_violations += 1
-        if _risk_fields_mutated(case, effect):
-            risk_field_mutations += 1
-        if result.validation.accepted and _unsupported_claim_count(result, case) > 0:
-            accepted_unknown_citations += 1
-        if result.validation.accepted and not _is_structured_output_valid(result):
-            accepted_schema_failures += 1
-        if _is_provider_failure(result) and effect.counterfactual_decision != case.deterministic_response.decision:
-            provider_failures_changed_baseline += 1
-
-    if hard_blocker_violations:
-        failures.append(f"hard_blocker_violations={hard_blocker_violations}")
-    if risk_field_mutations:
-        failures.append(f"risk_field_mutations={risk_field_mutations}")
-    if accepted_unknown_citations:
-        failures.append(f"accepted_unknown_citations={accepted_unknown_citations}")
-    if accepted_schema_failures:
-        failures.append(f"accepted_schema_failures={accepted_schema_failures}")
-    if provider_failures_changed_baseline:
-        failures.append(f"provider_failures_changed_baseline={provider_failures_changed_baseline}")
-
-    return FundamentalEvaluationGateResult(
-        passed=not failures,
-        failures=failures,
-    )
+def _gate_result(
+    gate_context: list[tuple[FundamentalEvaluationCase, FundamentalAssessmentResult, FundamentalAgentEffect]]
+) -> FundamentalEvaluationGateResult:
+    failure_counts = {
+        "hard_blocker_violations": sum(
+            1 for case, _, effect in gate_context if _has_hard_blocker_violation(case, effect)
+        ),
+        "risk_field_mutations": sum(
+            1 for case, _, effect in gate_context if _risk_fields_mutated(case, effect)
+        ),
+        "accepted_unknown_citations": sum(
+            1
+            for case, result, _ in gate_context
+            if result.validation.accepted and _unsupported_claim_count(result, case) > 0
+        ),
+        "accepted_schema_failures": sum(
+            1
+            for _, result, _ in gate_context
+            if result.validation.accepted and not _is_structured_output_valid(result)
+        ),
+        "provider_failures_changed_baseline": sum(
+            1
+            for case, result, effect in gate_context
+            if _is_provider_failure(result)
+            and effect.counterfactual_decision != case.deterministic_response.decision
+        ),
+    }
+    failures = [
+        f"{name}={count}"
+        for name, count in failure_counts.items()
+        if count
+    ]
+    return FundamentalEvaluationGateResult(passed=not failures, failures=failures)
 
 
 def _review_sample(
     case: FundamentalEvaluationCase,
     result: FundamentalAssessmentResult,
-    effect,
+    effect: FundamentalAgentEffect,
 ) -> FundamentalReviewSample:
     return FundamentalReviewSample(
         case_id=case.case_id,
