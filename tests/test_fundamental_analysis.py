@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from app.db.models import Fundamental
 from app.domain.fundamentals import (
     MAX_FUNDAMENTAL_SCORE,
     DEBT_TO_EQUITY_MAX,
@@ -16,6 +17,7 @@ from app.domain.fundamentals import (
     FundamentalSnapshotData,
     analyze_fundamentals,
 )
+from app.services.checklist import evaluate_checklist
 
 
 def test_revenue_growth_rule_handles_threshold_edges():
@@ -122,6 +124,53 @@ def test_missing_snapshot_is_reported_explicitly():
         "missing_metric:eps_trend",
     ]
     assert [rule.status for rule in analysis.rule_results] == ["unknown"] * 4
+
+
+def test_present_snapshot_with_missing_metrics_is_not_missing_snapshot():
+    analysis = analyze_fundamentals(
+        "NVDA",
+        FundamentalSnapshotData(
+            has_snapshot=True,
+            as_of_date=date(2025, 12, 31),
+            currency="USD",
+        ),
+    )
+
+    assert "no_fundamental_snapshot" not in analysis.warnings
+    assert analysis.warnings == [
+        "missing_metric:revenue_growth",
+        "missing_metric:fcf",
+        "missing_metric:debt_to_equity",
+        "missing_metric:eps_trend",
+    ]
+
+
+def test_checklist_preserves_fundamental_rule_details():
+    score, results = evaluate_checklist(
+        latest_bar=None,
+        fundamental=Fundamental(
+            security_id=1,
+            as_of_date=date(2025, 12, 31),
+            revenue_growth=Decimal("0.20"),
+            fcf=Decimal("1000"),
+            debt_to_equity=Decimal("0.50"),
+            eps_trend=Decimal("0.10"),
+            margins=Decimal("0.30"),
+            raw_payload={},
+        ),
+        technical_feature=None,
+        vix_close=None,
+        ticker="NVDA",
+        currency="USD",
+    )
+
+    assert score == 6
+    assert [(result.rule_id, result.points, result.detail) for result in results] == [
+        ("revenue_growth", 2, "revenue_growth: 0.20 > 0.15 min"),
+        ("fcf", 2, "fcf: 1000.00 > 0"),
+        ("debt_to_equity", 1, "debt_to_equity: 0.50 < 1.00 max"),
+        ("eps_trend", 1, "eps_trend: 0.10 > 0.00 min"),
+    ]
 
 
 def test_validation_rejects_inconsistent_score_totals():
