@@ -14,18 +14,23 @@ from app.db.models import (
     Recommendation,
     Security,
     Fundamental,
+    FundamentalObservation,
     TechnicalFeature,
 )
 from app.db.repository import (
+    count_fundamental_observations,
     get_latest_fundamental,
+    get_latest_authoritative_observation,
     get_latest_macro_daily,
     get_latest_technical_feature,
     get_next_earnings_event,
-    list_active_securities,
     count_price_bars,
     get_latest_bars,
+    list_active_securities,
+    list_fundamental_observations,
     save_recommendation,
     upsert_fundamental,
+    upsert_fundamental_observations,
     upsert_earnings_event,
     upsert_earnings_events,
     upsert_macro_daily,
@@ -33,6 +38,7 @@ from app.db.repository import (
     upsert_price_bars,
     upsert_technical_feature,
 )
+from app.services.fundamental_history import build_fundamental_history
 
 
 def test_tables_exist(db_engine):
@@ -40,6 +46,7 @@ def test_tables_exist(db_engine):
     assert inspector.has_table("security")
     assert inspector.has_table("price_bar")
     assert inspector.has_table("fundamental")
+    assert inspector.has_table("fundamental_observation")
     assert inspector.has_table("earnings_event")
     assert inspector.has_table("macro_daily")
     assert inspector.has_table("technical_feature")
@@ -310,6 +317,167 @@ def test_upsert_fundamental_updates_matching_security_and_date(db_engine):
         assert rows[0].revenue_growth == Decimal("0.250000")
         assert rows[0].fcf == Decimal("1000.0000")
         assert rows[0].raw_payload == {"version": 2}
+
+
+def test_fundamental_observation_upsert_and_authoritative_reads(db_engine):
+    security = Security(ticker="OBS1", name="Observation One", exchange="NYSE", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    observations = [
+        FundamentalObservation(
+            security_id=security.id,
+            metric_name="revenue",
+            value=Decimal("250.000000"),
+            unit="USD",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 6, 30),
+            fiscal_year=2025,
+            fiscal_period="Q2",
+            form_type="10-Q",
+            filed_at=date(2025, 7, 20),
+            accession_number="0002",
+            source_concept="Revenues",
+            source_url="sec://revenues",
+            is_derived=False,
+        ),
+        FundamentalObservation(
+            security_id=security.id,
+            metric_name="revenue",
+            value=Decimal("260.000000"),
+            unit="USD",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 6, 30),
+            fiscal_year=2025,
+            fiscal_period="Q2",
+            form_type="10-Q/A",
+            filed_at=date(2025, 8, 1),
+            accession_number="0002A",
+            source_concept="Revenues",
+            source_url="sec://revenues-amended",
+            is_derived=False,
+        ),
+        FundamentalObservation(
+            security_id=security.id,
+            metric_name="revenue",
+            value=Decimal("700.000000"),
+            unit="USD",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+            fiscal_year=2025,
+            fiscal_period="FY",
+            form_type="10-K",
+            filed_at=date(2026, 2, 10),
+            accession_number="0004",
+            source_concept="Revenues",
+            source_url="sec://revenues-fy",
+            is_derived=False,
+        ),
+        FundamentalObservation(
+            security_id=security.id,
+            metric_name="net_margin",
+            value=Decimal("0.200000"),
+            unit="ratio",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+            fiscal_year=2025,
+            fiscal_period="FY",
+            form_type="10-K",
+            filed_at=date(2026, 2, 10),
+            accession_number="0004",
+            source_concept="derived:net_margin",
+            source_url="sec://revenues-fy",
+            is_derived=True,
+            derivation="net_margin derived from test rows",
+        ),
+    ]
+
+    upsert_fundamental_observations(observations, engine=db_engine)
+    upsert_fundamental_observations(observations, engine=db_engine)
+
+    assert count_fundamental_observations("OBS1", engine=db_engine) == 4
+
+    all_q2_rows = list_fundamental_observations(
+        "obs1",
+        metric_name="revenue",
+        fiscal_period="Q2",
+        engine=db_engine,
+    )
+    authoritative_q2_rows = list_fundamental_observations(
+        "OBS1",
+        metric_name="revenue",
+        fiscal_period="Q2",
+        authoritative_only=True,
+        engine=db_engine,
+    )
+    latest_q2 = get_latest_authoritative_observation(
+        "OBS1",
+        metric_name="revenue",
+        fiscal_period="Q2",
+        engine=db_engine,
+    )
+
+    assert len(all_q2_rows) == 2
+    assert len(authoritative_q2_rows) == 1
+    assert latest_q2 is not None
+    assert latest_q2.value == Decimal("260.000000")
+    assert latest_q2.accession_number == "0002A"
+
+
+def test_build_fundamental_history_groups_annual_and_quarterly_points(db_engine):
+    security = Security(ticker="HIST1", name="History One", exchange="NYSE", sector_tag="ai")
+    with Session(db_engine) as session:
+        session.add(security)
+        session.commit()
+        session.refresh(security)
+
+    upsert_fundamental_observations(
+        [
+            FundamentalObservation(
+                security_id=security.id,
+                metric_name="revenue",
+                value=Decimal("130.000000"),
+                unit="USD",
+                period_start=date(2025, 1, 1),
+                period_end=date(2025, 3, 31),
+                fiscal_year=2025,
+                fiscal_period="Q1",
+                form_type="10-Q",
+                filed_at=date(2025, 4, 20),
+                accession_number="1001",
+                source_concept="Revenues",
+                source_url="sec://q1",
+                is_derived=False,
+            ),
+            FundamentalObservation(
+                security_id=security.id,
+                metric_name="revenue",
+                value=Decimal("690.000000"),
+                unit="USD",
+                period_start=date(2025, 1, 1),
+                period_end=date(2025, 12, 31),
+                fiscal_year=2025,
+                fiscal_period="FY",
+                form_type="10-K",
+                filed_at=date(2026, 2, 10),
+                accession_number="1004",
+                source_concept="Revenues",
+                source_url="sec://fy",
+                is_derived=False,
+            ),
+        ],
+        engine=db_engine,
+    )
+
+    history = build_fundamental_history("hist1", engine=db_engine)
+
+    assert history.ticker == "HIST1"
+    assert len(history.series) == 1
+    assert history.series[0].metric_name == "revenue"
+    assert [point.fiscal_period for point in history.series[0].annual] == ["FY"]
+    assert [point.fiscal_period for point in history.series[0].quarterly] == ["Q1"]
 
 
 def test_list_active_securities_filters_inactive_rows(db_engine):

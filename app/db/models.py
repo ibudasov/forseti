@@ -95,6 +95,57 @@ class Fundamental(SQLModel, table=True):
     )
 
 
+class FundamentalObservation(SQLModel, table=True):
+    __tablename__ = "fundamental_observation"
+    __table_args__ = (
+        sa.Index("ix_fundamental_observation_metric_period", "security_id", "metric_name", "period_end"),
+        sa.Index(
+            "ix_fundamental_observation_metric_fiscal_period",
+            "security_id",
+            "metric_name",
+            "fiscal_period",
+            "period_end",
+        ),
+        sa.UniqueConstraint(
+            "security_id",
+            "metric_name",
+            "period_start",
+            "period_end",
+            "fiscal_period",
+            "form_type",
+            "unit",
+            "source_concept",
+            "accession_number",
+            "is_derived",
+            name="uq_fundamental_observation_ingest",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    security_id: int = Field(foreign_key="security.id", nullable=False)
+    metric_name: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
+    value: Decimal = Field(sa_column=Column(sa.Numeric(24, 6), nullable=False))
+    unit: Optional[str] = Field(default=None, sa_column=Column(sa.String(length=32), nullable=True))
+    period_start: date = Field(sa_column=Column(sa.Date, nullable=False))
+    period_end: date = Field(sa_column=Column(sa.Date, nullable=False))
+    fiscal_year: Optional[int] = Field(default=None, sa_column=Column(sa.Integer, nullable=True))
+    fiscal_period: str = Field(sa_column=Column(sa.String(length=4), nullable=False))
+    form_type: str = Field(sa_column=Column(sa.String(length=8), nullable=False))
+    filed_at: Optional[date] = Field(default=None, sa_column=Column(sa.Date, nullable=True))
+    accession_number: Optional[str] = Field(default=None, sa_column=Column(sa.String(length=32), nullable=True))
+    source_concept: str = Field(sa_column=Column(sa.String(length=128), nullable=False))
+    source_url: str = Field(sa_column=Column(sa.Text, nullable=False))
+    is_derived: bool = Field(
+        default=False,
+        sa_column=Column(sa.Boolean(), nullable=False, server_default=sa.text("FALSE")),
+    )
+    derivation: Optional[str] = Field(default=None, sa_column=Column(sa.Text, nullable=True))
+    ingested_at: datetime = Field(
+        default_factory=_utc_now,
+        sa_column=Column(sa.DateTime(timezone=True), nullable=False, default=_utc_now),
+    )
+
+
 class EarningsEvent(SQLModel, table=True):
     __tablename__ = "earnings_event"
 

@@ -11,7 +11,7 @@ from typing import Callable
 from app.ingestion.coverage import build_coverage_report
 from app.ingestion.earnings import ingest_earnings
 from app.ingestion.features import compute_technical_features
-from app.ingestion.fundamentals import ingest_fundamentals
+from app.ingestion.fundamentals import backfill_fundamental_observations, ingest_fundamentals
 from app.ingestion.prices import ingest_prices
 from app.ingestion.universe import seed_universe
 from app.ingestion.vix import ingest_vix
@@ -24,11 +24,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Forseti structured data ingestion")
     parser.add_argument(
         "--source",
-        choices=["all", "prices", "vix", "fundamentals", "earnings", "features"],
+        choices=["all", "prices", "vix", "fundamentals", "fundamentals-backfill", "earnings", "features"],
         default="all",
         help="Select which source to ingest",
     )
     parser.add_argument("--ticker", default=None, help="Optional ticker filter for per-security sources")
+    parser.add_argument(
+        "--refetch-fundamentals",
+        action="store_true",
+        help="When backfilling fundamentals, refetch SEC payloads after replaying stored raw payloads",
+    )
     return parser
 
 
@@ -42,6 +47,10 @@ def _run_vix(_: str | None) -> tuple[int, list[str]]:
 
 def _run_fundamentals(ticker: str | None) -> tuple[int, list[str]]:
     return ingest_fundamentals(ticker=ticker)
+
+
+def _run_fundamentals_backfill(ticker: str | None, *, refetch: bool) -> tuple[int, list[str]]:
+    return backfill_fundamental_observations(ticker=ticker, refetch=refetch)
 
 
 def _run_earnings(ticker: str | None) -> tuple[int, list[str]]:
@@ -58,6 +67,7 @@ def _source_handlers() -> dict[str, Callable[[str | None], tuple[int, list[str]]
         "prices": _run_prices,
         "vix": _run_vix,
         "fundamentals": _run_fundamentals,
+        "fundamentals-backfill": lambda ticker: _run_fundamentals_backfill(ticker, refetch=False),
         "earnings": _run_earnings,
         "features": _run_features,
     }
@@ -75,6 +85,11 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _build_parser().parse_args()
     handlers = _source_handlers()
+    if getattr(args, "refetch_fundamentals", False):
+        handlers["fundamentals-backfill"] = lambda ticker: _run_fundamentals_backfill(
+            ticker,
+            refetch=True,
+        )
 
     start_time = time.monotonic()
     selected_sources = list(handlers)
