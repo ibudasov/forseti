@@ -54,7 +54,7 @@ class FundamentalMetricRef(BaseModel):
 
     metric_id: str
     name: str
-    value: float | None
+    value: Decimal | None
     unit: str | None
     period_end: date
 
@@ -81,7 +81,7 @@ class FundamentalRuleResult(BaseModel):
 class DeterministicFundamentalAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = SCHEMA_VERSION
+    schema_version: Literal["1.0"] = SCHEMA_VERSION
     ticker: str
     as_of_date: date | None
     score: int = Field(ge=0)
@@ -195,7 +195,7 @@ def _build_metric_refs(
             FundamentalMetricRef(
                 metric_id=_metric_id(metric_key, snapshot.as_of_date),
                 name=definition.name,
-                value=float(value) if value is not None else None,
+                value=value,
                 unit=_metric_unit(metric_key, snapshot.currency),
                 period_end=snapshot.as_of_date,
             )
