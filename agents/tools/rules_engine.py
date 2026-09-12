@@ -80,7 +80,6 @@ def build_rules_engine_tool(
             fundamental=fundamental,
             technical_feature=technical_feature,
             vix_close=vix_close,
-            ticker=ticker,
         )
         return RulesEngineOutput(
             checklist_score=score,
