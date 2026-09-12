@@ -423,6 +423,16 @@ class TestFundamentalMapping:
         assert result.as_of_date == date(2024, 12, 31)
         assert result.fcf is None
 
+    def test_to_fundamental_keeps_latest_snapshot_without_revenue_row(self):
+        payload = _load_sample_payload()
+        payload["facts"]["us-gaap"].pop("Revenues")
+
+        result = to_fundamental(23, payload)
+
+        assert result is not None
+        assert result.as_of_date == date(2024, 12, 31)
+        assert result.fcf == Decimal("300")
+
 
 class TestObservationNormalization:
     def test_normalize_fundamental_observations_derives_standalone_quarters_and_provenance(self):

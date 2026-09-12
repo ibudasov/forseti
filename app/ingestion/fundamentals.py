@@ -191,13 +191,9 @@ def project_latest_fundamental(
         observations,
         period_end=latest_annual_period,
     )
-    revenue = annual_observations_by_metric.get("revenue")
-    if revenue is None:
-        return None
-
     return Fundamental(
         security_id=security_id,
-        as_of_date=revenue.period_end,
+        as_of_date=latest_annual_period,
         revenue_growth=_observation_value(annual_observations_by_metric.get("revenue_growth_yoy")),
         fcf=_observation_value(annual_observations_by_metric.get("free_cash_flow")),
         debt_to_equity=_observation_value(annual_observations_by_metric.get("debt_to_equity")),
@@ -1044,7 +1040,7 @@ def _latest_annual_period_end(
     annual_periods = [
         observation.period_end
         for observation in observations
-        if observation.metric_name == "revenue" and observation.fiscal_period == "FY"
+        if observation.fiscal_period == "FY"
     ]
     if not annual_periods:
         return None

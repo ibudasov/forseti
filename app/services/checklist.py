@@ -138,10 +138,11 @@ def _fundamental_currency(fundamental: Fundamental) -> str | None:
     for metric_name in projected_metric_names:
         for tag_name in _MONETARY_UNIT_TAGS_BY_METRIC[metric_name]:
             fact_payload = us_gaap.get(tag_name, {})
-            for unit_name in fact_payload.get("units", {}):
+            for unit_name, unit_rows in fact_payload.get("units", {}).items():
                 if "/" in unit_name or unit_name == "shares":
                     continue
-                return unit_name
+                if _unit_rows_cover_snapshot_period(unit_rows, fundamental.as_of_date):
+                    return unit_name
     return None
 
 
@@ -158,6 +159,13 @@ def _projected_metric_names(fundamental: Fundamental) -> list[str]:
     if fundamental.eps_trend is not None:
         projected_metrics.append("eps_trend")
     return projected_metrics
+
+
+def _unit_rows_cover_snapshot_period(unit_rows: list[dict], as_of_date) -> bool:
+    for row in unit_rows:
+        if row.get("end") == as_of_date.isoformat():
+            return True
+    return False
 
 
 def _check_close_vs_sma50(
