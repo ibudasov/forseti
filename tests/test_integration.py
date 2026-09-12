@@ -668,7 +668,7 @@ class TestUniverseDiagnosticsEndpoint:
         from sqlalchemy import func
         from sqlmodel import select
 
-        from app.db.models import DocumentChunk, MacroDaily, Recommendation, SourceType
+        from app.db.models import DocumentChunk, MacroDaily, Recommendation, SourceQualityTier, SourceType
 
         today = date(2026, 1, 10)
         with Session(db_engine) as session:
@@ -694,7 +694,11 @@ class TestUniverseDiagnosticsEndpoint:
                 DocumentChunk(
                     ticker="ONEB1",
                     source_type=SourceType.company_news,
+                    document_id="news:oneb1",
                     source_url="https://example.invalid/oneb1",
+                    publisher="Example Publisher",
+                    title="ONEB1 company news",
+                    source_quality_tier=SourceQualityTier.secondary_reputable,
                     source_hash="oneb1-hash",
                     published_at=datetime(2026, 1, 9, tzinfo=timezone.utc),
                     chunk_index=0,

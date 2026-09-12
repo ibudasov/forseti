@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag analyze fundamental-context assess-fundamentals eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context assess-fundamentals eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -22,6 +22,7 @@ help:
 	@echo "  make ingest           # Run structured data ingestion pipeline"
 	@echo "  make ingest-earnings  # Run earnings ingestion"
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
+	@echo "  make rag-coverage     # Show RAG coverage (use ticker=NVDA [live=1])"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
 	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make assess-fundamentals # Run one fundamental analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
@@ -85,6 +86,12 @@ ingest-earnings: check-compose
 
 ingest-rag: check-compose
 	$(if $(ticker),	$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --ticker $(ticker),$(DOCKER_COMPOSE) run --rm app python -m app.rag.cli --all-active)
+
+rag-coverage: check-compose
+	@if [ -z "$(ticker)" ]; then echo "Error: ticker is required. Run 'make rag-coverage ticker=NVDA [live=1]'"; exit 1; fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		app python -m app.rag.cli --ticker "$(ticker)" --coverage --json $(if $(live),--live,)
 
 analyze: check-compose
 	@if [ -z "$(ticker)" ]; then \

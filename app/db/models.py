@@ -178,9 +178,20 @@ class TechnicalFeature(SQLModel, table=True):
 class SourceType(str, enum.Enum):
     filing_business = "filing_business"
     filing_risk = "filing_risk"
-    earnings_call = "earnings_call"
+    filing_mda = "filing_mda"
+    analyst_recommendations = "analyst_recommendations"
+    earnings_calendar = "earnings_calendar"
+    earnings_release = "earnings_release"
+    earnings_call_transcript = "earnings_call_transcript"
     company_news = "company_news"
     sector_news = "sector_news"
+
+
+class SourceQualityTier(str, enum.Enum):
+    primary_regulatory = "primary_regulatory"
+    primary_company = "primary_company"
+    secondary_reputable = "secondary_reputable"
+    unknown = "unknown"
 
 
 class DocumentChunk(SQLModel, table=True):
@@ -188,6 +199,12 @@ class DocumentChunk(SQLModel, table=True):
     __table_args__ = (
         sa.Index("ix_document_chunk_ticker_source_type", "ticker", "source_type"),
         sa.Index("ix_document_chunk_published_at", "published_at"),
+        sa.Index(
+            "ix_document_chunk_ticker_quality_published",
+            "ticker",
+            "source_quality_tier",
+            "published_at",
+        ),
         sa.UniqueConstraint("source_hash", name="uq_document_chunk_source_hash"),
     )
 
@@ -199,7 +216,20 @@ class DocumentChunk(SQLModel, table=True):
             nullable=False,
         )
     )
+    document_id: str = Field(sa_column=Column(sa.String(length=128), nullable=False, index=True))
     source_url: str = Field(sa_column=Column(sa.Text, nullable=False))
+    publisher: str = Field(sa_column=Column(sa.String(length=255), nullable=False))
+    title: str = Field(sa_column=Column(sa.String(length=512), nullable=False))
+    form_type: Optional[str] = Field(default=None, sa_column=Column(sa.String(length=16), nullable=True))
+    accession_number: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.String(length=32), nullable=True),
+    )
+    period_start: Optional[date] = Field(default=None, sa_column=Column(sa.Date, nullable=True))
+    period_end: Optional[date] = Field(default=None, sa_column=Column(sa.Date, nullable=True))
+    source_quality_tier: SourceQualityTier = Field(
+        sa_column=Column(sa.String(length=32), nullable=False),
+    )
     source_hash: str = Field(sa_column=Column(sa.String(length=64), nullable=False))
     published_at: Optional[datetime] = Field(
         sa_column=Column(sa.DateTime(timezone=True), nullable=True)

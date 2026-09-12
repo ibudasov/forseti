@@ -67,6 +67,10 @@ class Settings(BaseSettings):
         default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
     )
     RAG_FAIL_LOUD: bool = Field(default=False, validation_alias="RAG_FAIL_LOUD")
+    EARNINGS_TRANSCRIPT_URL_TEMPLATE: Optional[str] = Field(
+        default=None,
+        validation_alias="EARNINGS_TRANSCRIPT_URL_TEMPLATE",
+    )
 
     # Agentic workflow (ADK) settings
     PIPELINE_MODE: str = Field(default="linear", validation_alias="PIPELINE_MODE")

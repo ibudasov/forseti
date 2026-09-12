@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from sqlalchemy import inspect
 from sqlmodel import Session
 
-from app.db.models import DocumentChunk, SourceType
-from app.db.repository import upsert_document_chunks, similarity_search
+from app.db.models import DocumentChunk, SourceQualityTier, SourceType
+from app.db.repository import similarity_search, summarize_document_coverage, upsert_document_chunks
 from app.rag.ingestion.base import compute_source_hash
 
 
@@ -21,7 +21,11 @@ def _make_chunk(ticker: str, chunk_index: int, text: str, embedding=None) -> Doc
     return DocumentChunk(
         ticker=ticker,
         source_type=SourceType.filing_business,
+        document_id=f"sec:{ticker}:{chunk_index}",
         source_url=source_url,
+        publisher="Example Issuer",
+        title=f"{ticker} filing section {chunk_index}",
+        source_quality_tier=SourceQualityTier.primary_regulatory,
         source_hash=compute_source_hash(source_url, chunk_index, text),
         published_at=datetime.now(timezone.utc),
         ingested_at=datetime.now(timezone.utc),
@@ -106,3 +110,47 @@ class TestDocumentChunkRepository:
             engine=pgvector_engine,
         )
         assert all(r.source_type == SourceType.filing_risk.value for r in results)
+
+    def test_similarity_search_filters_by_quality_tier(self, pgvector_engine):
+        dim = 768
+        emb = [0.5] * dim
+        primary_chunk = _make_chunk("QUAL", 0, "Primary regulatory text.", embedding=emb)
+        primary_chunk.source_quality_tier = SourceQualityTier.primary_regulatory
+        primary_chunk.source_hash = compute_source_hash("qual-primary", 0, primary_chunk.text)
+
+        secondary_chunk = _make_chunk("QUAL", 1, "Secondary source text.", embedding=emb)
+        secondary_chunk.source_quality_tier = SourceQualityTier.secondary_reputable
+        secondary_chunk.source_hash = compute_source_hash("qual-secondary", 1, secondary_chunk.text)
+
+        upsert_document_chunks([primary_chunk, secondary_chunk], engine=pgvector_engine)
+
+        results = similarity_search(
+            ticker="QUAL",
+            query_embedding=emb,
+            top_k=5,
+            quality_tiers=[SourceQualityTier.primary_regulatory],
+            engine=pgvector_engine,
+        )
+        assert len(results) == 1
+        assert results[0].source_quality_tier == SourceQualityTier.primary_regulatory.value
+
+    def test_summarize_document_coverage_groups_by_source_type(self, pgvector_engine):
+        first_chunk = _make_chunk("COVR", 0, "Business section text.")
+        second_chunk = _make_chunk("COVR", 1, "Another business section text.")
+        second_chunk.document_id = first_chunk.document_id
+        second_chunk.source_hash = compute_source_hash("cover-business", 1, second_chunk.text)
+
+        risk_chunk = _make_chunk("COVR", 2, "Risk factors text.")
+        risk_chunk.document_id = "sec:COVR:risk"
+        risk_chunk.source_type = SourceType.filing_risk
+        risk_chunk.source_hash = compute_source_hash("cover-risk", 2, risk_chunk.text)
+
+        upsert_document_chunks([first_chunk, second_chunk, risk_chunk], engine=pgvector_engine)
+
+        rows = summarize_document_coverage("COVR", engine=pgvector_engine)
+
+        assert rows[0]["source_type"] == SourceType.filing_business.value
+        assert rows[0]["chunk_count"] == 2
+        assert rows[0]["document_count"] == 1
+        assert rows[1]["source_type"] == SourceType.filing_risk.value
+        assert rows[1]["chunk_count"] == 1

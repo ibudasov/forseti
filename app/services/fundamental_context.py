@@ -45,12 +45,22 @@ EVIDENCE_QUESTIONS: tuple[EvidenceQuestion, ...] = (
     EvidenceQuestion(
         question_id="growth_sustainability",
         prompt="What explains recent revenue growth or decline, and is it sustainable?",
-        source_types=(SourceType.filing_business, SourceType.earnings_call, SourceType.company_news),
+        source_types=(
+            SourceType.filing_mda,
+            SourceType.earnings_release,
+            SourceType.earnings_call_transcript,
+            SourceType.company_news,
+        ),
     ),
     EvidenceQuestion(
         question_id="cash_flow_and_margins",
         prompt="What explains cash-flow and margin movements?",
-        source_types=(SourceType.filing_business, SourceType.earnings_call, SourceType.company_news),
+        source_types=(
+            SourceType.filing_mda,
+            SourceType.earnings_release,
+            SourceType.earnings_call_transcript,
+            SourceType.company_news,
+        ),
     ),
     EvidenceQuestion(
         question_id="concentration_risks",
@@ -60,17 +70,27 @@ EVIDENCE_QUESTIONS: tuple[EvidenceQuestion, ...] = (
     EvidenceQuestion(
         question_id="guidance_vs_history",
         prompt="What does management guidance imply relative to historical trends?",
-        source_types=(SourceType.earnings_call, SourceType.company_news, SourceType.filing_business),
+        source_types=(
+            SourceType.earnings_release,
+            SourceType.earnings_call_transcript,
+            SourceType.filing_mda,
+            SourceType.company_news,
+        ),
     ),
     EvidenceQuestion(
         question_id="one_offs_and_accounting",
         prompt="Are there one-off items or accounting effects that distort EPS or free cash flow?",
-        source_types=(SourceType.filing_risk, SourceType.earnings_call, SourceType.company_news),
+        source_types=(
+            SourceType.filing_mda,
+            SourceType.filing_risk,
+            SourceType.earnings_release,
+            SourceType.company_news,
+        ),
     ),
     EvidenceQuestion(
         question_id="liquidity_and_dilution",
         prompt="What liquidity, debt-maturity, dilution, or capex risks are material?",
-        source_types=(SourceType.filing_risk, SourceType.filing_business, SourceType.company_news),
+        source_types=(SourceType.filing_mda, SourceType.filing_risk, SourceType.company_news),
     ),
 )
 
@@ -360,7 +380,11 @@ def _quality_rank(source_type: SourceType | str) -> int:
     return {
         SourceType.filing_business.value: 0,
         SourceType.filing_risk.value: 0,
-        SourceType.earnings_call.value: 1,
+        SourceType.filing_mda.value: 0,
+        SourceType.earnings_release.value: 0,
+        SourceType.earnings_call_transcript.value: 1,
+        SourceType.analyst_recommendations.value: 2,
+        SourceType.earnings_calendar.value: 2,
         SourceType.company_news.value: 2,
         SourceType.sector_news.value: 3,
     }[value]

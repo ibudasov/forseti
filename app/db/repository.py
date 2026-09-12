@@ -20,6 +20,7 @@ from app.db.models import (
     PriceBar,
     Recommendation,
     Security,
+    SourceQualityTier,
     SourceType,
     TechnicalFeature,
 )
@@ -426,6 +427,7 @@ def similarity_search(
     query_embedding: List[float],
     top_k: int = 5,
     source_types: Optional[List[SourceType]] = None,
+    quality_tiers: Optional[List[SourceQualityTier]] = None,
     published_after: Optional[datetime] = None,
     engine=None,
 ) -> List[DocumentChunk]:
@@ -448,6 +450,9 @@ def similarity_search(
     if source_types:
         stmt = stmt.where(table.c.source_type.in_([st.value for st in source_types]))
 
+    if quality_tiers:
+        stmt = stmt.where(table.c.source_quality_tier.in_([tier.value for tier in quality_tiers]))
+
     if published_after is not None:
         stmt = stmt.where(
             sa.or_(table.c.published_at.is_(None), table.c.published_at >= published_after)
@@ -462,6 +467,28 @@ def similarity_search(
     with get_session(engine) as session:
         rows = session.execute(stmt).fetchall()
         return [DocumentChunk(**dict(row._mapping)) for row in rows]
+
+
+def summarize_document_coverage(ticker: str, engine=None) -> list[dict[str, object]]:
+    engine = engine or get_engine()
+    normalized_ticker = _normalize_ticker(ticker)
+    table = DocumentChunk.__table__
+    stmt = (
+        sa.select(
+            table.c.source_type,
+            table.c.source_quality_tier,
+            func.count().label("chunk_count"),
+            func.count(sa.distinct(table.c.document_id)).label("document_count"),
+            func.max(table.c.published_at).label("latest_published_at"),
+            func.max(table.c.ingested_at).label("latest_ingested_at"),
+        )
+        .where(table.c.ticker == normalized_ticker)
+        .group_by(table.c.source_type, table.c.source_quality_tier)
+        .order_by(table.c.source_type.asc())
+    )
+    with get_session(engine) as session:
+        rows = session.execute(stmt).fetchall()
+    return [dict(row._mapping) for row in rows]
 
 
 def _authoritative_observations(

@@ -40,3 +40,15 @@ def test_llm_io_debug_capture_defaults_off():
     settings = Settings(_env_file=None)
     assert settings.DEBUG_LLM_IO is False
     assert settings.DEBUG_LLM_IO_DIR == "/tmp/forseti-llm-io"
+
+
+def test_earnings_transcript_template_defaults_to_none(monkeypatch):
+    monkeypatch.delenv("EARNINGS_TRANSCRIPT_URL_TEMPLATE", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE is None
+
+
+def test_earnings_transcript_template_reads_env_var(monkeypatch):
+    monkeypatch.setenv("EARNINGS_TRANSCRIPT_URL_TEMPLATE", "https://example.com/{ticker}")
+    settings = Settings(_env_file=None)
+    assert settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE == "https://example.com/{ticker}"

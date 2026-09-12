@@ -6,7 +6,14 @@ from decimal import Decimal
 
 from sqlmodel import Session
 
-from app.db.models import DocumentChunk, Fundamental, FundamentalObservation, Security, SourceType
+from app.db.models import (
+    DocumentChunk,
+    Fundamental,
+    FundamentalObservation,
+    Security,
+    SourceQualityTier,
+    SourceType,
+)
 from app.db.repository import upsert_fundamental, upsert_fundamental_observations
 from app.services.fundamental_context import build_fundamental_analysis_request
 
@@ -310,7 +317,11 @@ def _chunk(
         id=chunk_id,
         ticker="CTX1",
         source_type=source_type,
+        document_id=f"doc-{chunk_id}",
         source_url=f"https://example.com/{chunk_id}",
+        publisher="Example Publisher",
+        title=f"Chunk {chunk_id}",
+        source_quality_tier=SourceQualityTier.primary_regulatory,
         source_hash=f"hash-{chunk_id}",
         published_at=published_at,
         chunk_index=0,
