@@ -239,6 +239,24 @@ class FundamentalAssessmentResult(BaseModel):
     prompt_version: str
 
 
+class FundamentalAgentEffect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["off", "shadow", "enforced"]
+    accepted: bool
+    reason_codes: list[str] = Field(default_factory=list)
+    raw_adjustment: int
+    applied_adjustment: int
+    baseline_fundamental_score: int = Field(ge=0)
+    adjusted_fundamental_score: int = Field(ge=0)
+    baseline_total_score: int = Field(ge=0)
+    adjusted_total_score: int = Field(ge=0)
+    baseline_decision: Literal["trade", "watchlist", "no_trade"]
+    counterfactual_decision: Literal["trade", "watchlist", "no_trade"]
+    final_decision: Literal["trade", "watchlist", "no_trade"]
+    decision_changed: bool
+
+
 def _assert_unique_metric_ids(points: list[MetricSeriesPoint]) -> None:
     metric_ids = [point.metric_id for point in points]
     if len(metric_ids) != len(set(metric_ids)):

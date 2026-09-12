@@ -278,6 +278,10 @@ class AgentRun(SQLModel, table=True):
         default_factory=list,
         sa_column=Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
     )
+    fundamental_agent_effect: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
 
 
 class AgentRunStep(SQLModel, table=True):
