@@ -5,7 +5,7 @@ from typing import Any
 
 from app.db.models import SourceQualityTier, SourceType
 from app.db.repository import get_security, summarize_document_coverage
-from app.rag.ingestion.base import IngestionResult, SourceCoverage
+from app.rag.ingestion.base import IngestionResult, Ingestor, SourceCoverage
 from app.rag.ingestion.earnings import EarningsCallIngestor
 from app.rag.ingestion.edgar import SECEdgarIngestor
 from app.rag.ingestion.news import CompanyNewsIngestor, SectorNewsIngestor
@@ -48,7 +48,11 @@ def build_coverage_report(
                 "latest_published_at": _isoformat(stored_row.get("latest_published_at")),
                 "latest_ingested_at": _isoformat(stored_row.get("latest_ingested_at")),
                 "status": live_row.status if live_row is not None else ("available" if stored_row else "missing"),
-                "detail": live_row.detail if live_row is not None else ("stored_chunks_present" if stored_row else "not_ingested"),
+                "detail": (
+                    live_row.detail
+                    if live_row is not None
+                    else ("stored_chunks_present" if stored_row else "not_ingested")
+                ),
             }
         )
 
@@ -63,7 +67,7 @@ def _live_coverage(ticker: str, *, engine=None) -> dict[str, SourceCoverage]:
     settings = get_settings()
     security = get_security(ticker, engine=engine)
     sector = None if security is None else security.sector_tag.value
-    ingestors = [
+    ingestors: list[Ingestor] = [
         SECEdgarIngestor(user_agent=settings.EDGAR_USER_AGENT),
         CompanyNewsIngestor(),
         EarningsCallIngestor(transcript_url_template=settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE),

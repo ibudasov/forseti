@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Iterable, List
+from typing import Iterable
 
 import requests
 

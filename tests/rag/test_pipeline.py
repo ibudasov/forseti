@@ -25,7 +25,11 @@ class _MockEmbeddingClient:
 
 
 class _SingleDocIngestor:
-    def __init__(self, ticker: str, text: str = "Some evidence sentence about the business. Another sentence follows.") -> None:
+    def __init__(
+        self,
+        ticker: str,
+        text: str = "Some evidence sentence about the business. Another sentence follows.",
+    ) -> None:
         self._ticker = ticker
         self._text = text
 
