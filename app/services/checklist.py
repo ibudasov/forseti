@@ -58,34 +58,34 @@ def evaluate_checklist(
         total_score += result.points
 
     # Rule 5: Close vs SMA50 (+1)
-    result = _check_close_vs_sma50(latest_bar, technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_close_vs_sma50(latest_bar, technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 6: Close vs SMA200 (+1)
-    result = _check_close_vs_sma200(latest_bar, technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_close_vs_sma200(latest_bar, technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 7: RSI healthy 45-65 (+1)
-    result = _check_rsi_healthy(technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_rsi_healthy(technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 8: Volume trend > 1.0 (+1)
-    result = _check_volume_trend(technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_volume_trend(technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 9: VIX calm < 25 (+1)
-    result = _check_vix_calm(vix_close)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_vix_calm(vix_close)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     return total_score, results
 
