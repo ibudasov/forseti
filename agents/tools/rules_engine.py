@@ -18,6 +18,7 @@ from app.db.repository import (
     get_latest_macro_daily,
     get_latest_technical_feature,
     get_next_earnings_event,
+    get_security,
 )
 from app.services.checklist import evaluate_checklist
 from app.services.vetoes import check_vetoes
@@ -51,6 +52,7 @@ def build_rules_engine_tool(
         """
         bars = list(reversed(get_latest_bars(ticker, 250, engine=engine)))
         latest_bar = bars[-1] if bars else None
+        security = get_security(ticker, engine=engine)
         technical_feature = get_latest_technical_feature(ticker, engine=engine)
         fundamental = get_latest_fundamental(ticker, engine=engine)
         vix_row = get_latest_macro_daily(engine=engine)
@@ -80,6 +82,8 @@ def build_rules_engine_tool(
             fundamental=fundamental,
             technical_feature=technical_feature,
             vix_close=vix_close,
+            ticker=ticker,
+            currency=getattr(security, "currency", None) if security else None,
         )
         return RulesEngineOutput(
             checklist_score=score,

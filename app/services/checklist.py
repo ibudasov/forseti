@@ -5,11 +5,12 @@ from decimal import Decimal
 from typing import List, Optional
 
 from app.db.models import Fundamental, PriceBar, TechnicalFeature
+from app.domain.fundamentals import (
+    FundamentalSnapshotData,
+    analyze_fundamentals,
+)
 
 # Frozen constants for checklist scoring
-REVENUE_GROWTH_MIN = Decimal("0.15")
-DEBT_TO_EQUITY_MAX = Decimal("1.0")
-EPS_TREND_MIN = Decimal("0")
 RSI_HEALTHY_MIN = 45
 RSI_HEALTHY_MAX = 65
 VIX_CALM_MAX = 25
@@ -29,6 +30,8 @@ def evaluate_checklist(
     fundamental: Optional[Fundamental],
     technical_feature: Optional[TechnicalFeature],
     vix_close: Optional[Decimal],
+    ticker: str = "",
+    currency: Optional[str] = None,
 ) -> tuple[int, List[ChecklistResult]]:
     """
     Evaluate all checklist rules.
@@ -38,27 +41,19 @@ def evaluate_checklist(
     results: List[ChecklistResult] = []
     total_score = 0
 
-    # Rule 1: Revenue growth > 0.15 YoY (+2)
-    result = _check_revenue_growth(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 2: FCF > 0 (+2)
-    result = _check_fcf(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 3: Debt to equity < 1.0 (+1)
-    result = _check_debt_to_equity(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 4: EPS trend > 0 (+1)
-    result = _check_eps_trend(fundamental)
-    if result:
+    # Rules 1-4: Deterministic fundamentals baseline (+6 max)
+    fundamental_analysis = analyze_fundamentals(
+        ticker=ticker,
+        snapshot=_to_fundamental_snapshot(fundamental, currency),
+    )
+    for rule_result in fundamental_analysis.rule_results:
+        if rule_result.status != "passed":
+            continue
+        result = ChecklistResult(
+            rule_id=rule_result.rule_id,
+            points=rule_result.points_awarded,
+            detail=rule_result.explanation,
+        )
         results.append(result)
         total_score += result.points
 
@@ -95,56 +90,22 @@ def evaluate_checklist(
     return total_score, results
 
 
-def _check_revenue_growth(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.revenue_growth is None:
-        return None
-    rg = Decimal(str(fundamental.revenue_growth))
-    if rg > REVENUE_GROWTH_MIN:
-        return ChecklistResult(
-            rule_id="revenue_growth",
-            points=2,
-            detail=f"revenue_growth: {float(rg):.2f} > {float(REVENUE_GROWTH_MIN):.2f} min",
-        )
-    return None
+def _to_fundamental_snapshot(
+    fundamental: Optional[Fundamental],
+    currency: Optional[str],
+) -> FundamentalSnapshotData:
+    if fundamental is None:
+        return FundamentalSnapshotData(currency=currency)
 
-
-def _check_fcf(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.fcf is None:
-        return None
-    fcf = Decimal(str(fundamental.fcf))
-    if fcf > 0:
-        return ChecklistResult(
-            rule_id="fcf",
-            points=2,
-            detail=f"fcf: {float(fcf):.2f} > 0",
-        )
-    return None
-
-
-def _check_debt_to_equity(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.debt_to_equity is None:
-        return None
-    de = Decimal(str(fundamental.debt_to_equity))
-    if de < DEBT_TO_EQUITY_MAX:
-        return ChecklistResult(
-            rule_id="debt_to_equity",
-            points=1,
-            detail=f"debt_to_equity: {float(de):.2f} < {float(DEBT_TO_EQUITY_MAX):.2f} max",
-        )
-    return None
-
-
-def _check_eps_trend(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.eps_trend is None:
-        return None
-    et = Decimal(str(fundamental.eps_trend))
-    if et > EPS_TREND_MIN:
-        return ChecklistResult(
-            rule_id="eps_trend",
-            points=1,
-            detail=f"eps_trend: {float(et):.2f} > {float(EPS_TREND_MIN):.2f} min",
-        )
-    return None
+    return FundamentalSnapshotData(
+        as_of_date=fundamental.as_of_date,
+        revenue_growth=fundamental.revenue_growth,
+        fcf=fundamental.fcf,
+        debt_to_equity=fundamental.debt_to_equity,
+        eps_trend=fundamental.eps_trend,
+        margins=fundamental.margins,
+        currency=currency,
+    )
 
 
 def _check_close_vs_sma50(
