@@ -101,7 +101,18 @@ def _to_fundamental_snapshot(
         debt_to_equity=fundamental.debt_to_equity,
         eps_trend=fundamental.eps_trend,
         margins=fundamental.margins,
+        currency=_fundamental_currency(fundamental),
     )
+
+
+def _fundamental_currency(fundamental: Fundamental) -> str | None:
+    us_gaap = fundamental.raw_payload.get("facts", {}).get("us-gaap", {})
+    for fact_payload in us_gaap.values():
+        for unit_name in fact_payload.get("units", {}):
+            if "/" in unit_name or unit_name == "shares":
+                continue
+            return unit_name
+    return None
 
 
 def _check_close_vs_sma50(

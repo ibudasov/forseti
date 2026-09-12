@@ -478,6 +478,7 @@ def test_build_fundamental_history_groups_annual_and_quarterly_points(db_engine)
     assert history.series[0].metric_name == "revenue"
     assert [point.fiscal_period for point in history.series[0].annual] == ["FY"]
     assert [point.fiscal_period for point in history.series[0].quarterly] == ["Q1"]
+    assert history.series[0].annual[0].value == Decimal("690.000000")
 
 
 def test_list_active_securities_filters_inactive_rows(db_engine):

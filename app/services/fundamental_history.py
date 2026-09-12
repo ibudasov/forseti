@@ -54,7 +54,7 @@ def build_fundamental_history(
 def _to_point(observation: FundamentalObservation) -> FundamentalObservationPoint:
     return FundamentalObservationPoint(
         metric_name=observation.metric_name,
-        value=float(observation.value),
+        value=observation.value,
         unit=observation.unit,
         period_start=observation.period_start,
         period_end=observation.period_end,

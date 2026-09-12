@@ -952,9 +952,14 @@ def _derived_seed(
 
 
 def _authoritative_seeds(observations: list[ObservationSeed]) -> list[ObservationSeed]:
-    winners: dict[tuple[str, str, date], ObservationSeed] = {}
+    winners: dict[tuple[str, str, date, str | None], ObservationSeed] = {}
     for observation in observations:
-        key = (observation.metric_name, observation.fiscal_period, observation.period_end)
+        key = (
+            observation.metric_name,
+            observation.fiscal_period,
+            observation.period_end,
+            observation.unit,
+        )
         current = winners.get(key)
         if current is None or _seed_sort_key(observation) > _seed_sort_key(current):
             winners[key] = observation

@@ -14,7 +14,7 @@ from app.db.models import (
     TechnicalFeature,
 )
 from app.services.analyzer import analyze
-from app.services.checklist import evaluate_checklist
+from app.services.checklist import _to_fundamental_snapshot, evaluate_checklist
 from app.services.risk import calculate_risk_levels, RiskConfig
 from app.services.vetoes import check_vetoes
 
@@ -206,6 +206,34 @@ class TestChecklist:
         )
         assert score == 11
         assert len(results) == 9
+
+    def test_persisted_fundamental_snapshot_derives_currency_from_raw_payload(self):
+        fundamental = Fundamental(
+            security_id=1,
+            as_of_date=date(2026, 1, 1),
+            revenue_growth=None,
+            fcf=Decimal("1000000"),
+            debt_to_equity=None,
+            eps_trend=None,
+            margins=None,
+            raw_payload={
+                "facts": {
+                    "us-gaap": {
+                        "Revenues": {
+                            "units": {
+                                "USD": [
+                                    {"end": "2026-01-01", "val": 1, "form": "10-K", "fp": "FY"},
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+        snapshot = _to_fundamental_snapshot(fundamental)
+
+        assert snapshot.currency == "USD"
 
     def test_analyze_uses_newest_bar_for_checklist_scoring(self, monkeypatch):
         """Latest price data should drive the checklist and veto signals."""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 
 class FundamentalObservationPoint(BaseModel):
     metric_name: str
-    value: float
+    value: Decimal
     unit: Optional[str] = None
     period_start: date
     period_end: date

@@ -474,12 +474,13 @@ def similarity_search(
 def _authoritative_observations(
     observations: List[FundamentalObservation],
 ) -> List[FundamentalObservation]:
-    winners: dict[tuple[str, str, date], FundamentalObservation] = {}
+    winners: dict[tuple[str, str, date, str | None], FundamentalObservation] = {}
     for observation in observations:
         key = (
             observation.metric_name,
             observation.fiscal_period,
             observation.period_end,
+            observation.unit,
         )
         current = winners.get(key)
         if current is None or _observation_sort_key(observation) > _observation_sort_key(current):
