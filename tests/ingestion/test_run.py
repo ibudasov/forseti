@@ -121,3 +121,30 @@ class TestIngestionRun:
 
         assert exit_code == 0
         assert calls == [("NVDA", True)]
+
+    def test_run_all_source_ignores_refetch_flag_for_backfill(self, monkeypatch):
+        class ParserStub:
+            def parse_args(self):
+                return Namespace(source="all", ticker=None, refetch_fundamentals=True)
+
+        calls: list[bool] = []
+
+        monkeypatch.setattr(run, "_build_parser", lambda: ParserStub())
+        monkeypatch.setattr(run, "seed_universe", lambda: 0)
+        monkeypatch.setattr(
+            run,
+            "_source_handlers",
+            lambda: {
+                "prices": lambda _: (1, []),
+                "vix": lambda _: (1, []),
+                "fundamentals": lambda _: (1, []),
+                "earnings": lambda _: (1, []),
+                "features": lambda _: (1, []),
+                "fundamentals-backfill": lambda _: (calls.append(True) or (1, [])),
+            },
+        )
+
+        exit_code = run.main()
+
+        assert exit_code == 0
+        assert calls == []

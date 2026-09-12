@@ -85,14 +85,18 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = _build_parser().parse_args()
     handlers = _source_handlers()
-    if getattr(args, "refetch_fundamentals", False):
+    if args.source == "fundamentals-backfill" and getattr(args, "refetch_fundamentals", False):
         handlers["fundamentals-backfill"] = lambda ticker: _run_fundamentals_backfill(
             ticker,
             refetch=True,
         )
 
     start_time = time.monotonic()
-    selected_sources = list(handlers)
+    selected_sources = [
+        source_name
+        for source_name in handlers
+        if source_name != "fundamentals-backfill"
+    ]
     if args.source != "all":
         selected_sources = [args.source]
 

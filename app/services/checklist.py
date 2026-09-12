@@ -15,6 +15,32 @@ RSI_HEALTHY_MIN = 45
 RSI_HEALTHY_MAX = 65
 VIX_CALM_MAX = 25
 MAX_SCORE = 11
+_MONETARY_UNIT_TAGS_BY_METRIC = {
+    "fcf": (
+        "NetCashProvidedByUsedInOperatingActivities",
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+    ),
+    "revenue_growth": (
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+    ),
+    "debt_to_equity": (
+        "LongTermDebtNoncurrent",
+        "LongTermDebt",
+        "DebtCurrent",
+        "LongTermDebtCurrent",
+        "Liabilities",
+        "StockholdersEquity",
+    ),
+    "eps_trend": (),
+    "margins": (
+        "NetIncomeLoss",
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+    ),
+}
 
 
 @dataclass
@@ -108,12 +134,30 @@ def to_fundamental_snapshot(
 
 def _fundamental_currency(fundamental: Fundamental) -> str | None:
     us_gaap = fundamental.raw_payload.get("facts", {}).get("us-gaap", {})
-    for fact_payload in us_gaap.values():
-        for unit_name in fact_payload.get("units", {}):
-            if "/" in unit_name or unit_name == "shares":
-                continue
-            return unit_name
+    projected_metric_names = _projected_metric_names(fundamental)
+    for metric_name in projected_metric_names:
+        for tag_name in _MONETARY_UNIT_TAGS_BY_METRIC[metric_name]:
+            fact_payload = us_gaap.get(tag_name, {})
+            for unit_name in fact_payload.get("units", {}):
+                if "/" in unit_name or unit_name == "shares":
+                    continue
+                return unit_name
     return None
+
+
+def _projected_metric_names(fundamental: Fundamental) -> list[str]:
+    projected_metrics: list[str] = []
+    if fundamental.fcf is not None:
+        projected_metrics.append("fcf")
+    if fundamental.revenue_growth is not None:
+        projected_metrics.append("revenue_growth")
+    if fundamental.debt_to_equity is not None:
+        projected_metrics.append("debt_to_equity")
+    if fundamental.margins is not None:
+        projected_metrics.append("margins")
+    if fundamental.eps_trend is not None:
+        projected_metrics.append("eps_trend")
+    return projected_metrics
 
 
 def _check_close_vs_sma50(

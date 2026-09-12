@@ -219,7 +219,7 @@ class TestChecklist:
             raw_payload={
                 "facts": {
                     "us-gaap": {
-                        "Revenues": {
+                        "NetCashProvidedByUsedInOperatingActivities": {
                             "units": {
                                 "USD": [
                                     {"end": "2026-01-01", "val": 1, "form": "10-K", "fp": "FY"},

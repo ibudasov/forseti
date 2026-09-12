@@ -92,15 +92,8 @@ def upsert_fundamental_observations(
         payload.pop("id", None)
 
     stmt = pg_insert(FundamentalObservation.__table__).values(payloads)
-    stmt = stmt.on_conflict_do_update(
+    stmt = stmt.on_conflict_do_nothing(
         constraint="uq_fundamental_observation_ingest",
-        set_={
-            "value": stmt.excluded.value,
-            "filed_at": stmt.excluded.filed_at,
-            "source_url": stmt.excluded.source_url,
-            "derivation": stmt.excluded.derivation,
-            "ingested_at": stmt.excluded.ingested_at,
-        },
     )
 
     with get_session(engine) as session:
