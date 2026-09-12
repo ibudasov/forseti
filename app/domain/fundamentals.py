@@ -39,6 +39,7 @@ FUNDAMENTAL_METRIC_DEFINITIONS = {
 class FundamentalSnapshotData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    has_snapshot: bool = True
     as_of_date: Optional[date] = None
     revenue_growth: Optional[Decimal] = None
     fcf: Optional[Decimal] = None
@@ -184,7 +185,7 @@ def _build_metric_refs(
     snapshot: FundamentalSnapshotData,
     metric_values: dict[str, Optional[Decimal]],
 ) -> list[FundamentalMetricRef]:
-    if snapshot.as_of_date is None:
+    if not snapshot.has_snapshot or snapshot.as_of_date is None:
         return []
 
     refs: list[FundamentalMetricRef] = []
@@ -312,7 +313,7 @@ def _build_warnings(
     rule_results: list[FundamentalRuleResult],
 ) -> list[str]:
     warnings: list[str] = []
-    if snapshot.as_of_date is None:
+    if not snapshot.has_snapshot:
         warnings.append("no_fundamental_snapshot")
     for result in rule_results:
         if result.status == "unknown":

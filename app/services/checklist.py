@@ -96,7 +96,7 @@ def _to_fundamental_snapshot(
     currency: Optional[str],
 ) -> FundamentalSnapshotData:
     if fundamental is None:
-        return FundamentalSnapshotData(currency=currency)
+        return FundamentalSnapshotData(has_snapshot=False, currency=currency)
 
     return FundamentalSnapshotData(
         as_of_date=fundamental.as_of_date,

@@ -106,6 +106,24 @@ def test_all_fail_analysis_reports_four_explicit_failed_rules():
     assert [rule.status for rule in analysis.rule_results] == ["failed"] * 4
 
 
+def test_missing_snapshot_is_reported_explicitly():
+    analysis = analyze_fundamentals(
+        "NVDA",
+        FundamentalSnapshotData(has_snapshot=False, currency="USD"),
+    )
+
+    assert analysis.as_of_date is None
+    assert analysis.metrics == []
+    assert analysis.warnings == [
+        "no_fundamental_snapshot",
+        "missing_metric:revenue_growth",
+        "missing_metric:fcf",
+        "missing_metric:debt_to_equity",
+        "missing_metric:eps_trend",
+    ]
+    assert [rule.status for rule in analysis.rule_results] == ["unknown"] * 4
+
+
 def test_validation_rejects_inconsistent_score_totals():
     with pytest.raises(ValidationError, match="Score must equal the sum of awarded points"):
         DeterministicFundamentalAnalysis(
