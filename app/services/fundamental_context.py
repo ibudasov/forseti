@@ -285,7 +285,10 @@ def _build_evidence_pack(
         for chunk in _prefer_source_diversity(eligible):
             if len(selected_for_question) >= MAX_CHUNKS_PER_QUESTION:
                 break
-            if chunk.id in selected_chunk_ids:
+            chunk_id = chunk.id
+            if chunk_id is None:
+                continue
+            if chunk_id in selected_chunk_ids:
                 continue
             remaining_characters = MAX_TOTAL_EVIDENCE_CHARACTERS - selected_characters
             if remaining_characters <= 0:
@@ -300,9 +303,9 @@ def _build_evidence_pack(
             selected_characters += len(chunk_text)
             truncated = truncated or was_truncated
             question_truncated = question_truncated or was_truncated
-            selected_chunk_ids.add(chunk.id)
+            selected_chunk_ids.add(chunk_id)
             evidence_chunk = EvidenceChunkInput(
-                chunk_id=chunk.id,
+                chunk_id=chunk_id,
                 retrieval_question_id=question.question_id,
                 source_type=_enum_value(chunk.source_type),
                 source_url=chunk.source_url,
