@@ -36,6 +36,7 @@ from agents.orchestration.trace_recorder import TraceRecorder
 from agents.tools.ticker_resolver import resolve_ticker
 from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, get_latest_bars, save_agent_run
+from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.fundamental_analyst import FundamentalAnalyst
 from app.services.fundamental_context import build_fundamental_analysis_request
@@ -175,11 +176,13 @@ class AgenticAnalysisWorkflow:
         engine=None,
         runner_factory: Optional[RunnerFactory] = None,
         llm_io_recorder=None,
+        embedding_client: Optional[EmbeddingClient] = None,
     ) -> None:
         self.config = config
         self.engine = engine
         self.runner_factory = runner_factory or self._default_runner_factory
         self.llm_io_recorder = llm_io_recorder
+        self.embedding_client = embedding_client
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         run_id = str(uuid4())
@@ -310,7 +313,14 @@ class AgenticAnalysisWorkflow:
         *,
         today: date | None,
     ) -> AgentRegistry:
-        registry = build_agent_registry(config=self.config, engine=self.engine, today=today)
+        registry_kwargs = {
+            "config": self.config,
+            "engine": self.engine,
+            "today": today,
+        }
+        if self.embedding_client is not None:
+            registry_kwargs["embedding_client"] = self.embedding_client
+        registry = build_agent_registry(**registry_kwargs)
         if _runner_ignores_registry(self.runner_factory):
             return registry
         if RETRIEVER_TOOL_NAME not in registry.tools:

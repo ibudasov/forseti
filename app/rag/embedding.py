@@ -5,6 +5,8 @@ import logging
 import time
 from typing import List, Protocol
 
+from app.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 20
@@ -60,3 +62,17 @@ class MockEmbeddingClient:
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         return [[0.0] * self._dimension for _ in texts]
+
+
+def build_configured_embedding_client() -> EmbeddingClient:
+    """Build the embedding client selected by application settings."""
+    settings = get_settings()
+    if settings.VERTEX_AI_PROJECT:
+        return VertexAIEmbeddingClient(
+            project=settings.VERTEX_AI_PROJECT,
+            location=settings.VERTEX_AI_LOCATION,
+            model=settings.EMBEDDING_MODEL,
+            dimension=settings.EMBEDDING_DIM,
+        )
+    logger.info("VERTEX_AI_PROJECT not set — using MockEmbeddingClient (zero vectors)")
+    return MockEmbeddingClient(dimension=settings.EMBEDDING_DIM)

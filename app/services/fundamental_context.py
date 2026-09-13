@@ -15,7 +15,7 @@ from app.domain.fundamentals import (
     FundamentalSnapshotData,
     analyze_fundamentals,
 )
-from app.rag.embedding import EmbeddingClient, MockEmbeddingClient, VertexAIEmbeddingClient
+from app.rag.embedding import EmbeddingClient, build_configured_embedding_client
 from app.rag.retrieval import retrieve
 from app.schemas.fundamentals import (
     EvidenceChunkInput,
@@ -25,7 +25,6 @@ from app.schemas.fundamentals import (
     MetricSeries,
     MetricSeriesPoint,
 )
-from app.settings import get_settings
 
 MAX_ANNUAL_PERIODS = 5
 MAX_QUARTERLY_PERIODS = 8
@@ -518,15 +517,7 @@ def _default_retriever(
 
 
 def _build_embedding_client() -> EmbeddingClient:
-    settings = get_settings()
-    if settings.VERTEX_AI_PROJECT:
-        return VertexAIEmbeddingClient(
-            project=settings.VERTEX_AI_PROJECT,
-            location=settings.VERTEX_AI_LOCATION,
-            model=settings.EMBEDDING_MODEL,
-            dimension=settings.EMBEDDING_DIM,
-        )
-    return MockEmbeddingClient(dimension=settings.EMBEDDING_DIM)
+    return build_configured_embedding_client()
 
 
 def _enum_value(value: SourceType | Enum | str) -> str:

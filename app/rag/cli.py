@@ -17,19 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 def _build_embedding_client():
-    from app.rag.embedding import MockEmbeddingClient, VertexAIEmbeddingClient
-    from app.settings import get_settings
+    from app.rag.embedding import build_configured_embedding_client
 
-    settings = get_settings()
-    if settings.VERTEX_AI_PROJECT:
-        return VertexAIEmbeddingClient(
-            project=settings.VERTEX_AI_PROJECT,
-            location=settings.VERTEX_AI_LOCATION,
-            model=settings.EMBEDDING_MODEL,
-            dimension=settings.EMBEDDING_DIM,
-        )
-    logger.info("VERTEX_AI_PROJECT not set — using MockEmbeddingClient (zero vectors)")
-    return MockEmbeddingClient(dimension=settings.EMBEDDING_DIM)
+    return build_configured_embedding_client()
 
 
 def _run_ticker(ticker: str, sector: str | None, embedding_client) -> int:

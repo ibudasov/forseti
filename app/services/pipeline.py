@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Optional, Protocol
 
 from agents.config import AGENTIC_PIPELINE_MODE, LINEAR_PIPELINE_MODE, AgentWorkflowConfig
+from app.rag.embedding import build_configured_embedding_client
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
 from app.services.analyzer import analyze_request
 
@@ -35,7 +36,12 @@ class AgenticPipeline:
     def analyze(self, request: AnalyzeRequest) -> AnalyzeResponse:
         from agents.orchestration.workflow import AgenticAnalysisWorkflow
 
-        return AgenticAnalysisWorkflow(self.config, engine=self.engine).analyze(
+        embedding_client = build_configured_embedding_client()
+        return AgenticAnalysisWorkflow(
+            self.config,
+            engine=self.engine,
+            embedding_client=embedding_client,
+        ).analyze(
             request.ticker,
             request=request,
         )
