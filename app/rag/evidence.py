@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional
 
 from app.db.models import DocumentChunk
-from app.rag.embedding import EmbeddingClient, MockEmbeddingClient
+from app.rag.embedding import EmbeddingClient, build_configured_embedding_client
 from app.rag.retrieval import retrieve
 from app.rag.synthesis import SynthesisOutput, synthesize
 from app.settings import get_settings
@@ -34,20 +34,8 @@ def build_evidence(
     vectors — useful for local development and tests).
     """
     settings = get_settings()
-
     if embedding_client is None:
-        if settings.VERTEX_AI_PROJECT:
-            from app.rag.embedding import VertexAIEmbeddingClient
-
-            embedding_client = VertexAIEmbeddingClient(
-                project=settings.VERTEX_AI_PROJECT,
-                location=settings.VERTEX_AI_LOCATION,
-                model=settings.EMBEDDING_MODEL,
-                dimension=settings.EMBEDDING_DIM,
-            )
-        else:
-            logger.info("VERTEX_AI_PROJECT not set — using MockEmbeddingClient for %s", ticker)
-            embedding_client = MockEmbeddingClient(dimension=settings.EMBEDDING_DIM)
+        embedding_client = build_configured_embedding_client()
 
     all_chunks: List[DocumentChunk] = []
     seen_ids: set[int] = set()

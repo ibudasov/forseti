@@ -114,7 +114,8 @@ Gemini HTTP traffic.
 
 ## Known sharp edges
 
-The `retriever` tool is not registered at runtime because `workflow.py` builds
-the registry without an embedding client. Specialists are instructed with
+The `retriever` tool uses the embedding client selected by the application
+settings. With `VERTEX_AI_PROJECT` configured it uses Vertex AI; otherwise it
+uses the deterministic mock client. Specialists are instructed with
 `NO_TOOLS_TEXT`; if a model emits a function call anyway, the run records
 `agent_narration_degraded`.

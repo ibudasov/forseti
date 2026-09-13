@@ -15,10 +15,12 @@ from app.db.models import (
     DocumentChunk,
     EarningsEvent,
     Fundamental,
+    FundamentalObservation,
     MacroDaily,
     PriceBar,
     Recommendation,
     Security,
+    SourceQualityTier,
     SourceType,
     TechnicalFeature,
 )
@@ -74,6 +76,29 @@ def upsert_fundamental(fundamental: Fundamental, engine=None) -> None:
         existing.margins = fundamental.margins
         existing.raw_payload = fundamental.raw_payload
         session.add(existing)
+        session.commit()
+
+
+def upsert_fundamental_observations(
+    observations: Iterable[FundamentalObservation],
+    engine=None,
+) -> None:
+    engine = engine or get_engine()
+    payloads = [observation.model_dump(exclude_none=False) for observation in observations]
+    payloads = [payload for payload in payloads if payload]
+    if not payloads:
+        return
+
+    for payload in payloads:
+        payload.pop("id", None)
+
+    stmt = pg_insert(FundamentalObservation.__table__).values(payloads)
+    stmt = stmt.on_conflict_do_nothing(
+        constraint="uq_fundamental_observation_ingest",
+    )
+
+    with get_session(engine) as session:
+        session.execute(stmt)
         session.commit()
 
 
@@ -250,6 +275,81 @@ def get_latest_fundamental(ticker: str, engine=None) -> Optional[Fundamental]:
         return session.exec(stmt).first()
 
 
+def list_fundamentals(engine=None, ticker: str | None = None) -> List[Fundamental]:
+    engine = engine or get_engine()
+    stmt = select(Fundamental)
+    if ticker is not None:
+        stmt = stmt.join(Security).where(Security.ticker == _normalize_ticker(ticker))
+    stmt = stmt.order_by(Fundamental.security_id.asc(), Fundamental.as_of_date.desc())
+    with get_session(engine) as session:
+        return list(session.exec(stmt).all())
+
+
+def list_fundamental_observations(
+    ticker: str,
+    *,
+    metric_name: str | None = None,
+    fiscal_period: str | None = None,
+    authoritative_only: bool = False,
+    engine=None,
+) -> List[FundamentalObservation]:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(FundamentalObservation)
+        .join(Security)
+        .where(Security.ticker == ticker)
+    )
+    if metric_name is not None:
+        stmt = stmt.where(FundamentalObservation.metric_name == metric_name)
+    if fiscal_period is not None:
+        stmt = stmt.where(FundamentalObservation.fiscal_period == fiscal_period)
+    stmt = stmt.order_by(
+        FundamentalObservation.metric_name.asc(),
+        FundamentalObservation.fiscal_period.asc(),
+        FundamentalObservation.period_end.asc(),
+        sa.nullslast(FundamentalObservation.filed_at.desc()),
+        sa.nullslast(FundamentalObservation.accession_number.desc()),
+        FundamentalObservation.id.desc(),
+    )
+
+    with get_session(engine) as session:
+        observations = list(session.exec(stmt).all())
+
+    if not authoritative_only:
+        return observations
+    return _authoritative_observations(observations)
+
+
+def get_latest_authoritative_observation(
+    ticker: str,
+    metric_name: str,
+    fiscal_period: str,
+    engine=None,
+) -> Optional[FundamentalObservation]:
+    observations = list_fundamental_observations(
+        ticker,
+        metric_name=metric_name,
+        fiscal_period=fiscal_period,
+        authoritative_only=True,
+        engine=engine,
+    )
+    return observations[-1] if observations else None
+
+
+def count_fundamental_observations(ticker: str, engine=None) -> int:
+    engine = engine or get_engine()
+    ticker = _normalize_ticker(ticker)
+    stmt = (
+        select(func.count())
+        .select_from(FundamentalObservation)
+        .join(Security)
+        .where(Security.ticker == ticker)
+    )
+    with get_session(engine) as session:
+        return session.exec(stmt).one()
+
+
 def get_next_earnings_event(ticker: str, on_or_after: date, engine=None) -> Optional[EarningsEvent]:
     engine = engine or get_engine()
     ticker = _normalize_ticker(ticker)
@@ -327,6 +427,7 @@ def similarity_search(
     query_embedding: List[float],
     top_k: int = 5,
     source_types: Optional[List[SourceType]] = None,
+    quality_tiers: Optional[List[SourceQualityTier]] = None,
     published_after: Optional[datetime] = None,
     engine=None,
 ) -> List[DocumentChunk]:
@@ -349,6 +450,9 @@ def similarity_search(
     if source_types:
         stmt = stmt.where(table.c.source_type.in_([st.value for st in source_types]))
 
+    if quality_tiers:
+        stmt = stmt.where(table.c.source_quality_tier.in_([tier.value for tier in quality_tiers]))
+
     if published_after is not None:
         stmt = stmt.where(
             sa.or_(table.c.published_at.is_(None), table.c.published_at >= published_after)
@@ -363,3 +467,58 @@ def similarity_search(
     with get_session(engine) as session:
         rows = session.execute(stmt).fetchall()
         return [DocumentChunk(**dict(row._mapping)) for row in rows]
+
+
+def summarize_document_coverage(ticker: str, engine=None) -> list[dict[str, object]]:
+    engine = engine or get_engine()
+    normalized_ticker = _normalize_ticker(ticker)
+    table = DocumentChunk.__table__
+    stmt = (
+        sa.select(
+            table.c.source_type,
+            table.c.source_quality_tier,
+            func.count().label("chunk_count"),
+            func.count(sa.distinct(table.c.document_id)).label("document_count"),
+            func.max(table.c.published_at).label("latest_published_at"),
+            func.max(table.c.ingested_at).label("latest_ingested_at"),
+        )
+        .where(table.c.ticker == normalized_ticker)
+        .group_by(table.c.source_type, table.c.source_quality_tier)
+        .order_by(table.c.source_type.asc())
+    )
+    with get_session(engine) as session:
+        rows = session.execute(stmt).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+def _authoritative_observations(
+    observations: List[FundamentalObservation],
+) -> List[FundamentalObservation]:
+    winners: dict[tuple[str, str, date, str | None], FundamentalObservation] = {}
+    for observation in observations:
+        key = (
+            observation.metric_name,
+            observation.fiscal_period,
+            observation.period_end,
+            observation.unit,
+        )
+        current = winners.get(key)
+        if current is None or _observation_sort_key(observation) > _observation_sort_key(current):
+            winners[key] = observation
+    return sorted(
+        winners.values(),
+        key=lambda observation: (
+            observation.metric_name,
+            observation.fiscal_period,
+            observation.period_end,
+        ),
+    )
+
+
+def _observation_sort_key(observation: FundamentalObservation) -> tuple[date, str, str, int]:
+    return (
+        observation.filed_at or date.min,
+        observation.accession_number or "",
+        observation.source_url,
+        observation.id or 0,
+    )

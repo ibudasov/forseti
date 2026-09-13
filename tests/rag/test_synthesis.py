@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from app.db.models import DocumentChunk, SourceType
+from app.db.models import DocumentChunk, SourceQualityTier, SourceType
 from app.rag.synthesis import (
     EvidenceItem,
     SynthesisOutput,
@@ -23,7 +23,11 @@ def _make_chunk(chunk_id: int, text: str = "Some evidence text.") -> DocumentChu
         id=chunk_id,
         ticker="NVDA",
         source_type=SourceType.filing_business,
+        document_id=f"sec:nvda:{chunk_id}",
         source_url="https://example.com",
+        publisher="Example Issuer",
+        title=f"Chunk {chunk_id}",
+        source_quality_tier=SourceQualityTier.primary_regulatory,
         source_hash=f"hash{chunk_id}",
         chunk_index=0,
         text=text,

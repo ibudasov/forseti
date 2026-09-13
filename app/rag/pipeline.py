@@ -9,7 +9,7 @@ from app.db.models import DocumentChunk
 from app.db.repository import upsert_document_chunks
 from app.rag.chunking import chunk_text
 from app.rag.embedding import EmbeddingClient
-from app.rag.ingestion.base import RawDocument, compute_source_hash
+from app.rag.ingestion.base import IngestionResult, RawDocument, compute_source_hash
 from app.rag.ingestion.earnings import EarningsCallIngestor
 from app.rag.ingestion.edgar import SECEdgarIngestor
 from app.rag.ingestion.news import CompanyNewsIngestor, SectorNewsIngestor
@@ -33,7 +33,15 @@ def _build_chunks(
             DocumentChunk(
                 ticker=doc.ticker,
                 source_type=doc.source_type,
+                document_id=doc.document_id,
                 source_url=doc.source_url,
+                publisher=doc.publisher,
+                title=doc.title,
+                form_type=doc.form_type,
+                accession_number=doc.accession_number,
+                period_start=doc.period_start,
+                period_end=doc.period_end,
+                source_quality_tier=doc.source_quality_tier,
                 source_hash=source_hash,
                 published_at=doc.published_at,
                 ingested_at=now,
@@ -68,8 +76,8 @@ def ingest_ticker(
 
     all_chunks: List[DocumentChunk] = []
     for ingestor in ingestors:
-        documents: List[RawDocument] = ingestor.fetch(ticker)
-        for doc in documents:
+        result: IngestionResult = ingestor.fetch(ticker)
+        for doc in result.documents:
             text_chunks = chunk_text(doc.text, chunk_size=chunk_size, overlap=overlap)
             if not text_chunks:
                 continue

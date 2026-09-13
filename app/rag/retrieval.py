@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from app.db.models import DocumentChunk, SourceType
+from app.db.models import DocumentChunk, SourceQualityTier, SourceType
 from app.db.repository import similarity_search
 from app.rag.embedding import EmbeddingClient
 
@@ -21,6 +21,7 @@ def retrieve(
     embedding_client: EmbeddingClient,
     top_k: int = 5,
     source_types: Optional[List[SourceType]] = None,
+    quality_tiers: Optional[List[SourceQualityTier]] = None,
     date_window_days: int = _DEFAULT_DATE_WINDOW_DAYS,
     engine=None,
 ) -> List[DocumentChunk]:
@@ -37,6 +38,7 @@ def retrieve(
         query_embedding=query_embedding,
         top_k=top_k,
         source_types=source_types,
+        quality_tiers=quality_tiers,
         published_after=published_after,
         engine=engine,
     )
@@ -47,6 +49,7 @@ def retrieve(
             query_embedding=query_embedding,
             top_k=top_k - len(chunks),
             source_types=_SECTOR_FALLBACK_SOURCE_TYPES,
+            quality_tiers=[SourceQualityTier.secondary_reputable],
             published_after=published_after,
             engine=engine,
         )

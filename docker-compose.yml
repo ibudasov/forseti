@@ -21,6 +21,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # sourced from Codespaces/host secrets, not committed to .env
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
     depends_on:
       postgresql:
         condition: service_healthy
