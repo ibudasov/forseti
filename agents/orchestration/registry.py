@@ -41,7 +41,8 @@ CRITIC_NAME = "critic_guardrail"
 # and the ADK run fails with "tool not found".
 NO_TOOLS_TEXT = (
     "You have no tools available. Never emit a function call: answer in plain "
-    "text using only the information already present in the conversation."
+    "text using only the information already present in the conversation. "
+    "Specifically, you must NEVER call `transfer_to_agent` or any other function."
 )
 
 
