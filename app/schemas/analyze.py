@@ -5,6 +5,7 @@ from typing import Any, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
+from app.schemas.fundamentals import FundamentalAgentEffect
 
 
 class AnalyzeRequest(BaseModel):
@@ -59,6 +60,7 @@ class AnalysisTrace(BaseModel):
     entered_agent_layer: bool = False
     adk_event_count: int = 0
     observed_agents: List[str] = Field(default_factory=list)
+    fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
 
 
 class DecisionDiagnosis(BaseModel):
@@ -89,5 +91,6 @@ class AnalyzeResponse(BaseModel):
     evidence: Optional[EvidenceBlock] = None
     trace: Optional[AnalysisTrace] = None
     diagnosis: Optional[DecisionDiagnosis] = None
+    fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
 
     model_config = ConfigDict(populate_by_name=True)

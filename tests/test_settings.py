@@ -25,6 +25,11 @@ def test_pipeline_override_defaults_to_false():
     assert settings.ALLOW_PIPELINE_OVERRIDE is False
 
 
+def test_fundamental_agent_mode_defaults_to_off():
+    settings = Settings(_env_file=None)
+    assert settings.FUNDAMENTAL_AGENT_MODE == "off"
+
+
 def test_pipeline_override_env_var_parses_to_true(monkeypatch):
     monkeypatch.setenv("ALLOW_PIPELINE_OVERRIDE", "true")
     settings = Settings(_env_file=None)
@@ -35,3 +40,15 @@ def test_llm_io_debug_capture_defaults_off():
     settings = Settings(_env_file=None)
     assert settings.DEBUG_LLM_IO is False
     assert settings.DEBUG_LLM_IO_DIR == "/tmp/forseti-llm-io"
+
+
+def test_earnings_transcript_template_defaults_to_none(monkeypatch):
+    monkeypatch.delenv("EARNINGS_TRANSCRIPT_URL_TEMPLATE", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE is None
+
+
+def test_earnings_transcript_template_reads_env_var(monkeypatch):
+    monkeypatch.setenv("EARNINGS_TRANSCRIPT_URL_TEMPLATE", "https://example.com/{ticker}")
+    settings = Settings(_env_file=None)
+    assert settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE == "https://example.com/{ticker}"

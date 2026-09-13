@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +12,17 @@ from agents.config import load_agent_config
 from agents.observability.llm_io_recorder import FileLlmIoRecorder, NullLlmIoRecorder
 from agents.orchestration.registry import AgentRegistry, build_agent_registry as build_real_agent_registry
 from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, DecisionDiagnosis
+from app.schemas.fundamentals import (
+    CitedFinding,
+    EvidenceChunkInput,
+    EvidenceQuestionCoverage,
+    FundamentalAnalysisRequest,
+    FundamentalAssessmentResponse,
+    FundamentalAssessmentResult,
+    FundamentalAssessmentValidation,
+    FundamentalContextCoverage,
+)
 from app.settings import Settings
 
 
@@ -55,6 +65,25 @@ def _deterministic_response() -> AnalyzeResponse:
         take_profit=(110.0, 115.0),
         risk_reward=2.0,
         position_size_eur=500.0,
+    )
+
+
+def _watchlist_response() -> AnalyzeResponse:
+    return AnalyzeResponse(
+        ticker="NVDA",
+        decision="watchlist",
+        confidence=0.64,
+        reasons=["deterministic"],
+        warnings=[],
+        engine_version="v1.rules.0",
+        trace_id="deterministic-trace",
+        diagnosis=DecisionDiagnosis(
+            stage="checklist",
+            rule_id="score_below_trade",
+            detail="score 7/11, missing: none",
+            checklist_score=7,
+            debug_reason="checklist/score_below_trade: score 7/11, missing: none",
+        ),
     )
 
 
@@ -301,3 +330,218 @@ def test_default_workflow_uses_null_recorder_when_capture_disabled(monkeypatch):
 
     assert recorder_calls == [response.trace.run_id]
     assert response.trace.adk_event_count == 1
+
+
+def test_fundamental_mode_off_skips_context_builder(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "off")
+    monkeypatch.setattr(
+        workflow_module,
+        "build_fundamental_analysis_request",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not build context")),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "FundamentalAnalyst",
+        lambda: (_ for _ in ()).throw(AssertionError("should not call analyst")),
+    )
+
+    response = _workflow(monkeypatch, events=()).analyze("NVDA")
+
+    assert response.fundamental_agent_effect is None
+
+
+def test_fundamental_shadow_mode_records_counterfactual_without_changing_baseline(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "shadow")
+    workflow = _workflow(monkeypatch, events=())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
+    monkeypatch.setattr(
+        workflow_module,
+        "FundamentalAnalyst",
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert response.fundamental_agent_effect is not None
+    assert response.fundamental_agent_effect.mode == "shadow"
+    assert response.fundamental_agent_effect.counterfactual_decision == "trade"
+    assert response.fundamental_agent_effect.final_decision == "watchlist"
+    assert response.trace.fundamental_agent_effect is not None
+
+
+def test_fundamental_enforced_mode_promotes_trade_with_deterministic_risk(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "enforced")
+    workflow = _workflow(monkeypatch, events=())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
+    monkeypatch.setattr(
+        workflow_module,
+        "FundamentalAnalyst",
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "get_latest_bars",
+        lambda *a, **k: [SimpleNamespace(high=110, low=90, close=100)] * 100,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "calculate_risk_levels",
+        lambda bars, risk_config: SimpleNamespace(
+            entry_low=98,
+            entry_high=102,
+            stop_loss=90,
+            take_profit_1=110,
+            take_profit_2=120,
+            risk_reward=2,
+            position_size_eur=500,
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "calculate_time_stop_at",
+        lambda recommendation_date: date(2026, 12, 31),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "trade"
+    assert response.entry_range == (98.0, 102.0)
+    assert response.stop_loss == 90.0
+    assert response.position_size_eur == 500.0
+    assert response.fundamental_agent_effect is not None
+    assert response.fundamental_agent_effect.final_decision == "trade"
+
+
+class _AnalystStub:
+    def __init__(self, result):
+        self._result = result
+
+    def assess(self, request):
+        return self._result
+
+
+def _request() -> FundamentalAnalysisRequest:
+    return FundamentalAnalysisRequest(
+        run_id="run-1",
+        context_hash="ctx-1",
+        ticker="NVDA",
+        company_name="NVIDIA",
+        sector="ai",
+        currency="USD",
+        snapshot_at=datetime(2026, 9, 8, 23, 59, 59, tzinfo=timezone.utc),
+        as_of_date=date(2026, 9, 8),
+        deterministic_result=_fundamental_result(),
+        metric_series=[],
+        evidence_chunks=[
+            EvidenceChunkInput(
+                chunk_id=10,
+                retrieval_question_id="growth_sustainability",
+                source_type="filing_business",
+                source_url="https://example.com/10",
+                source_hash="hash-10",
+                chunk_index=0,
+                quality_tier="primary",
+                text="Recurring demand supports growth.",
+            )
+        ],
+        coverage=FundamentalContextCoverage(
+            required_metrics_present=["revenue_growth"],
+            required_metrics_missing=[],
+            annual_period_counts={},
+            quarterly_period_counts={},
+            source_types_present=["filing_business"],
+            source_types_missing=[],
+            evidence_stale=False,
+            evidence_truncated=False,
+            metric_series_truncated=False,
+            selected_chunk_count=1,
+            selected_character_count=32,
+            question_coverage=[
+                EvidenceQuestionCoverage(
+                    question_id="growth_sustainability",
+                    chunk_ids=[10],
+                    source_types=["filing_business"],
+                    truncated=False,
+                )
+            ],
+        ),
+    )
+
+
+def _fundamental_result():
+    from decimal import Decimal
+
+    from app.domain.fundamentals import DeterministicFundamentalAnalysis, FundamentalMetricRef, FundamentalRuleResult
+
+    return DeterministicFundamentalAnalysis(
+        ticker="NVDA",
+        as_of_date=date(2026, 6, 30),
+        score=2,
+        maximum_score=6,
+        rule_results=[
+            FundamentalRuleResult(
+                rule_id="revenue_growth",
+                status="passed",
+                points_awarded=2,
+                points_available=2,
+                metric_ids=["revenue_growth:2026-06-30"],
+                explanation="revenue_growth: 0.20 > 0.15 min",
+            )
+        ],
+        warnings=[],
+        metrics=[
+            FundamentalMetricRef(
+                metric_id="revenue_growth:2026-06-30",
+                name="Revenue growth",
+                value=Decimal("0.20"),
+                unit="ratio",
+                period_end=date(2026, 6, 30),
+            )
+        ],
+    )
+
+
+def _assessment(*, accepted: bool, adjustment: int) -> FundamentalAssessmentResult:
+    response = FundamentalAssessmentResponse(
+        run_id="run-1",
+        context_hash="ctx-1",
+        status="completed",
+        overall_signal="positive",
+        proposed_score_adjustment=adjustment,
+        findings=[
+            CitedFinding(
+                finding_id="f1",
+                category="growth_quality",
+                direction="positive",
+                materiality="high",
+                claim="Supported claim.",
+                metric_ids=["revenue_growth:2026-06-30"],
+                chunk_ids=[10],
+            )
+        ],
+        contradictions=[],
+        material_red_flags=[],
+        evidence_coverage=0.5,
+        missing_information=[],
+        summary="Assessment summary.",
+    )
+    return FundamentalAssessmentResult(
+        response=response,
+        validation=FundamentalAssessmentValidation(accepted=accepted, reason_codes=[]),
+        raw_output="",
+        latency_ms=0.0,
+        token_usage={},
+        model_name="fake",
+        prompt_version="v1",
+    )

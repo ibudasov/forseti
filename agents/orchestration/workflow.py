@@ -7,7 +7,8 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Callable, Iterable, Literal, Optional
+from decimal import Decimal
+from typing import Any, Callable, Iterable, Literal, Optional, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, ValidationError
@@ -34,9 +35,15 @@ from agents.orchestration.registry import (
 from agents.orchestration.trace_recorder import TraceRecorder
 from agents.tools.ticker_resolver import resolve_ticker
 from app.db.models import AgentRun, AgentRunStep
-from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
+from app.db.repository import get_agent_run, get_agent_run_steps, get_latest_bars, save_agent_run
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
+from app.services.fundamental_analyst import FundamentalAnalyst
+from app.services.fundamental_context import build_fundamental_analysis_request
+from app.services.fundamental_policy import apply_fundamental_policy
+from app.services.risk import RiskConfig, RiskDowngrade, calculate_risk_levels
+from app.services.time_stop import calculate_time_stop_at
 from app.services.analyzer import analyze_request
+from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +140,13 @@ def _analysis_date(request: AnalyzeRequest) -> date | None:
     return request.as_of_date
 
 
+def _fundamental_agent_mode() -> Literal["off", "shadow", "enforced"]:
+    mode = get_settings().FUNDAMENTAL_AGENT_MODE.strip().lower()
+    if mode not in {"off", "shadow", "enforced"}:
+        raise ValueError("FUNDAMENTAL_AGENT_MODE must be one of ('off', 'shadow', 'enforced').")
+    return cast(Literal["off", "shadow", "enforced"], mode)
+
+
 def _deterministic_fields(response: AnalyzeResponse) -> dict[str, Any]:
     return {
         "decision": response.decision,
@@ -178,6 +192,12 @@ class AgenticAnalysisWorkflow:
         request = request or AnalyzeRequest(ticker=resolved_ticker)
         analysis_date = _analysis_date(request)
         response = self._run_deterministic_pipeline(request, trace_recorder)
+        self._apply_fundamental_policy_if_enabled(
+            run_id=run_id,
+            request=request,
+            response=response,
+            trace_recorder=trace_recorder,
+        )
         registry = self._build_registry(trace_recorder, warnings, today=analysis_date)
 
         self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
@@ -397,6 +417,19 @@ class AgenticAnalysisWorkflow:
         latency_ms: float,
         token_usage: dict[str, int],
     ) -> None:
+        if response.fundamental_agent_effect is not None:
+            trace_recorder.record_completed(
+                DECISION_SYNTHESIZER_NAME,
+                tool_calls=tool_calls,
+                output={
+                    "text": text,
+                    "guardrail": "ignored_due_to_fundamental_policy",
+                },
+                latency_ms=latency_ms,
+                token_usage=token_usage,
+            )
+            return
+
         synthesis = self._parse_synthesis(text)
         if synthesis is None:
             trace_recorder.record_degraded(
@@ -485,6 +518,108 @@ class AgenticAnalysisWorkflow:
         )
         recorder.record_agent_prompts(registry)
 
+    def _apply_fundamental_policy_if_enabled(
+        self,
+        *,
+        run_id: str,
+        request: AnalyzeRequest,
+        response: AnalyzeResponse,
+        trace_recorder: TraceRecorder,
+    ) -> None:
+        mode = _fundamental_agent_mode()
+        if mode == "off":
+            return
+
+        context_started_at = time.monotonic()
+        context = build_fundamental_analysis_request(
+            request.ticker,
+            run_id,
+            as_of=request.as_of_date,
+            engine=self.engine,
+        )
+        trace_recorder.record_completed(
+            "fundamental_context_builder",
+            latency_ms=(time.monotonic() - context_started_at) * 1000,
+            output={
+                "context_hash": context.context_hash,
+                "chunk_count": len(context.evidence_chunks),
+            },
+        )
+
+        assessment_started_at = time.monotonic()
+        assessment_result = FundamentalAnalyst().assess(context)
+        assessment_latency_ms = (time.monotonic() - assessment_started_at) * 1000
+        if assessment_result.validation.accepted:
+            trace_recorder.record_completed(
+                FUNDAMENTAL_ANALYST_NAME,
+                latency_ms=assessment_latency_ms,
+                token_usage=assessment_result.token_usage,
+                output={
+                    "status": assessment_result.response.status,
+                    "proposed_score_adjustment": assessment_result.response.proposed_score_adjustment,
+                },
+            )
+        else:
+            trace_recorder.record_degraded(
+                FUNDAMENTAL_ANALYST_NAME,
+                "assessment_invalid",
+                detail=",".join(assessment_result.validation.reason_codes),
+                latency_ms=assessment_latency_ms,
+                token_usage=assessment_result.token_usage,
+                output={"status": assessment_result.response.status},
+            )
+
+        effect = apply_fundamental_policy(
+            mode=mode,
+            deterministic_response=response.model_copy(deep=True),
+            request=context,
+            assessment_result=assessment_result,
+        )
+        updated_effect = self._apply_policy_effect_to_response(effect, response, request)
+        response.fundamental_agent_effect = updated_effect
+
+    def _apply_policy_effect_to_response(
+        self,
+        effect,
+        response: AnalyzeResponse,
+        request: AnalyzeRequest,
+    ):
+        if effect.final_decision == response.decision:
+            return effect
+        if effect.final_decision != "trade":
+            response.decision = effect.final_decision
+            return effect
+
+        bars = get_latest_bars(
+            request.ticker,
+            250,
+            engine=self.engine,
+            as_of_date=request.as_of_date,
+        )
+        settings = get_settings()
+        risk_config = RiskConfig(
+            capital_eur=Decimal(str(settings.ACCOUNT_CAPITAL_EUR)),
+            risk_per_trade_pct=Decimal(str(settings.RISK_PER_TRADE_PCT)),
+        )
+        risk_result = calculate_risk_levels(bars, risk_config)
+        if risk_result is None or isinstance(risk_result, RiskDowngrade):
+            effect.final_decision = "watchlist"
+            effect.decision_changed = effect.final_decision != effect.baseline_decision
+            effect.reason_codes.append("risk_gate_rejected_promotion")
+            return effect
+
+        response.decision = "trade"
+        response.entry_range = (float(risk_result.entry_low), float(risk_result.entry_high))
+        response.stop_loss = float(risk_result.stop_loss)
+        response.take_profit = (
+            float(risk_result.take_profit_1),
+            float(risk_result.take_profit_2),
+        )
+        response.risk_reward = float(risk_result.risk_reward)
+        response.position_size_eur = float(risk_result.position_size_eur)
+        response.time_stop_at = calculate_time_stop_at(request.as_of_date or date.today())
+        return effect
+
     def _build_trace(
         self,
         *,
@@ -509,6 +644,7 @@ class AgenticAnalysisWorkflow:
             entered_agent_layer=adk_event_count > 0,
             adk_event_count=adk_event_count,
             observed_agents=observed_agents,
+            fundamental_agent_effect=response.fundamental_agent_effect,
         )
 
     @staticmethod
@@ -547,6 +683,11 @@ class AgenticAnalysisWorkflow:
             entered_agent_layer=trace.entered_agent_layer,
             adk_event_count=trace.adk_event_count,
             observed_agents=trace.observed_agents,
+            fundamental_agent_effect=(
+                trace.fundamental_agent_effect.model_dump(mode="json")
+                if trace.fundamental_agent_effect is not None
+                else None
+            ),
         )
         steps = [AgentRunStep(run_id=trace.run_id, **step.model_dump()) for step in trace.steps]
         save_agent_run(run, steps, engine=self.engine)
@@ -572,4 +713,5 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         entered_agent_layer=run.entered_agent_layer,
         adk_event_count=run.adk_event_count,
         observed_agents=run.observed_agents,
+        fundamental_agent_effect=run.fundamental_agent_effect,
     )

@@ -223,14 +223,14 @@ def analyze(
         )
 
     return _evaluate_trade(
-        symbol,
-        bars,
-        latest_bar,
-        technical_feature,
-        fundamental,
-        vix_close,
-        gate_warnings,
-        today,
+        symbol=symbol,
+        bars=bars,
+        latest_bar=latest_bar,
+        technical_feature=technical_feature,
+        fundamental=fundamental,
+        vix_close=vix_close,
+        gate_warnings=gate_warnings,
+        recommendation_date=today,
     )
 
 

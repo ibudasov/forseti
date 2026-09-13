@@ -5,15 +5,42 @@ from decimal import Decimal
 from typing import List, Optional
 
 from app.db.models import Fundamental, PriceBar, TechnicalFeature
+from app.domain.fundamentals import (
+    FundamentalSnapshotData,
+    analyze_fundamentals,
+)
 
 # Frozen constants for checklist scoring
-REVENUE_GROWTH_MIN = Decimal("0.15")
-DEBT_TO_EQUITY_MAX = Decimal("1.0")
-EPS_TREND_MIN = Decimal("0")
 RSI_HEALTHY_MIN = 45
 RSI_HEALTHY_MAX = 65
 VIX_CALM_MAX = 25
 MAX_SCORE = 11
+_MONETARY_UNIT_TAGS_BY_METRIC = {
+    "fcf": (
+        "NetCashProvidedByUsedInOperatingActivities",
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+    ),
+    "revenue_growth": (
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+    ),
+    "debt_to_equity": (
+        "LongTermDebtNoncurrent",
+        "LongTermDebt",
+        "DebtCurrent",
+        "LongTermDebtCurrent",
+        "Liabilities",
+        "StockholdersEquity",
+    ),
+    "eps_trend": (),
+    "margins": (
+        "NetIncomeLoss",
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+    ),
+}
 
 
 @dataclass
@@ -38,113 +65,107 @@ def evaluate_checklist(
     results: List[ChecklistResult] = []
     total_score = 0
 
-    # Rule 1: Revenue growth > 0.15 YoY (+2)
-    result = _check_revenue_growth(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 2: FCF > 0 (+2)
-    result = _check_fcf(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 3: Debt to equity < 1.0 (+1)
-    result = _check_debt_to_equity(fundamental)
-    if result:
-        results.append(result)
-        total_score += result.points
-
-    # Rule 4: EPS trend > 0 (+1)
-    result = _check_eps_trend(fundamental)
-    if result:
+    # Rules 1-4: Deterministic fundamentals baseline (+6 max)
+    fundamental_analysis = analyze_fundamentals(
+        ticker="UNKNOWN",
+        snapshot=to_fundamental_snapshot(fundamental),
+    )
+    for rule_result in fundamental_analysis.rule_results:
+        if rule_result.status != "passed":
+            continue
+        result = ChecklistResult(
+            rule_id=rule_result.rule_id,
+            points=rule_result.points_awarded,
+            detail=rule_result.explanation,
+        )
         results.append(result)
         total_score += result.points
 
     # Rule 5: Close vs SMA50 (+1)
-    result = _check_close_vs_sma50(latest_bar, technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_close_vs_sma50(latest_bar, technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 6: Close vs SMA200 (+1)
-    result = _check_close_vs_sma200(latest_bar, technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_close_vs_sma200(latest_bar, technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 7: RSI healthy 45-65 (+1)
-    result = _check_rsi_healthy(technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_rsi_healthy(technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 8: Volume trend > 1.0 (+1)
-    result = _check_volume_trend(technical_feature)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_volume_trend(technical_feature)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     # Rule 9: VIX calm < 25 (+1)
-    result = _check_vix_calm(vix_close)
-    if result:
-        results.append(result)
-        total_score += result.points
+    technical_result = _check_vix_calm(vix_close)
+    if technical_result:
+        results.append(technical_result)
+        total_score += technical_result.points
 
     return total_score, results
 
 
-def _check_revenue_growth(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.revenue_growth is None:
-        return None
-    rg = Decimal(str(fundamental.revenue_growth))
-    if rg > REVENUE_GROWTH_MIN:
-        return ChecklistResult(
-            rule_id="revenue_growth",
-            points=2,
-            detail=f"revenue_growth: {float(rg):.2f} > {float(REVENUE_GROWTH_MIN):.2f} min",
-        )
+def to_fundamental_snapshot(
+    fundamental: Optional[Fundamental],
+) -> FundamentalSnapshotData:
+    if fundamental is None:
+        return FundamentalSnapshotData(has_snapshot=False)
+
+    return FundamentalSnapshotData(
+        has_snapshot=fundamental.as_of_date is not None,
+        as_of_date=fundamental.as_of_date,
+        revenue_growth=fundamental.revenue_growth,
+        fcf=fundamental.fcf,
+        debt_to_equity=fundamental.debt_to_equity,
+        eps_trend=fundamental.eps_trend,
+        margins=fundamental.margins,
+        currency=_fundamental_currency(fundamental),
+    )
+
+
+def _fundamental_currency(fundamental: Fundamental) -> str | None:
+    us_gaap = fundamental.raw_payload.get("facts", {}).get("us-gaap", {})
+    projected_metric_names = _projected_metric_names(fundamental)
+    for metric_name in projected_metric_names:
+        for tag_name in _MONETARY_UNIT_TAGS_BY_METRIC[metric_name]:
+            fact_payload = us_gaap.get(tag_name, {})
+            for unit_name, unit_rows in fact_payload.get("units", {}).items():
+                if "/" in unit_name or unit_name == "shares":
+                    continue
+                if _unit_rows_cover_snapshot_period(unit_rows, fundamental.as_of_date):
+                    return unit_name
     return None
 
 
-def _check_fcf(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.fcf is None:
-        return None
-    fcf = Decimal(str(fundamental.fcf))
-    if fcf > 0:
-        return ChecklistResult(
-            rule_id="fcf",
-            points=2,
-            detail=f"fcf: {float(fcf):.2f} > 0",
-        )
-    return None
+def _projected_metric_names(fundamental: Fundamental) -> list[str]:
+    projected_metrics: list[str] = []
+    if fundamental.fcf is not None:
+        projected_metrics.append("fcf")
+    if fundamental.revenue_growth is not None:
+        projected_metrics.append("revenue_growth")
+    if fundamental.debt_to_equity is not None:
+        projected_metrics.append("debt_to_equity")
+    if fundamental.margins is not None:
+        projected_metrics.append("margins")
+    if fundamental.eps_trend is not None:
+        projected_metrics.append("eps_trend")
+    return projected_metrics
 
 
-def _check_debt_to_equity(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.debt_to_equity is None:
-        return None
-    de = Decimal(str(fundamental.debt_to_equity))
-    if de < DEBT_TO_EQUITY_MAX:
-        return ChecklistResult(
-            rule_id="debt_to_equity",
-            points=1,
-            detail=f"debt_to_equity: {float(de):.2f} < {float(DEBT_TO_EQUITY_MAX):.2f} max",
-        )
-    return None
-
-
-def _check_eps_trend(fundamental: Optional[Fundamental]) -> Optional[ChecklistResult]:
-    if fundamental is None or fundamental.eps_trend is None:
-        return None
-    et = Decimal(str(fundamental.eps_trend))
-    if et > EPS_TREND_MIN:
-        return ChecklistResult(
-            rule_id="eps_trend",
-            points=1,
-            detail=f"eps_trend: {float(et):.2f} > {float(EPS_TREND_MIN):.2f} min",
-        )
-    return None
+def _unit_rows_cover_snapshot_period(unit_rows: list[dict], as_of_date) -> bool:
+    for row in unit_rows:
+        if row.get("end") == as_of_date.isoformat():
+            return True
+    return False
 
 
 def _check_close_vs_sma50(
