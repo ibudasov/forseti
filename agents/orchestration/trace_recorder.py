@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from app.schemas.analyze import TraceStep
 
 STEP_STATUSES = ("completed", "degraded", "failed", "skipped")
-MAX_TRACE_OUTPUT_CHARS = 2000
+MAX_TRACE_OUTPUT_CHARS = 20_000
 _TRUNCATED_SUFFIX = "…[truncated]"
 
 
