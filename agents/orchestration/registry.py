@@ -123,6 +123,9 @@ def build_specialist_agents(
             "information. Cite the chunk id or metric name backing every material claim.\n"
             f"{NO_TOOLS_TEXT}"
         ),
+        # Leaf specialist: never let ADK offer transfer_to_agent, which the model can hallucinate against itself.
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
     )
 
@@ -137,6 +140,8 @@ def build_specialist_agents(
             "compute new indicator values; only interpret the ones provided.\n"
             f"{NO_TOOLS_TEXT}"
         ),
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
     )
 
@@ -154,6 +159,8 @@ def build_specialist_agents(
             "plain text; never invent any other function name."
         ),
         tools=[tools[RISK_MANAGER_TOOL_NAME]] if RISK_MANAGER_TOOL_NAME in tools else [],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
     )
 
@@ -170,6 +177,8 @@ def build_specialist_agents(
             "never upgrade them.\n"
             f"{NO_TOOLS_TEXT}"
         ),
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
     )
 
