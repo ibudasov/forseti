@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Dict, Optional
 
-from google.adk.agents import LlmAgent
+from google.adk.agents import BaseAgent, LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
 
 from agents.config import HARD_RULES_TEXT, AgentWorkflowConfig
@@ -36,6 +36,17 @@ FUNDAMENTAL_ANALYST_NAME = "fundamental_analyst"
 TECHNICAL_ANALYST_NAME = "technical_analyst"
 DECISION_SYNTHESIZER_NAME = "decision_synthesizer"
 CRITIC_NAME = "critic_guardrail"
+SPECIALIST_ORDER = (
+    FUNDAMENTAL_ANALYST_NAME,
+    TECHNICAL_ANALYST_NAME,
+    DECISION_SYNTHESIZER_NAME,
+    CRITIC_NAME,
+)
+
+FUNDAMENTAL_VIEW_OUTPUT_KEY = "fundamental_view"
+TECHNICAL_VIEW_OUTPUT_KEY = "technical_view"
+DRAFT_RECOMMENDATION_OUTPUT_KEY = "draft_recommendation"
+CRITIQUE_OUTPUT_KEY = "critique"
 
 # Specialists have no tools of their own; without this the model invents function names
 # and the ADK run fails with "tool not found".
@@ -52,7 +63,11 @@ class AgentRegistry:
 
     tools: Dict[str, FunctionTool] = field(default_factory=dict)
     specialists: Dict[str, LlmAgent] = field(default_factory=dict)
-    root_agent: Optional[LlmAgent] = None
+    root_agent: Optional[BaseAgent] = None
+
+
+def _state_key_reference(key: str) -> str:
+    return "{" + key + "}"
 
 
 def _default_risk_config() -> RiskConfig:
@@ -127,6 +142,7 @@ def build_specialist_agents(
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
+        output_key=FUNDAMENTAL_VIEW_OUTPUT_KEY,
     )
 
     technical_analyst = LlmAgent(
@@ -135,6 +151,9 @@ def build_specialist_agents(
         description="Interprets trend, RSI, support/resistance, and momentum from deterministic indicators.",
         instruction=(
             f"{HARD_RULES_TEXT}\n\n"
+            f"The prior fundamental view is available in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}. "
+            "Use it only as context for agreement or tension; do not let it override the deterministic "
+            "technical indicators.\n"
             "You are the Technical Analyst. Given the deterministic technical "
             "indicators, describe trend, momentum, and support/resistance. Do not "
             "compute new indicator values; only interpret the ones provided.\n"
@@ -143,6 +162,7 @@ def build_specialist_agents(
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
+        output_key=TECHNICAL_VIEW_OUTPUT_KEY,
     )
 
     decision_synthesizer = LlmAgent(
@@ -151,6 +171,8 @@ def build_specialist_agents(
         description="Combines the rules-engine output and analyst views into the final recommendation memo.",
         instruction=(
             f"{HARD_RULES_TEXT}\n\n"
+            f"The fundamental view is stored in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}.\n"
+            f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)}.\n"
             "You are the Decision Synthesizer. Combine the rules engine decision, "
             "the risk manager's trade levels, and the analyst views into a single "
             "human-readable memo. Reuse the risk manager's numbers verbatim; never "
@@ -162,6 +184,7 @@ def build_specialist_agents(
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
+        output_key=DRAFT_RECOMMENDATION_OUTPUT_KEY,
     )
 
     critic = LlmAgent(
@@ -170,6 +193,9 @@ def build_specialist_agents(
         description="Finds contradictions, unsupported claims, or violated hard rules and can force no_trade.",
         instruction=(
             f"{HARD_RULES_TEXT}\n\n"
+            f"The fundamental view is stored in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}.\n"
+            f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)}.\n"
+            f"The draft recommendation is stored in {_state_key_reference(DRAFT_RECOMMENDATION_OUTPUT_KEY)}.\n"
             "You are the Critic/Guardrail. Review the draft recommendation for "
             "contradictions between the fundamental and technical views, claims "
             "without cited evidence, stale or incomplete data, and violated hard "
@@ -180,6 +206,7 @@ def build_specialist_agents(
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
         generate_content_config=generation_config,
+        output_key=CRITIQUE_OUTPUT_KEY,
     )
 
     return {
@@ -190,33 +217,12 @@ def build_specialist_agents(
     }
 
 
-def build_root_agent(
-    config: AgentWorkflowConfig,
-    tools: Dict[str, FunctionTool],
-    specialists: Dict[str, LlmAgent],
-) -> LlmAgent:
-    """Build the Trade Analyst Supervisor root agent orchestrating the
-    deterministic tools and LLM specialists."""
-    return LlmAgent(
+def build_root_agent(specialists: Dict[str, LlmAgent]) -> SequentialAgent:
+    """Build the Trade Analyst Supervisor root agent as fixed control flow."""
+    return SequentialAgent(
         name=ROOT_AGENT_NAME,
-        model=config.model_name,
         description="Orchestrates the agentic trade analysis workflow end-to-end.",
-        instruction=(
-            f"{HARD_RULES_TEXT}\n\n"
-            "You are the Trade Analyst Supervisor. Resolve the ticker, collect "
-            "structured data and evidence, delegate to the Fundamental and "
-            "Technical Analysts, call the Risk Manager, delegate to the Decision "
-            "Synthesizer, then have the Critic/Guardrail review the draft before "
-            "returning the final recommendation.\n"
-            "Call only the functions that are registered for you. To reach a "
-            f"specialist ({FUNDAMENTAL_ANALYST_NAME}, {TECHNICAL_ANALYST_NAME}, "
-            f"{DECISION_SYNTHESIZER_NAME}, {CRITIC_NAME}) you must use "
-            "`transfer_to_agent` with its name as the argument; a specialist name "
-            "is never itself a callable function."
-        ),
-        tools=list(tools.values()),
-        sub_agents=list(specialists.values()),
-        generate_content_config={"temperature": config.temperature},
+        sub_agents=[specialists[name] for name in SPECIALIST_ORDER],
     )
 
 
@@ -235,5 +241,5 @@ def build_agent_registry(
         engine=engine, embedding_client=embedding_client, risk_config=risk_config, today=today
     )
     specialists = build_specialist_agents(config, tools)
-    root_agent = build_root_agent(config, tools, specialists)
+    root_agent = build_root_agent(specialists)
     return AgentRegistry(tools=tools, specialists=specialists, root_agent=root_agent)
