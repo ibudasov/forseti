@@ -1,11 +1,16 @@
 from __future__ import annotations
+
+from importlib import import_module
 from datetime import date, datetime
-from typing import Any, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
 from app.schemas.fundamentals import FundamentalAgentEffect
+
+if TYPE_CHECKING:
+    from app.schemas.critique import CriticEffect
 
 
 class AnalyzeRequest(BaseModel):
@@ -61,6 +66,10 @@ class AnalysisTrace(BaseModel):
     adk_event_count: int = 0
     observed_agents: List[str] = Field(default_factory=list)
     fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
+    critic_effect: Optional["CriticEffect"] = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class DecisionDiagnosis(BaseModel):
@@ -92,5 +101,15 @@ class AnalyzeResponse(BaseModel):
     trace: Optional[AnalysisTrace] = None
     diagnosis: Optional[DecisionDiagnosis] = None
     fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
+    critic_effect: Optional["CriticEffect"] = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+_CriticEffect = getattr(import_module("app.schemas.critique"), "CriticEffect")
+
+AnalysisTrace.model_rebuild(_types_namespace={"CriticEffect": _CriticEffect})
+AnalyzeResponse.model_rebuild(_types_namespace={"CriticEffect": _CriticEffect})
