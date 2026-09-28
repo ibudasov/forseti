@@ -16,9 +16,8 @@ from tests.fixtures.critic.loader import (
     DEFAULT_FIXTURE_DIR,
     CriticSuiteResult,
     build_shadow_report,
-    critic_case_paths,
     evaluate_suite,
-    load_critic_case,
+    load_critic_cases,
     render_shadow_markdown,
     render_suite_markdown,
 )
@@ -64,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_shadow_markdown(report), end="")
         return 0
 
-    cases = [load_critic_case(path) for path in critic_case_paths(args.fixture)]
+    cases = load_critic_cases(args.fixture)
     result = evaluate_suite(cases)
     if args.live:
         _require_live_confirmation(args.confirm_cost)

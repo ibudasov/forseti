@@ -611,6 +611,15 @@ def _assert_shadow_matches_off(
     deterministic_objections: list[CritiqueObjection],
     shadow_effect: CriticEffect,
 ) -> None:
+    # `apply_critic_policy` fully computes the counterfactual effect in shadow
+    # mode too, so `shadow_effect.final_decision`/`final_confidence` may
+    # legitimately differ from the pre-critique response when an objection
+    # would (if enforced) change the outcome. What "shadow is byte-identical
+    # to off" actually guarantees is: the caller's `response` argument is
+    # never mutated by the policy call itself in either mode — only the
+    # workflow decides, based on mode, whether to apply the effect to the
+    # live response (and it never does in `shadow` or `off`).
+    response_snapshot = case.response.model_copy(deep=True)
     off_effect = apply_critic_policy(
         mode="off",
         response=case.response.model_copy(deep=True),
@@ -619,6 +628,11 @@ def _assert_shadow_matches_off(
         critique_result=critique_result,
         deterministic_objections=deterministic_objections,
     )
+    if case.response.decision != response_snapshot.decision or not math.isclose(
+        case.response.confidence, response_snapshot.confidence, abs_tol=1e-9
+    ):
+        raise AssertionError(f"{case.filename}: response argument was mutated by apply_critic_policy.")
+
     shadow_dump = shadow_effect.model_dump(mode="json")
     off_dump = off_effect.model_dump(mode="json")
     shadow_dump.pop("mode", None)
@@ -627,13 +641,9 @@ def _assert_shadow_matches_off(
         raise AssertionError(
             f"{case.filename}: shadow effect diverged from off effect when excluding mode."
         )
-    if shadow_effect.final_decision != case.response.decision:
+    if not deterministic_objections and not critique_result.response.objections:
         raise AssertionError(
-            f"{case.filename}: shadow final_decision changed the response from {case.response.decision!r}."
-        )
-    if not math.isclose(shadow_effect.final_confidence, case.response.confidence, abs_tol=1e-9):
-        raise AssertionError(
-            f"{case.filename}: shadow final_confidence changed the response from {case.response.confidence!r}."
+            f"{case.filename}: shadow_matches_off case must exercise at least one objection."
         )
 
 

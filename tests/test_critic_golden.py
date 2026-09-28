@@ -12,6 +12,7 @@ from tests.fixtures.critic.loader import (
     critic_case_paths,
     evaluate_suite,
     load_critic_case,
+    load_critic_cases,
     render_suite_markdown,
     run_critic_case,
 )
@@ -49,7 +50,7 @@ def test_fixture_directory_is_auto_discovered_and_complete():
 
 
 def test_full_suite_passes_and_renders_all_twelve_cases():
-    suite = evaluate_suite([load_critic_case(path) for path in critic_case_paths()])
+    suite = evaluate_suite(load_critic_cases())
     table = render_suite_markdown(suite)
 
     assert suite.passed is True
