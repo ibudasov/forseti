@@ -111,5 +111,6 @@ Do not flip `CRITIC_MODE` to `enforced` until all of these hold:
 
 The CLI exposes `--live` to mirror the fundamental-agent harness and to keep the
 manual confirmation gate explicit. Today it replays the same frozen critic
-fixtures after checking `--confirm-cost yes` and `VERTEX_AI_PROJECT`; there are
-no live-only critic golden cases yet.
+fixtures after checking `--confirm-cost yes`; there are no live-only critic
+golden cases yet, so no live model or network calls happen and no
+`VERTEX_AI_PROJECT` check is required.

@@ -11,7 +11,6 @@ from sqlmodel import select
 
 from app.db.models import AgentRun, AgentRunStep
 from app.db.session import get_engine, get_session
-from app.settings import get_settings
 from tests.fixtures.critic.loader import (
     DEFAULT_FIXTURE_DIR,
     CriticSuiteResult,
@@ -79,8 +78,6 @@ def main(argv: list[str] | None = None) -> int:
 def _require_live_confirmation(confirm_cost: str) -> None:
     if confirm_cost.lower() != "yes":
         raise RuntimeError("Live evaluation requires --confirm-cost yes.")
-    if not get_settings().VERTEX_AI_PROJECT:
-        raise RuntimeError("Live evaluation requires VERTEX_AI_PROJECT.")
 
 
 def _with_live_note(result: CriticSuiteResult) -> CriticSuiteResult:
