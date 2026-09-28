@@ -54,8 +54,8 @@ def test_full_suite_passes_and_renders_all_twelve_cases():
     table = render_suite_markdown(suite)
 
     assert suite.passed is True
-    assert suite.total_cases == 12
-    assert table.count("| ") >= 13
+    assert suite.total_cases == len(EXPECTED_CASES)
+    assert table.count("| ") >= suite.total_cases + 1
     for case_name in EXPECTED_CASES:
         assert case_name in table
 
