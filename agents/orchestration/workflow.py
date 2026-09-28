@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Literal, Optional, Protocol, cast
@@ -40,7 +41,7 @@ from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, get_latest_bars, save_agent_run
 from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
-from app.schemas.critique import CritiqueResult, DraftRecommendation
+from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
 from app.schemas.fundamentals import FundamentalAssessmentResult
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
@@ -129,6 +130,7 @@ class _DecisionRevisionResult:
 class _CriticStepResult:
     step: _PendingTraceStep
     synthesis_retries: int = 0
+    additional_token_usage: dict[str, int] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -261,6 +263,18 @@ def _merged_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str
     merged = dict(left)
     _merge_token_usage(merged, right)
     return merged
+
+
+def _objection_counts_by_severity(objections: Iterable[CritiqueObjection]) -> dict[str, int]:
+    return dict(Counter(objection.severity for objection in objections))
+
+
+def _update_critic_trace_output(step: _PendingTraceStep, effect: Any) -> None:
+    if step.output is None:
+        return
+    step.output["baseline_decision"] = effect.baseline_decision
+    step.output["final_decision"] = effect.final_decision
+    step.output["reason_codes"] = list(effect.reason_codes)
 
 
 def _analysis_date(request: AnalyzeRequest) -> date | None:
@@ -555,6 +569,7 @@ class AgenticAnalysisWorkflow:
                         token_usage=usage,
                         pending_synthesis=pending_synthesis,
                     )
+                    _merge_token_usage(token_usage, critic_result.additional_token_usage)
                     self._flush_pending_synthesis(
                         trace_recorder,
                         pending_synthesis,
@@ -800,14 +815,19 @@ class AgenticAnalysisWorkflow:
 
         critic_step = self._build_critic_trace_step(
             critique_result=critique_result,
+            deterministic_objections=deterministic_objections,
             effect=effect,
             tool_calls=tool_calls,
             latency_ms=latency_ms + critique_result.latency_ms,
             token_usage=_merged_token_usage(token_usage, critique_result.token_usage),
         )
         synthesis_retries = 0
+        additional_token_usage = dict(critique_result.token_usage)
         if mode == "shadow":
-            return _CriticStepResult(step=critic_step)
+            return _CriticStepResult(
+                step=critic_step,
+                additional_token_usage=additional_token_usage,
+            )
 
         if effect.decision_changed or effect.final_confidence != response.confidence:
             self._apply_downgrade_only_transition(
@@ -824,6 +844,7 @@ class AgenticAnalysisWorkflow:
                 critique_result=critique_result,
                 pending_synthesis=pending_synthesis,
                 critic_step=critic_step,
+                additional_token_usage=additional_token_usage,
                 warnings=warnings,
             )
             effect.revisions_performed = synthesis_retries
@@ -832,20 +853,33 @@ class AgenticAnalysisWorkflow:
             effect.decision_changed = effect.final_decision != effect.baseline_decision
 
         response.critic_effect = effect
-        return _CriticStepResult(step=critic_step, synthesis_retries=synthesis_retries)
+        _update_critic_trace_output(critic_step, effect)
+        return _CriticStepResult(
+            step=critic_step,
+            synthesis_retries=synthesis_retries,
+            additional_token_usage=additional_token_usage,
+        )
 
     def _build_critic_trace_step(
         self,
         *,
         critique_result: CritiqueResult,
+        deterministic_objections: list[CritiqueObjection],
         effect,
         tool_calls: list[str],
         latency_ms: float,
         token_usage: dict[str, int],
     ) -> _PendingTraceStep:
+        objections = [
+            *deterministic_objections,
+            *critique_result.response.objections,
+        ]
         output = {
             "status": critique_result.response.status,
             "verdict": critique_result.response.verdict,
+            "objection_counts_by_severity": _objection_counts_by_severity(objections),
+            "baseline_decision": effect.baseline_decision,
+            "final_decision": effect.final_decision,
             "accepted": critique_result.validation.accepted,
             "reason_codes": list(effect.reason_codes),
         }
@@ -876,6 +910,7 @@ class AgenticAnalysisWorkflow:
         critique_result: CritiqueResult,
         pending_synthesis: _PendingTraceStep | None,
         critic_step: _PendingTraceStep,
+        additional_token_usage: dict[str, int],
         warnings: list[str],
     ) -> int:
         if MAX_CRITIC_REVISIONS != 1:
@@ -888,6 +923,7 @@ class AgenticAnalysisWorkflow:
             baseline=baseline,
             revision_instructions=critique_result.response.revision_instructions,
         )
+        _merge_token_usage(additional_token_usage, revision_result.token_usage)
         if revision_result.synthesis is None:
             warnings.append("critic_revision_failed")
             if pending_synthesis is not None:
@@ -1247,6 +1283,11 @@ class AgenticAnalysisWorkflow:
                 if trace.fundamental_agent_effect is not None
                 else None
             ),
+            critic_effect=(
+                trace.critic_effect.model_dump(mode="json")
+                if trace.critic_effect is not None
+                else None
+            ),
         )
         steps = [AgentRunStep(run_id=trace.run_id, **step.model_dump()) for step in trace.steps]
         save_agent_run(run, steps, engine=self.engine)
@@ -1273,4 +1314,5 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         adk_event_count=run.adk_event_count,
         observed_agents=run.observed_agents,
         fundamental_agent_effect=run.fundamental_agent_effect,
+        critic_effect=run.critic_effect,
     )
