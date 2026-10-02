@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -9,14 +11,17 @@ from app.schemas.fundamentals import (
     EvidenceChunkInput,
     EvidenceQuestionCoverage,
     FundamentalAnalysisRequest,
+    FundamentalAssessmentResponse,
     FundamentalContextCoverage,
     MetricSeries,
     MetricSeriesPoint,
 )
 from app.services.fundamental_analyst import (
     FundamentalAnalyst,
+    GeminiFundamentalModel,
     ModelOutput,
     RetryableModelError,
+    _fundamental_response_schema,
     build_fundamental_analyst_prompt,
 )
 
@@ -32,6 +37,48 @@ class _FakeModel:
         if isinstance(output, Exception):
             raise output
         return ModelOutput(text=output, token_usage={"total_token_count": 9})
+
+
+def test_gemini_model_enforces_fundamental_response_schema(monkeypatch):
+    request = _request()
+    captured_config = {}
+    fake_vertexai = types.ModuleType("vertexai")
+    fake_vertexai.init = lambda **kwargs: None
+    fake_generative_models = types.ModuleType("vertexai.generative_models")
+
+    class _FakeGemini:
+        def __init__(self, model_name):
+            del model_name
+
+        def generate_content(self, prompt, generation_config):
+            del prompt
+            captured_config.update(generation_config)
+            return types.SimpleNamespace(text=_response_json(request), usage_metadata=None)
+
+    class _FakeGenerationConfig:
+        @classmethod
+        def from_dict(cls, config):
+            return config
+
+    fake_generative_models.GenerativeModel = _FakeGemini
+    fake_generative_models.GenerationConfig = _FakeGenerationConfig
+    monkeypatch.setitem(sys.modules, "vertexai", fake_vertexai)
+    monkeypatch.setitem(sys.modules, "vertexai.generative_models", fake_generative_models)
+    model = GeminiFundamentalModel(
+        model_name="fake-gemini",
+        vertex_project="project",
+        vertex_location="region",
+        temperature=0.2,
+    )
+
+    model.generate("prompt")
+
+    assert captured_config["response_mime_type"] == "application/json"
+    assert captured_config["response_schema"] == _fundamental_response_schema()
+    assert "$defs" not in captured_config["response_schema"]
+    assert "$ref" not in json.dumps(captured_config["response_schema"])
+    assert "additionalProperties" not in json.dumps(captured_config["response_schema"])
+    assert '"const"' not in json.dumps(captured_config["response_schema"])
 
 
 def test_valid_assessment_is_accepted():

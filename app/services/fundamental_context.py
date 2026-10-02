@@ -32,6 +32,14 @@ MAX_CHUNKS_PER_QUESTION = 3
 MAX_TOTAL_EVIDENCE_CHARACTERS = 12_000
 EVIDENCE_STALE_DAYS = 180
 
+REQUIRED_METRIC_SERIES_NAMES = {
+    "revenue_growth": frozenset({"revenue_growth", "revenue_growth_yoy"}),
+    "fcf": frozenset({"fcf", "free_cash_flow"}),
+    "debt_to_equity": frozenset({"debt_to_equity"}),
+    "eps_trend": frozenset({"eps_trend", "diluted_eps_growth_delta"}),
+    "margins": frozenset({"margins", "net_margin", "operating_margin"}),
+}
+
 
 @dataclass(frozen=True)
 class EvidenceQuestion:
@@ -91,6 +99,13 @@ EVIDENCE_QUESTIONS: tuple[EvidenceQuestion, ...] = (
         prompt="What liquidity, debt-maturity, dilution, or capex risks are material?",
         source_types=(SourceType.filing_mda, SourceType.filing_risk, SourceType.company_news),
     ),
+)
+MAX_CHARACTERS_PER_QUESTION = MAX_TOTAL_EVIDENCE_CHARACTERS // len(EVIDENCE_QUESTIONS)
+MAX_CHARACTERS_PER_EVIDENCE_CHUNK = MAX_CHARACTERS_PER_QUESTION // MAX_CHUNKS_PER_QUESTION
+EXPECTED_EVIDENCE_SOURCE_TYPES = frozenset(
+    source_type.value
+    for question in EVIDENCE_QUESTIONS
+    for source_type in question.source_types
 )
 
 RetrieveEvidenceChunks = Callable[[str, str, Sequence[SourceType], int], list[DocumentChunk]]
@@ -290,6 +305,7 @@ def _build_evidence_pack(
     truncated = False
 
     for question in EVIDENCE_QUESTIONS:
+        selected_question_characters = 0
         candidates = retriever(ticker, question.prompt, question.source_types, MAX_CHUNKS_PER_QUESTION * 2)
         eligible = _rank_chunks(
             [
@@ -309,7 +325,11 @@ def _build_evidence_pack(
                 continue
             if chunk_id in selected_chunk_ids:
                 continue
-            remaining_characters = MAX_TOTAL_EVIDENCE_CHARACTERS - selected_characters
+            remaining_characters = min(
+                MAX_TOTAL_EVIDENCE_CHARACTERS - selected_characters,
+                MAX_CHARACTERS_PER_QUESTION - selected_question_characters,
+                MAX_CHARACTERS_PER_EVIDENCE_CHUNK,
+            )
             if remaining_characters <= 0:
                 truncated = True
                 question_truncated = True
@@ -320,6 +340,7 @@ def _build_evidence_pack(
                 question_truncated = True
                 break
             selected_characters += len(chunk_text)
+            selected_question_characters += len(chunk_text)
             truncated = truncated or was_truncated
             question_truncated = question_truncated or was_truncated
             selected_chunk_ids.add(chunk_id)
@@ -423,20 +444,24 @@ def _build_coverage(
 ) -> FundamentalContextCoverage:
     metrics_in_request = {series.metric_name for series in metric_series}
     required_metrics = list(FUNDAMENTAL_METRIC_DEFINITIONS)
+    present_required_metrics = {
+        metric_name
+        for metric_name, series_names in REQUIRED_METRIC_SERIES_NAMES.items()
+        if metrics_in_request & series_names
+    }
     newest_published_at = max(
         (chunk.published_at for chunk in evidence_chunks if chunk.published_at is not None),
         default=None,
     )
     source_types_present = sorted({chunk.source_type for chunk in evidence_chunks})
-    all_source_types = sorted(source_type.value for source_type in SourceType)
     selected_character_count = sum(len(chunk.text) for chunk in evidence_chunks)
 
     return FundamentalContextCoverage(
         required_metrics_present=[
-            metric_name for metric_name in required_metrics if metric_name in metrics_in_request
+            metric_name for metric_name in required_metrics if metric_name in present_required_metrics
         ],
         required_metrics_missing=[
-            metric_name for metric_name in required_metrics if metric_name not in metrics_in_request
+            metric_name for metric_name in required_metrics if metric_name not in present_required_metrics
         ],
         annual_period_counts={
             series.metric_name: len(series.annual)
@@ -448,7 +473,9 @@ def _build_coverage(
         },
         source_types_present=source_types_present,
         source_types_missing=[
-            source_type for source_type in all_source_types if source_type not in source_types_present
+            source_type
+            for source_type in sorted(EXPECTED_EVIDENCE_SOURCE_TYPES)
+            if source_type not in source_types_present
         ],
         newest_evidence_published_at=newest_published_at,
         evidence_stale=_is_stale(newest_published_at, snapshot_at=snapshot_at),

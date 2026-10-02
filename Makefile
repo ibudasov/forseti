@@ -59,6 +59,7 @@ test: check-compose
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e PIPELINE_MODE=linear \
 		-e ALLOW_PIPELINE_OVERRIDE=false \
+		-e FUNDAMENTAL_AGENT_MODE=off \
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
