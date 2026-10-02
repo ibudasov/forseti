@@ -13,6 +13,15 @@ from agents.observability.llm_io_recorder import FileLlmIoRecorder, NullLlmIoRec
 from agents.orchestration.registry import AgentRegistry, build_agent_registry as build_real_agent_registry
 from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, DecisionDiagnosis
+from agents.orchestration.trace_recorder import MAX_TRACE_OUTPUT_CHARS
+from app.schemas.critique import (
+    CritiqueObjection,
+    CritiqueRequest,
+    CritiqueResponse,
+    CritiqueResult,
+    CritiqueValidation,
+    DraftRecommendation,
+)
 from app.schemas.fundamentals import (
     CitedFinding,
     EvidenceChunkInput,
@@ -122,6 +131,12 @@ def _workflow(monkeypatch, *, events=(), raise_error: Exception | None = None, w
         "build_agent_registry",
         lambda config, engine=None, today=None: AgentRegistry(tools=tools, specialists={}, root_agent=None),
     )
+    monkeypatch.setattr(
+        workflow_module,
+        "build_critique_request",
+        lambda *args, **kwargs: _critique_request(kwargs["draft"]),
+    )
+    monkeypatch.setattr(workflow_module, "evaluate_deterministic_objections", lambda **kwargs: [])
     if engine is None:
         monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
 
@@ -139,6 +154,7 @@ def _workflow(monkeypatch, *, events=(), raise_error: Exception | None = None, w
 
 
 def test_happy_trajectory_records_observed_steps(monkeypatch):
+    _enable_critic(monkeypatch, mode="shadow")
     events = [
         _event("trade_analyst_supervisor", tool_calls=("structured_data_collector", "transfer_to_agent")),
         _event("fundamental_analyst", text="bullish"),
@@ -171,6 +187,16 @@ def test_happy_trajectory_records_observed_steps(monkeypatch):
         "decision_synthesizer",
         "critic_guardrail",
     ]
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.output == {
+        "status": "completed",
+        "verdict": "accept",
+        "objection_counts_by_severity": {},
+        "baseline_decision": "no_trade",
+        "final_decision": "no_trade",
+        "accepted": True,
+        "reason_codes": [],
+    }
 
 
 def test_zero_events_marks_specialists_as_skipped(monkeypatch):
@@ -260,6 +286,429 @@ def test_guardrail_rejects_fabricated_risk_values(monkeypatch):
     assert synthesis_step.status == "degraded"
     assert synthesis_step.output["reason"] == "guardrail_rejected"
     assert any(warning.startswith("guardrail_rejected: agent_output_changed_risk_value") for warning in response.warnings)
+
+
+def test_finalizer_ordering_applies_fundamental_then_synthesizer_then_critic(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "enforced")
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="reject",
+            proposed_decision="no_trade",
+            objections=[_model_objection()],
+        ),
+    )
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["downgrade"]}'),
+            _event("critic_guardrail", text="critic narration"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
+    monkeypatch.setattr(
+        workflow_module,
+        "FundamentalAnalyst",
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "get_latest_bars",
+        lambda *a, **k: [SimpleNamespace(high=110, low=90, close=100)] * 100,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "calculate_risk_levels",
+        lambda bars, risk_config: SimpleNamespace(
+            entry_low=98,
+            entry_high=102,
+            stop_loss=90,
+            take_profit_1=110,
+            take_profit_2=120,
+            risk_reward=2,
+            position_size_eur=500,
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "calculate_time_stop_at",
+        lambda recommendation_date: date(2026, 12, 31),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.fundamental_agent_effect is not None
+    assert response.fundamental_agent_effect.final_decision == "trade"
+    assert response.decision == "no_trade"
+    assert response.critic_effect is not None
+    assert response.critic_effect.final_decision == "no_trade"
+    assert all("ignored_due_to_fundamental_policy" not in str(step.output) for step in response.trace.steps)
+    critic_chain = [
+        step.agent_name
+        for step in response.trace.steps
+        if step.agent_name in {"decision_synthesizer", "critic_guardrail"}
+    ]
+    assert critic_chain == [
+        "decision_synthesizer",
+        "critic_guardrail",
+    ]
+
+
+def test_revision_loop_invokes_synthesizer_once_more(monkeypatch):
+    revision_calls: list[str] = []
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="revise",
+            revision_instructions="Lower confidence.",
+            objections=[_model_objection()],
+        ),
+    )
+
+    def _fake_revision(self, **kwargs):
+        revision_calls.append(kwargs["revision_instructions"])
+        return workflow_module._DecisionRevisionResult(
+            synthesis=workflow_module.DecisionSynthesis(
+                decision="no_trade",
+                confidence=0.2,
+                reasons=["revised"],
+            ),
+            raw_output='{"decision":"no_trade","confidence":0.2,"reasons":["revised"]}',
+            token_usage={"total_token_count": 4},
+            latency_ms=5.0,
+        )
+
+    monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_request_synthesis_revision", _fake_revision)
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="revise"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    response = workflow.analyze("NVDA")
+
+    assert revision_calls == ["Lower confidence."]
+    assert response.decision == "no_trade"
+    assert response.critic_effect is not None
+    assert response.critic_effect.revisions_performed == 1
+    synth_step = [step for step in response.trace.steps if step.agent_name == "decision_synthesizer"][0]
+    assert synth_step.retries == 1
+
+
+def test_revision_loop_cannot_run_twice(monkeypatch):
+    revision_calls: list[str] = []
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="revise",
+            revision_instructions="Only once.",
+            objections=[_model_objection()],
+        ),
+    )
+
+    def _fake_revision(self, **kwargs):
+        revision_calls.append(kwargs["revision_instructions"])
+        return workflow_module._DecisionRevisionResult(
+            synthesis=workflow_module.DecisionSynthesis(
+                decision="watchlist",
+                confidence=0.3,
+                reasons=["revised"],
+            ),
+            raw_output='{"decision":"watchlist","confidence":0.3,"reasons":["revised"]}',
+            token_usage={},
+            latency_ms=1.0,
+        )
+
+    monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_request_synthesis_revision", _fake_revision)
+    _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="revise"),
+        ],
+    ).analyze("NVDA")
+
+    assert revision_calls == ["Only once."]
+
+
+def test_failed_revision_keeps_first_draft_and_marks_degraded(monkeypatch):
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="revise",
+            revision_instructions="Try again.",
+            objections=[_model_objection()],
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module.AgenticAnalysisWorkflow,
+        "_request_synthesis_revision",
+        lambda self, **kwargs: workflow_module._DecisionRevisionResult(
+            synthesis=None,
+            raw_output="bad output",
+            token_usage={},
+            latency_ms=3.0,
+            error_reason="critic_revision_failed",
+            error_detail="timeout",
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="revise"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert "critic_revision_failed" in response.warnings
+    synth_step = [step for step in response.trace.steps if step.agent_name == "decision_synthesizer"][0]
+    assert synth_step.status == "degraded"
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.status == "degraded"
+
+
+def test_critic_model_failure_preserves_http_success_and_deterministic_answer(monkeypatch):
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            accepted=False,
+            status="failed",
+            reason_codes=["provider_error:timeout"],
+        ),
+    )
+
+    response = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"no_trade","confidence":0.0,"reasons":["first"]}'),
+            _event("critic_guardrail", text="failure"),
+        ],
+    ).analyze("NVDA")
+
+    assert response.decision == "no_trade"
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.status == "degraded"
+
+
+def test_critic_trace_output_summarizes_objections_and_decision_change(monkeypatch):
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="reject",
+            proposed_decision="no_trade",
+            objections=[
+                _model_objection(),
+                _medium_model_objection(),
+                _low_model_objection(),
+            ],
+        ),
+    )
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="reviewed"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.output == {
+        "status": "completed",
+        "verdict": "reject",
+        "objection_counts_by_severity": {"high": 1, "medium": 1, "low": 1},
+        "baseline_decision": "watchlist",
+        "final_decision": "no_trade",
+        "accepted": True,
+        "reason_codes": ["critic_reject_applied"],
+    }
+
+
+def test_critic_mode_off_skips_policy_and_keeps_current_response(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_critic_mode", lambda: "off")
+    monkeypatch.setattr(
+        workflow_module.AgenticAnalysisWorkflow,
+        "_review_critique",
+        lambda self, critique_request: (_ for _ in ()).throw(AssertionError("critic should not run")),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="skip"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert response.critic_effect is None
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.status == "skipped"
+    assert critic_step.output == {"reason": "critic_mode_off"}
+
+
+def test_critic_shadow_mode_populates_effect_without_mutating_fields(monkeypatch):
+    _enable_critic(
+        monkeypatch,
+        mode="shadow",
+        critique_result=_critique_result(
+            verdict="reject",
+            proposed_decision="no_trade",
+            penalty=0.2,
+            objections=[_model_objection()],
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="shadow"),
+        ],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert response.confidence == 0.5
+    assert response.critic_effect is not None
+    assert response.critic_effect.final_decision == "no_trade"
+    assert response.entry_range == _watchlist_response().entry_range
+    assert response.stop_loss == _watchlist_response().stop_loss
+    assert response.take_profit == _watchlist_response().take_profit
+    assert response.position_size_eur == _watchlist_response().position_size_eur
+
+
+def test_money_fields_remain_identical_across_critic_modes(monkeypatch):
+    for mode in ("off", "shadow", "enforced"):
+        _enable_critic(
+            monkeypatch,
+            mode=mode,
+            critique_result=_critique_result(
+                verdict="reject",
+                proposed_decision="no_trade",
+                objections=[_model_objection()],
+            ),
+        )
+        response = _workflow(
+            monkeypatch,
+            events=[
+                _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+                _event("critic_guardrail", text=mode),
+            ],
+        ).analyze("NVDA")
+        baseline = _deterministic_response()
+        assert response.entry_range == baseline.entry_range
+        assert response.stop_loss == baseline.stop_loss
+        assert response.take_profit == baseline.take_profit
+        assert response.risk_reward == baseline.risk_reward
+        assert response.position_size_eur == baseline.position_size_eur
+
+
+def test_critic_trace_output_is_truncated_when_detail_is_oversized(monkeypatch):
+    oversized_reason = "x" * (MAX_TRACE_OUTPUT_CHARS + 25)
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            accepted=False,
+            status="failed",
+            reason_codes=[oversized_reason],
+        ),
+    )
+
+    response = _workflow(
+        monkeypatch,
+        events=[
+            _event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}'),
+            _event("critic_guardrail", text="failure"),
+        ],
+    ).analyze("NVDA")
+
+    critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
+    assert critic_step.status == "degraded"
+    assert critic_step.output is not None
+    assert critic_step.output["detail"].startswith("x" * MAX_TRACE_OUTPUT_CHARS)
+    assert critic_step.output["detail"].endswith("…[truncated]")
+
+
+def test_critic_token_usage_is_merged_into_trace_total(monkeypatch):
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(token_usage={"prompt_token_count": 7, "total_token_count": 11}),
+    )
+
+    response = _workflow(
+        monkeypatch,
+        events=[
+            _event(
+                "decision_synthesizer",
+                text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}',
+                token_usage={"prompt_token_count": 2, "total_token_count": 3},
+            ),
+            _event("critic_guardrail", text="accepted"),
+        ],
+    ).analyze("NVDA")
+
+    assert response.trace.token_usage["prompt_token_count"] == 9
+    assert response.trace.token_usage["total_token_count"] == 14
 
 
 def test_completed_non_deterministic_steps_do_not_exceed_event_count(monkeypatch):
@@ -544,4 +993,115 @@ def _assessment(*, accepted: bool, adjustment: int) -> FundamentalAssessmentResu
         token_usage={},
         model_name="fake",
         prompt_version="v1",
+    )
+
+
+def _enable_critic(
+    monkeypatch,
+    *,
+    mode: str,
+    critique_result: CritiqueResult | None = None,
+):
+    monkeypatch.setattr(workflow_module, "_critic_mode", lambda: mode)
+    monkeypatch.setattr(
+        workflow_module.AgenticAnalysisWorkflow,
+        "_review_critique",
+        lambda self, critique_request: critique_result or _critique_result(),
+    )
+
+
+def _critique_result(
+    *,
+    accepted: bool = True,
+    status: str = "completed",
+    verdict: str = "accept",
+    proposed_decision: str | None = None,
+    penalty: float = 0.0,
+    reason_codes: list[str] | None = None,
+    objections: list[CritiqueObjection] | None = None,
+    revision_instructions: str = "",
+    token_usage: dict[str, int] | None = None,
+) -> CritiqueResult:
+    response = CritiqueResponse.model_construct(
+        schema_version="1.0",
+        run_id="run-1",
+        context_hash="ctx-1",
+        agent_name="critic_guardrail",
+        status=status,
+        verdict=verdict,
+        objections=objections or [],
+        proposed_decision=proposed_decision,
+        proposed_confidence_penalty=penalty,
+        revision_instructions=revision_instructions,
+        summary="Critic summary.",
+    )
+    return CritiqueResult(
+        response=response,
+        validation=CritiqueValidation(accepted=accepted, reason_codes=reason_codes or []),
+        raw_output="{}",
+        latency_ms=6.0,
+        token_usage=token_usage or {"total_token_count": 3},
+        model_name="fake-critic",
+        prompt_version="critic-guardrail.v1",
+    )
+
+
+def _model_objection() -> CritiqueObjection:
+    return CritiqueObjection.model_construct(
+        objection_id="model:1",
+        category="unsupported_claim",
+        severity="high",
+        source="model",
+        claim="Unsupported claim.",
+        metric_ids=["revenue_growth:2026-06-30"],
+        chunk_ids=[10],
+        warning_codes=["warn:stale_data"],
+    )
+
+
+def _medium_model_objection() -> CritiqueObjection:
+    return CritiqueObjection.model_construct(
+        objection_id="model:2",
+        category="internal_inconsistency",
+        severity="medium",
+        source="model",
+        claim="Medium severity objection.",
+        metric_ids=["revenue_growth:2026-06-30"],
+        chunk_ids=[],
+        warning_codes=[],
+    )
+
+
+def _low_model_objection() -> CritiqueObjection:
+    return CritiqueObjection.model_construct(
+        objection_id="model:3",
+        category="stale_or_incomplete_data",
+        severity="low",
+        source="model",
+        claim="Low severity objection.",
+        metric_ids=[],
+        chunk_ids=[],
+        warning_codes=[],
+    )
+
+
+def _critique_request(draft: DraftRecommendation) -> CritiqueRequest:
+    return CritiqueRequest(
+        schema_version="1.0",
+        run_id="run-1",
+        context_hash="ctx-1",
+        ticker="NVDA",
+        as_of_date=date(2026, 9, 27),
+        snapshot_at=datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc),
+        draft=draft,
+        analyst_views=[],
+        evidence_chunks=[],
+        deterministic_warnings=[],
+        allowed_actions=[
+            "accept",
+            "downgrade_confidence",
+            "downgrade_decision",
+            "force_no_trade",
+            "request_revision",
+        ],
     )

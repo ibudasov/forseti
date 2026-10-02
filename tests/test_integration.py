@@ -14,6 +14,7 @@ from app.main import app
 from app.main import get_analysis_engine
 from app.main import get_pipeline_override_allowed
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse
+from app.schemas.critique import CriticEffect, CriticVersionStamp
 from app.settings import Settings
 from tests.fixtures.golden.loader import load_golden_case
 
@@ -257,6 +258,35 @@ class TestPipelineOverride:
             trace=trace,
         )
 
+    @staticmethod
+    def _critic_effect() -> CriticEffect:
+        return CriticEffect(
+            mode="shadow",
+            accepted=True,
+            status="completed",
+            verdict="reject",
+            reason_codes=["critic_reject_applied"],
+            objection_counts={"unsupported_claim": 1},
+            deterministic_objection_ids=[],
+            model_objection_ids=["model:1"],
+            baseline_decision="watchlist",
+            proposed_decision="no_trade",
+            final_decision="no_trade",
+            decision_changed=True,
+            baseline_confidence=0.8,
+            applied_confidence_penalty=0.1,
+            final_confidence=0.7,
+            revisions_requested=0,
+            revisions_performed=0,
+            versions=CriticVersionStamp(
+                request_schema_version="1.0",
+                critique_schema_version="1.0",
+                prompt_version="critic-guardrail.v1",
+                model_name="fake-critic",
+                policy_version="1.0",
+            ),
+        )
+
     def test_post_analyze_refuses_pipeline_override_when_disabled(self, db_client, monkeypatch):
         def unexpected_agentic_call(self, request):
             pytest.fail("Agentic pipeline should not run when override is disabled.")
@@ -271,11 +301,14 @@ class TestPipelineOverride:
 
     def test_post_analyze_runs_agentic_pipeline_when_override_is_enabled(self, db_client, monkeypatch):
         trace = AnalysisTrace(run_id="run-123", ticker="NVDA", entered_agent_layer=True)
+        critic_effect = self._critic_effect()
 
         app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
         monkeypatch.setattr(
             "app.services.pipeline.AgenticPipeline.analyze",
-            lambda _pipeline, request: self._response(trace=trace),
+            lambda _pipeline, request: self._response(trace=trace).model_copy(
+                update={"critic_effect": critic_effect, "trace": trace}
+            ),
         )
 
         response = db_client.post("/analyze?pipeline=agentic&include_trace=true", json={"ticker": "NVDA"})
@@ -283,6 +316,7 @@ class TestPipelineOverride:
         assert response.status_code == 200
         body = response.json()
         assert body["warnings"] == ["pipeline_override:agentic"]
+        assert body["critic_effect"]["final_decision"] == "no_trade"
         assert body["trace"]["run_id"] == "run-123"
         assert body["trace"]["entered_agent_layer"] is True
 
@@ -345,14 +379,18 @@ class TestPipelineOverride:
             "diagnosis": None,
             "fundamental_agent_effect": None,
         }
+        assert "critic_effect" not in response.json()
 
     def test_post_analyze_without_include_trace_strips_agentic_trace(self, db_client, monkeypatch):
         trace = AnalysisTrace(run_id="run-123", ticker="NVDA", entered_agent_layer=True)
+        critic_effect = self._critic_effect()
 
         app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
         monkeypatch.setattr(
             "app.services.pipeline.AgenticPipeline.analyze",
-            lambda _pipeline, request: self._response(trace=trace),
+            lambda _pipeline, request: self._response(trace=trace).model_copy(
+                update={"critic_effect": critic_effect, "trace": trace}
+            ),
         )
 
         response = db_client.post("/analyze?pipeline=agentic", json={"ticker": "NVDA"})
@@ -361,6 +399,7 @@ class TestPipelineOverride:
         body = response.json()
         assert body["warnings"] == ["pipeline_override:agentic"]
         assert body["trace"] is None
+        assert body["critic_effect"]["final_decision"] == "no_trade"
 
 
 class TestRunTraceEndpoint:
@@ -401,19 +440,50 @@ class TestRunTraceEndpoint:
             session.commit()
 
     def test_get_run_returns_persisted_observed_trace(self, db_client, db_engine):
-        from types import SimpleNamespace
-
         self._seed_security(db_engine)
-        events = [
-            SimpleNamespace(author="trade_analyst_supervisor", content=SimpleNamespace(parts=[]), usage_metadata=None),
-            SimpleNamespace(author="fundamental_analyst", content=SimpleNamespace(parts=[]), usage_metadata=None),
-        ]
+        critique_effect = CriticEffect(
+            mode="shadow",
+            accepted=True,
+            status="completed",
+            verdict="reject",
+            reason_codes=["critic_reject_applied"],
+            objection_counts={"unsupported_claim": 1},
+            deterministic_objection_ids=[],
+            model_objection_ids=["model:1"],
+            baseline_decision="watchlist",
+            proposed_decision="no_trade",
+            final_decision="no_trade",
+            decision_changed=True,
+            baseline_confidence=0.64,
+            applied_confidence_penalty=0.05,
+            final_confidence=0.59,
+            revisions_requested=0,
+            revisions_performed=0,
+            versions=CriticVersionStamp(
+                request_schema_version="1.0",
+                critique_schema_version="1.0",
+                prompt_version="critic-guardrail.v1",
+                model_name="fake-critic",
+                policy_version="1.0",
+            ),
+        )
+        trace = AnalysisTrace(
+            run_id="run-critic-roundtrip",
+            ticker="NVDA",
+            entered_agent_layer=True,
+            adk_event_count=2,
+            observed_agents=["trade_analyst_supervisor", "fundamental_analyst"],
+            critic_effect=critique_effect,
+        )
         workflow = AgenticAnalysisWorkflow(
             load_agent_config(Settings(_env_file=None)),
             engine=db_engine,
-            runner_factory=lambda registry, ticker: iter(events),
+            runner_factory=lambda registry, ticker: iter([]),
         )
-        response = workflow.analyze("NVDA")
+        response = TestPipelineOverride._response(trace=trace).model_copy(
+            update={"critic_effect": critique_effect, "trace": trace}
+        )
+        workflow._persist_trace(trace)
 
         run_response = db_client.get(f"/runs/{response.trace.run_id}")
         assert run_response.status_code == 200
@@ -422,9 +492,34 @@ class TestRunTraceEndpoint:
         assert body["entered_agent_layer"] is True
         assert body["adk_event_count"] == 2
         assert body["observed_agents"] == ["trade_analyst_supervisor", "fundamental_analyst"]
-        assert [(step["agent_name"], step["status"]) for step in body["steps"]] == [
-            (step.agent_name, step.status) for step in response.trace.steps
-        ]
+        assert body["critic_effect"] == response.critic_effect.model_dump(mode="json")
+
+    def test_get_run_returns_same_critic_effect_as_agentic_post_analyze(self, db_client, db_engine, monkeypatch):
+        self._seed_security(db_engine)
+        workflow = AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), engine=db_engine)
+        trace = AnalysisTrace(
+            run_id="run-from-analyze",
+            ticker="NVDA",
+            steps=[],
+            critic_effect=TestPipelineOverride._critic_effect(),
+        )
+        analyze_response = TestPipelineOverride._response(trace=trace).model_copy(
+            update={"critic_effect": TestPipelineOverride._critic_effect(), "trace": trace}
+        )
+        workflow._persist_trace(trace)
+
+        app.dependency_overrides[get_pipeline_override_allowed] = lambda: True
+        monkeypatch.setattr(
+            "app.services.pipeline.AgenticPipeline.analyze",
+            lambda _pipeline, request: analyze_response,
+        )
+
+        post_response = db_client.post("/analyze?pipeline=agentic&include_trace=true", json={"ticker": "NVDA"})
+        assert post_response.status_code == 200
+
+        get_response = db_client.get(f"/runs/{trace.run_id}")
+        assert get_response.status_code == 200
+        assert get_response.json()["critic_effect"] == post_response.json()["critic_effect"]
 
     def test_get_run_returns_404_for_unknown_run_id(self, db_client):
         response = db_client.get("/runs/does-not-exist")

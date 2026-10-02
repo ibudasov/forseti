@@ -1,7 +1,10 @@
 """Tests for app.settings: RAG_FAIL_LOUD flag parsing."""
 from __future__ import annotations
 
-from app.settings import Settings
+import pytest
+
+from agents.orchestration.workflow import _critic_mode
+from app.settings import Settings, get_settings
 
 
 def test_rag_fail_loud_defaults_to_false():
@@ -28,6 +31,19 @@ def test_pipeline_override_defaults_to_false():
 def test_fundamental_agent_mode_defaults_to_off():
     settings = Settings(_env_file=None)
     assert settings.FUNDAMENTAL_AGENT_MODE == "off"
+
+
+def test_critic_mode_defaults_to_off():
+    settings = Settings(_env_file=None)
+    assert settings.CRITIC_MODE == "off"
+
+
+def test_invalid_critic_mode_is_rejected(monkeypatch):
+    monkeypatch.setenv("CRITIC_MODE", "invalid")
+    get_settings.cache_clear()
+    with pytest.raises(ValueError, match="CRITIC_MODE must be one of"):
+        _critic_mode()
+    get_settings.cache_clear()
 
 
 def test_pipeline_override_env_var_parses_to_true(monkeypatch):

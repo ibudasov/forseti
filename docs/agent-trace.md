@@ -24,16 +24,43 @@ For `failed` and `skipped`, `TraceStep.output.reason` is always present.
 - `technical_analyst_never_reached`
 - `decision_synthesizer_never_reached`
 - `critic_never_reached`
+- `critic_mode_off`
 
 ## Trace-level observability fields
 
 - `entered_agent_layer` — `true` only when at least one ADK event was observed
 - `adk_event_count` — number of observed ADK events
 - `observed_agents` — ADK event authors in first-seen order
+- `fundamental_agent_effect` — persisted summary of the fundamental analyst guardrail outcome
+- `critic_effect` — persisted summary of the critic guardrail outcome, including objections, decisions, and revisions
 
 ## Output truncation
 
-Any string nested in `TraceStep.output` is truncated to 2000 chars and suffixed with `…[truncated]`.
+Any string nested in `TraceStep.output` is truncated to 20,000 chars and suffixed with `…[truncated]`.
+
+## `critic_guardrail` step
+
+Agentic runs always include a `critic_guardrail` step after `decision_synthesizer`.
+
+- `status=completed` — critique ran and passed validation
+- `status=degraded` — critique ran but the validation or fallback path degraded
+- `status=skipped` — critique was intentionally bypassed; `skip_reason` and `output.reason` explain why
+
+Known skip reasons:
+
+- `critic_mode_off`
+- `critic_never_reached`
+
+The step `output` is a compact summary of the critic result:
+
+- `verdict`
+- `objection_counts_by_severity`
+- `baseline_decision`
+- `final_decision`
+- `accepted`
+- `reason_codes`
+
+If the critic requests and receives one bounded revision, the `decision_synthesizer` step keeps the original sequence position and exposes `retries=1`.
 
 ## SQL quick check
 

@@ -85,6 +85,10 @@ class Settings(BaseSettings):
         default="off",
         validation_alias="FUNDAMENTAL_AGENT_MODE",
     )
+    CRITIC_MODE: str = Field(
+        default="off",
+        validation_alias="CRITIC_MODE",
+    )
     ALLOW_PIPELINE_OVERRIDE: bool = Field(
         default=False,
         validation_alias="ALLOW_PIPELINE_OVERRIDE",
