@@ -15,7 +15,11 @@ from app.db.models import (
     SourceType,
 )
 from app.db.repository import upsert_fundamental, upsert_fundamental_observations
-from app.services.fundamental_context import build_fundamental_analysis_request
+from app.services.fundamental_context import (
+    EVIDENCE_QUESTIONS,
+    MAX_TOTAL_EVIDENCE_CHARACTERS,
+    build_fundamental_analysis_request,
+)
 
 
 def test_build_request_is_deterministic_for_same_snapshot(db_engine):
@@ -107,6 +111,36 @@ def test_build_request_filters_future_evidence_and_deduplicates_chunks(db_engine
     assert sum(chunk_ids.count(20) for chunk_ids in question_coverage) == 1
 
 
+def test_evidence_budget_cannot_starve_later_questions(db_engine):
+    _seed_security_with_fundamentals(db_engine)
+    published_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    chunks_by_question = {
+        question.prompt: _chunk(
+            chunk_id=100 + index,
+            source_type=SourceType.company_news,
+            text="x" * 5_000,
+            published_at=published_at,
+        )
+        for index, question in enumerate(EVIDENCE_QUESTIONS)
+    }
+
+    def retriever(ticker: str, question: str, source_types, top_k: int) -> list[DocumentChunk]:
+        del ticker, source_types, top_k
+        return [chunks_by_question[question]]
+
+    request = build_fundamental_analysis_request(
+        "CTX1",
+        "run-balanced-evidence",
+        as_of=date(2026, 9, 8),
+        engine=db_engine,
+        retriever=retriever,
+        snapshot_at=datetime(2026, 9, 8, 23, 59, 59, tzinfo=timezone.utc),
+    )
+
+    assert all(entry.chunk_ids for entry in request.coverage.question_coverage)
+    assert request.coverage.selected_character_count <= MAX_TOTAL_EVIDENCE_CHARACTERS
+
+
 def test_build_request_reports_missing_data_without_leaking_payloads(db_engine):
     with Session(db_engine) as session:
         session.add(Security(ticker="MISS1", name="Missing One", exchange="NYSE", sector_tag="ai"))
@@ -134,6 +168,14 @@ def test_build_request_reports_missing_data_without_leaking_payloads(db_engine):
         "debt_to_equity",
         "eps_trend",
         "margins",
+    ]
+    assert request.coverage.source_types_missing == [
+        "company_news",
+        "earnings_call_transcript",
+        "earnings_release",
+        "filing_mda",
+        "filing_risk",
+        "sector_news",
     ]
     assert request.coverage.selected_chunk_count == 0
     assert request.coverage.evidence_stale is True
@@ -193,7 +235,7 @@ def _observations(security_id: int) -> list[FundamentalObservation]:
         [
             FundamentalObservation(
                 security_id=security_id,
-                metric_name="revenue_growth",
+                metric_name="revenue_growth_yoy",
                 value=Decimal("0.21"),
                 unit="ratio",
                 period_start=date(2026, 1, 1),
@@ -210,7 +252,7 @@ def _observations(security_id: int) -> list[FundamentalObservation]:
             ),
             FundamentalObservation(
                 security_id=security_id,
-                metric_name="fcf",
+                metric_name="free_cash_flow",
                 value=Decimal("1200"),
                 unit="USD",
                 period_start=date(2026, 1, 1),
@@ -244,7 +286,7 @@ def _observations(security_id: int) -> list[FundamentalObservation]:
             ),
             FundamentalObservation(
                 security_id=security_id,
-                metric_name="eps_trend",
+                metric_name="diluted_eps_growth_delta",
                 value=Decimal("0.08"),
                 unit="currency_per_share_delta",
                 period_start=date(2026, 1, 1),
@@ -261,7 +303,7 @@ def _observations(security_id: int) -> list[FundamentalObservation]:
             ),
             FundamentalObservation(
                 security_id=security_id,
-                metric_name="margins",
+                metric_name="net_margin",
                 value=Decimal("0.32"),
                 unit="ratio",
                 period_start=date(2026, 1, 1),

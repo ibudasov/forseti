@@ -72,15 +72,18 @@ class GeminiFundamentalModel:
             raise RetryableModelError("vertex_project_not_configured")
         try:
             import vertexai
-            from vertexai.generative_models import GenerativeModel
+            from vertexai.generative_models import GenerationConfig, GenerativeModel
 
             vertexai.init(project=self._vertex_project, location=self._vertex_location)
             response = GenerativeModel(self.model_name).generate_content(
                 prompt,
-                generation_config={
-                    "temperature": self._temperature,
-                    "response_mime_type": "application/json",
-                },
+                generation_config=GenerationConfig.from_dict(
+                    {
+                        "temperature": self._temperature,
+                        "response_mime_type": "application/json",
+                        "response_schema": _fundamental_response_schema(),
+                    }
+                ),
             )
         except Exception as exc:
             raise RetryableModelError(str(exc)) from exc
@@ -208,6 +211,32 @@ def build_fundamental_analyst_prompt(request: FundamentalAnalysisRequest) -> str
         "}\n\n"
         f"FundamentalAnalysisRequest:\n{request_json}\n"
     )
+
+
+def _fundamental_response_schema() -> dict[str, Any]:
+    schema = FundamentalAssessmentResponse.model_json_schema()
+    definitions = schema.get("$defs", {})
+
+    def inline(value: Any) -> Any:
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if reference is not None:
+                definition_name = reference.rsplit("/", maxsplit=1)[-1]
+                return inline(definitions[definition_name])
+            normalized = {}
+            for key, item in value.items():
+                if key in {"$defs", "additionalProperties"}:
+                    continue
+                if key == "const":
+                    normalized["enum"] = [inline(item)]
+                    continue
+                normalized[key] = inline(item)
+            return normalized
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        return value
+
+    return inline(schema)
 
 
 def validate_fundamental_assessment(
