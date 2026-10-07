@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context assess-fundamentals eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -25,10 +25,15 @@ help:
 	@echo "  make rag-coverage     # Show RAG coverage (use ticker=NVDA [live=1])"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
 	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make critique-context # Build one immutable critique context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make assess-fundamentals # Run one fundamental analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make review-draft      # Run one critic draft review (use ticker=NVDA [as_of=2026-09-08] [live=1])"
 	@echo "  make eval-fundamental-agent # Run the frozen offline fundamental-agent evaluation suite"
 	@echo "  make eval-fundamental-agent-live CONFIRM_COST=yes # Run live model evaluation over the frozen suite"
 	@echo "  make fundamental-shadow-report # Aggregate persisted shadow-mode runs"
+	@echo "  make eval-critic      # Run the frozen offline critic evaluation suite"
+	@echo "  make eval-critic-live CONFIRM_COST=yes # Run the manual live critic evaluation gate"
+	@echo "  make critic-shadow-report # Aggregate persisted critic shadow-mode runs"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -58,6 +63,7 @@ test: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e PIPELINE_MODE=linear \
+		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
 		-e FUNDAMENTAL_AGENT_MODE=off \
 		-e DEBUG_LLM_IO=false \
@@ -113,6 +119,16 @@ fundamental-context: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.build_fundamental_context --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --json
 
+critique-context: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make critique-context ticker=NVDA [as_of=2026-09-08]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.build_critique_context --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",)
+
 assess-fundamentals: check-compose
 	@if [ -z "$(ticker)" ]; then \
 		echo "Error: ticker is required. Run 'make assess-fundamentals ticker=NVDA [as_of=2026-09-08]'"; \
@@ -122,6 +138,16 @@ assess-fundamentals: check-compose
 		--env-from-file .env \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.assess_fundamentals --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --shadow --json
+
+review-draft: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make review-draft ticker=NVDA [as_of=2026-09-08] [live=1]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.review_draft --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) $(if $(live),--live,)
 
 eval-fundamental-agent: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
@@ -145,6 +171,29 @@ fundamental-shadow-report: check-compose
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_fundamental_agent --shadow-report --json
+
+eval-critic: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_critic --json
+
+eval-critic-live: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_critic --live --confirm-cost "$(CONFIRM_COST)" --json
+
+critic-shadow-report: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_critic --shadow-report --json
 
 up: check-compose
 	$(DOCKER_COMPOSE) up --force-recreate app

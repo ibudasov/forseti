@@ -87,6 +87,7 @@ def test_valid_assessment_is_accepted():
 
     result = analyst.assess(request)
 
+    assert isinstance(result.response, FundamentalAssessmentResponse)
     assert result.validation.accepted is True
     assert result.response.status == "completed"
     assert result.response.proposed_score_adjustment == 1

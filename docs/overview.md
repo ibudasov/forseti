@@ -525,6 +525,14 @@ Topology (Trade Analyst Supervisor root agent):
 5. Decision Synthesizer — combines rules-engine output and analyst views into the recommendation memo (LLM).
 6. Critic/Guardrail — can only downgrade confidence or the decision label, never upgrade it (LLM + deterministic validators).
 
+Related documentation:
+
+- `docs/golden-cases.md` — deterministic golden regression cases
+- `docs/fundamental-agent-evaluation.md` — frozen evaluation and shadow reporting for the Fundamental Analyst
+- `docs/critic-guardrail.md` — Critic authority, precedence, modes, and reason codes
+- `docs/critic-evaluation.md` — Critic golden cases, harness commands, and rollout gates
+- `docs/agent-trace.md` — persisted trace and `critic_effect` semantics
+
 ## Backlog for later
 
 - broker integration

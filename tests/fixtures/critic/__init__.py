@@ -1,0 +1,1 @@
+"""Critic golden case fixtures."""

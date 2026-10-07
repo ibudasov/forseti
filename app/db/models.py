@@ -312,6 +312,10 @@ class AgentRun(SQLModel, table=True):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+    critic_effect: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
 
 
 class AgentRunStep(SQLModel, table=True):

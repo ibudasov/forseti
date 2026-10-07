@@ -8,6 +8,8 @@ from sqlalchemy import inspect
 from sqlmodel import Session, select
 
 from app.db.models import (
+    AgentRun,
+    AgentRunStep,
     EarningsEvent,
     MacroDaily,
     PriceBar,
@@ -17,6 +19,10 @@ from app.db.models import (
     FundamentalObservation,
     TechnicalFeature,
 )
+from agents.config import load_agent_config
+from agents.orchestration.workflow import AgenticAnalysisWorkflow, load_trace
+from app.schemas.analyze import AnalysisTrace, TraceStep
+from app.schemas.critique import CriticEffect, CriticVersionStamp
 from app.db.repository import (
     count_fundamental_observations,
     get_latest_fundamental,
@@ -37,8 +43,10 @@ from app.db.repository import (
     upsert_macro_daily_rows,
     upsert_price_bars,
     upsert_technical_feature,
+    save_agent_run,
 )
 from app.services.fundamental_history import build_fundamental_history
+from app.settings import Settings
 
 
 def test_tables_exist(db_engine):
@@ -52,6 +60,84 @@ def test_tables_exist(db_engine):
     assert inspector.has_table("technical_feature")
     assert inspector.has_table("recommendation")
     assert inspector.has_table("document_chunk")
+
+
+def test_agent_run_persists_and_loads_critic_effect_losslessly(db_engine):
+    workflow = AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), engine=db_engine)
+    trace = AnalysisTrace(
+        run_id="critic-roundtrip",
+        ticker="NVDA",
+        final_decision="no_trade",
+        token_usage={"total_token_count": 3},
+        critic_effect=CriticEffect(
+            mode="shadow",
+            accepted=True,
+            status="completed",
+            verdict="reject",
+            reason_codes=["critic_reject_applied"],
+            objection_counts={"unsupported_claim": 1},
+            deterministic_objection_ids=["det:1"],
+            model_objection_ids=["model:1"],
+            baseline_decision="watchlist",
+            proposed_decision="no_trade",
+            final_decision="no_trade",
+            decision_changed=True,
+            baseline_confidence=0.5,
+            applied_confidence_penalty=0.1,
+            final_confidence=0.4,
+            revisions_requested=1,
+            revisions_performed=1,
+            versions=CriticVersionStamp(
+                request_schema_version="1.0",
+                critique_schema_version="1.0",
+                prompt_version="critic-guardrail.v1",
+                model_name="fake-critic",
+                policy_version="1.0",
+            ),
+        ),
+        steps=[
+            TraceStep(
+                sequence=1,
+                agent_name="critic_guardrail",
+                status="completed",
+                output={"verdict": "reject"},
+            )
+        ],
+    )
+
+    workflow._persist_trace(trace)
+
+    loaded = load_trace(trace.run_id, engine=db_engine)
+    assert loaded is not None
+    assert loaded.critic_effect == trace.critic_effect
+
+
+def test_load_trace_tolerates_legacy_null_critic_effect(db_engine):
+    save_agent_run(
+        AgentRun(
+            run_id="legacy-null-critic",
+            ticker="NVDA",
+            final_decision="watchlist",
+            token_usage={},
+            warnings=[],
+            observed_agents=[],
+            critic_effect=None,
+        ),
+        [
+            AgentRunStep(
+                run_id="legacy-null-critic",
+                sequence=1,
+                agent_name="critic_guardrail",
+                status="skipped",
+                output={"reason": "critic_mode_off"},
+            )
+        ],
+        engine=db_engine,
+    )
+
+    loaded = load_trace("legacy-null-critic", engine=db_engine)
+    assert loaded is not None
+    assert loaded.critic_effect is None
 
 
 def test_idempotent_price_bar_upsert(db_engine):
