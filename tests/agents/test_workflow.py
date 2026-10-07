@@ -502,7 +502,8 @@ def test_critic_model_failure_preserves_http_success_and_deterministic_answer(mo
         critique_result=_critique_result(
             accepted=False,
             status="failed",
-            reason_codes=["provider_error:timeout"],
+            reason_codes=["schema_validation_failed"],
+            validation_diagnostics=["verdict:literal_error"],
         ),
     )
 
@@ -517,6 +518,7 @@ def test_critic_model_failure_preserves_http_success_and_deterministic_answer(mo
     assert response.decision == "no_trade"
     critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
     assert critic_step.status == "degraded"
+    assert critic_step.output["detail"] == "schema_validation_failed; verdict:literal_error"
 
 
 def test_critic_trace_output_summarizes_objections_and_decision_change(monkeypatch):
@@ -1021,6 +1023,7 @@ def _critique_result(
     objections: list[CritiqueObjection] | None = None,
     revision_instructions: str = "",
     token_usage: dict[str, int] | None = None,
+    validation_diagnostics: list[str] | None = None,
 ) -> CritiqueResult:
     response = CritiqueResponse.model_construct(
         schema_version="1.0",
@@ -1038,6 +1041,7 @@ def _critique_result(
     return CritiqueResult(
         response=response,
         validation=CritiqueValidation(accepted=accepted, reason_codes=reason_codes or []),
+        validation_diagnostics=validation_diagnostics or [],
         raw_output="{}",
         latency_ms=6.0,
         token_usage=token_usage or {"total_token_count": 3},

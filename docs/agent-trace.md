@@ -46,6 +46,10 @@ Agentic runs always include a `critic_guardrail` step after `decision_synthesize
 - `status=degraded` — critique ran but the validation or fallback path degraded
 - `status=skipped` — critique was intentionally bypassed; `skip_reason` and `output.reason` explain why
 
+For schema validation failures, the trace `detail` includes sanitized field paths
+and validation error types (for example, `verdict:literal_error`). It does not
+include the model's raw response.
+
 Known skip reasons:
 
 - `critic_mode_off`

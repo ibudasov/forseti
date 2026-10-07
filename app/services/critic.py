@@ -85,6 +85,7 @@ class GeminiCriticModel:
                 generation_config={
                     "temperature": self._temperature,
                     "response_mime_type": "application/json",
+                    "response_schema": _gemini_response_schema(),
                 },
             )
         except Exception as exc:
@@ -112,6 +113,7 @@ class Critic:
         prompt = build_critic_prompt(request)
         started_at = time.monotonic()
         token_usage: dict[str, int] = {}
+        validation_diagnostics: list[str] = []
         raw_output = ""
         last_error = "provider_error"
 
@@ -126,7 +128,16 @@ class Critic:
                 if attempt < self.max_retries:
                     continue
                 break
-            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+            except ValidationError as exc:
+                last_error = _format_parse_error(exc)
+                validation_diagnostics = _validation_error_diagnostics(exc)
+                logger.warning(
+                    "critic_schema_validation_failed run_id=%s diagnostics=%s",
+                    request.run_id,
+                    validation_diagnostics,
+                )
+                break
+            except (json.JSONDecodeError, ValueError) as exc:
                 last_error = _format_parse_error(exc)
                 break
 
@@ -156,6 +167,7 @@ class Critic:
             latency_ms=latency_ms,
             token_usage=token_usage,
             model_name=self.model_port.model_name,
+            validation_diagnostics=validation_diagnostics,
         )
 
 
@@ -195,8 +207,8 @@ def build_critic_prompt(request: CritiqueRequest) -> str:
         "Required JSON output schema:\n"
         "{\n"
         '  "schema_version": "1.0",\n'
-        '  "run_id": "...",\n'
-        '  "context_hash": "...",\n'
+        f'  "run_id": {json.dumps(request.run_id)},\n'
+        f'  "context_hash": {json.dumps(request.context_hash)},\n'
         '  "agent_name": "critic_guardrail",\n'
         '  "status": "completed|insufficient_data|failed",\n'
         '  "verdict": "accept|revise|reject",\n'
@@ -219,9 +231,70 @@ def build_critic_prompt(request: CritiqueRequest) -> str:
         '  "summary": ""\n'
         "}\n"
         "Emit JSON only. Do not emit markdown, prose outside JSON, or extra keys.\n\n"
+        "Response consistency rules:\n"
+        "- Copy run_id and context_hash exactly from the request.\n"
+        "- A revise verdict requires non-empty revision_instructions.\n"
+        "- A reject verdict requires at least one high-severity objection.\n"
+        "- For insufficient_data or failed status, use verdict accept, no objections, "
+        "no proposed_decision, and a 0.0 confidence penalty.\n"
         'If the draft is clean, return verdict "accept" with zero objections and proposed_confidence_penalty 0.0. '
         "Manufacturing objections is a failure.\n"
     )
+
+
+def _gemini_response_schema() -> dict[str, Any]:
+    return _to_gemini_schema(CritiqueResponse.model_json_schema())
+
+
+def _to_gemini_schema(schema: Any) -> Any:
+    if isinstance(schema, list):
+        return [_to_gemini_schema(value) for value in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    normalized: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "default" or (key == "additionalProperties" and isinstance(value, bool)):
+            continue
+        if key == "anyOf" and isinstance(value, list):
+            normalized.update(_normalize_gemini_union(value))
+        else:
+            normalized_key, normalized_value = _normalize_gemini_schema_field(key, value)
+            normalized[normalized_key] = normalized_value
+
+    if "properties" in normalized:
+        normalized["required"] = list(normalized["properties"])
+    return normalized
+
+
+def _normalize_gemini_union(options: list[Any]) -> dict[str, Any]:
+    nullable_options = [option for option in options if option.get("type") == "null"]
+    non_null_options = [option for option in options if option.get("type") != "null"]
+    if nullable_options and len(non_null_options) == 1:
+        normalized = _to_gemini_schema(non_null_options[0])
+        normalized["nullable"] = True
+        return normalized
+    return {"anyOf": _to_gemini_schema(options)}
+
+
+def _normalize_gemini_schema_field(key: str, value: Any) -> tuple[str, Any]:
+    if key == "$defs":
+        return "defs", _to_gemini_schema(value)
+    if key == "$ref":
+        return "ref", value.replace("#/$defs/", "#/defs/")
+    if key == "const":
+        return "enum", [value]
+    if key == "type":
+        type_names = {
+            "array": "ARRAY",
+            "boolean": "BOOLEAN",
+            "integer": "INTEGER",
+            "number": "NUMBER",
+            "object": "OBJECT",
+            "string": "STRING",
+        }
+        return key, type_names.get(value, value)
+    return key, _to_gemini_schema(value)
 
 
 def validate_critique(
@@ -359,6 +432,7 @@ def _fallback_result(
     latency_ms: float,
     token_usage: dict[str, int],
     model_name: str,
+    validation_diagnostics: list[str],
 ) -> CritiqueResult:
     response = CritiqueResponse(
         run_id=request.run_id,
@@ -374,6 +448,7 @@ def _fallback_result(
     return CritiqueResult(
         response=response,
         validation=CritiqueValidation(accepted=False, reason_codes=_deduplicated(reason_codes)),
+        validation_diagnostics=validation_diagnostics,
         raw_output=_sanitize_raw_output(raw_output),
         latency_ms=latency_ms,
         token_usage=token_usage,
@@ -405,6 +480,14 @@ def _format_parse_error(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
         return "schema_validation_failed"
     return str(exc)
+
+
+def _validation_error_diagnostics(exc: ValidationError) -> list[str]:
+    diagnostics = []
+    for error in exc.errors(include_input=False, include_context=False):
+        location = ".".join(str(part) for part in error["loc"]) or "<root>"
+        diagnostics.append(f"{location}:{error['type']}")
+    return diagnostics
 
 
 def _token_usage(response: Any) -> dict[str, int]:

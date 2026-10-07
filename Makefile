@@ -63,6 +63,7 @@ test: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e PIPELINE_MODE=linear \
+		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \

@@ -192,6 +192,7 @@ class CritiqueResult(BaseModel):
 
     response: CritiqueResponse
     validation: CritiqueValidation
+    validation_diagnostics: list[str] = Field(default_factory=list)
     raw_output: str = ""
     latency_ms: float = Field(ge=0, default=0.0)
     token_usage: dict[str, int] = Field(default_factory=dict)

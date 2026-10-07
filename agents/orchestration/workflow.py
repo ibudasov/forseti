@@ -894,7 +894,12 @@ class AgenticAnalysisWorkflow:
         return _PendingTraceStep(
             status="degraded",
             reason="assessment_invalid",
-            detail=",".join(critique_result.validation.reason_codes),
+            detail="; ".join(
+                [
+                    *critique_result.validation.reason_codes,
+                    *critique_result.validation_diagnostics,
+                ]
+            ),
             tool_calls=tool_calls,
             output=output,
             latency_ms=latency_ms,

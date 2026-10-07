@@ -10,6 +10,7 @@ from app.services.critic import (
     Critic,
     ModelOutput,
     RetryableModelError,
+    _gemini_response_schema,
     build_critic_prompt,
     validate_critique,
 )
@@ -60,6 +61,43 @@ def test_clean_draft_accepts_without_objections():
     assert result.response.verdict == "accept"
     assert result.response.objections == []
     assert result.response.proposed_confidence_penalty == 0.0
+
+
+def test_schema_validation_failure_reports_only_field_and_error_type():
+    request = _request()
+    payload = _response_payload(request)
+    payload["verdict"] = "approve"
+    critic = Critic(model_port=_FakeModel([json.dumps(payload)]), max_retries=0)
+
+    result = critic.review(request)
+
+    assert result.validation.reason_codes == ["schema_validation_failed"]
+    assert result.validation_diagnostics == ["verdict:literal_error"]
+    assert "approve" not in " ".join(result.validation_diagnostics)
+
+
+def test_gemini_response_schema_is_accepted_by_vertex_sdk():
+    from vertexai.generative_models import GenerationConfig
+
+    generation_config = GenerationConfig.from_dict(
+        {
+            "response_mime_type": "application/json",
+            "response_schema": _gemini_response_schema(),
+        }
+    )
+
+    assert generation_config.to_dict()["response_schema"]["type"] == "OBJECT"
+
+
+def test_critic_prompt_echoes_request_ids_and_describes_cross_field_rules():
+    request = _request()
+
+    prompt = build_critic_prompt(request)
+
+    assert f'"run_id": "{request.run_id}"' in prompt
+    assert f'"context_hash": "{request.context_hash}"' in prompt
+    assert "A revise verdict requires non-empty revision_instructions." in prompt
+    assert "A reject verdict requires at least one high-severity objection." in prompt
 
 
 def test_unparsable_output_falls_back_to_neutral_failure():
