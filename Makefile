@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch trust-e2e up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -36,6 +36,7 @@ help:
 	@echo "  make critic-shadow-report [SAMPLE=20 OUT=reports/trust/critic-shadow-objections.csv] # Aggregate persisted critic shadow-mode runs"
 	@echo "  make critic-shadow-batch CONFIRM_COST=yes [REPEAT=1] # Run the trust ticker matrix with CRITIC_MODE=shadow"
 	@echo "  make trust-e2e CONFIRM_COST=yes # Run the manual live agentic-vs-linear trust matrix"
+	@echo "  make trust-consistency CONFIRM_COST=yes [REPEAT=5] # Run repeated live trust matrix consistency checks"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -223,6 +224,19 @@ trust-e2e: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust
+
+trust-consistency: check-compose
+	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
+		echo "Error: trust-consistency requires CONFIRM_COST=yes because it makes live network/model calls."; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e CRITIC_MODE=off \
+		-e FUNDAMENTAL_AGENT_MODE=enforced \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust --repeat "$(if $(REPEAT),$(REPEAT),5)"
 
 up: check-compose
 	$(DOCKER_COMPOSE) up --force-recreate app

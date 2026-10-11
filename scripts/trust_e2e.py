@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -30,6 +31,13 @@ from app.trust.invariants import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MATRIX_PATH = REPO_ROOT / "scripts" / "trust_tickers.json"
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "trust"
+CRITERIA_PATH = REPO_ROOT / "docs" / "trust" / "criteria.md"
+CONSISTENCY_THRESHOLDS = {
+    "risk_number_equality_rate": 1.0,
+    "decision_upgrade_count": 0,
+    "unstable_ticker_count": 1,
+    "confidence_stddev_max": 0.05,
+}
 
 
 @dataclass(frozen=True)
@@ -80,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         "as_of_date": as_of_date.isoformat(),
         "matrix_path": str(matrix_path.relative_to(REPO_ROOT)),
         "report_dir": str(report_dir.relative_to(REPO_ROOT)),
+        "criteria_path": str(CRITERIA_PATH.relative_to(REPO_ROOT)),
         "critic_mode": critic_mode,
         "pipeline_mode": AGENTIC_PIPELINE_MODE,
         "repeat_count": args.repeat,
@@ -124,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                 "linear": _response_summary(linear_response),
                 "agentic": None,
                 "trace": None,
+                "fundamental_agent_effect": None,
                 "violations": [],
                 "status": "blocked" if workflow is None else "pending",
                 "error": workflow_error,
@@ -156,6 +166,9 @@ def main(argv: list[str] | None = None) -> int:
                         ticker=matrix_ticker.ticker,
                         engine=engine,
                     )
+                    run_report["fundamental_agent_effect"] = _fundamental_effect_summary(
+                        persisted_trace.fundamental_agent_effect or agentic_response.fundamental_agent_effect
+                    )
                     run_report["fundamental_citation_resolution"] = _fundamental_citation_resolution_summary(
                         persisted_trace
                     )
@@ -170,11 +183,15 @@ def main(argv: list[str] | None = None) -> int:
                     exit_code = 1
             report["runs"].append(run_report)
 
-    report["summary"] = _build_summary(report["runs"])
-    report_path = report_dir / f"trust-e2e-{critic_mode}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}.json"
+    report["summary"] = _build_summary(report["runs"], repeat_count=args.repeat)
+    report_prefix = "trust-consistency" if args.repeat > 1 else "trust-e2e"
+    report_path = report_dir / f"{report_prefix}-{critic_mode}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     _print_summary(report["runs"], report_path)
+    consistency_status = report["summary"].get("consistency", {}).get("status")
+    if consistency_status == "failed":
+        exit_code = 1
     return exit_code
 
 
@@ -237,7 +254,7 @@ def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
     }
 
 
-def _build_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str, Any]:
     counts = {"passed": 0, "failed": 0, "blocked": 0}
     memo_failure_count = 0
     memo_warning_count = 0
@@ -253,7 +270,105 @@ def _build_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     counts["memo_failure_count"] = memo_failure_count
     counts["memo_warning_count"] = memo_warning_count
     counts["fundamental_unknown_citation_id_count"] = citation_unknown_count
+    counts["consistency"] = _build_consistency_summary(runs, repeat_count=repeat_count)
     return counts
+
+
+def _build_consistency_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str, Any]:
+    if repeat_count < 2:
+        return {"status": "not_requested", "thresholds": CONSISTENCY_THRESHOLDS}
+
+    by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        by_ticker.setdefault(str(run["ticker"]), []).append(run)
+
+    ticker_summaries: list[dict[str, Any]] = []
+    unstable_ticker_count = 0
+    decision_upgrade_count = 0
+    risk_match_count = 0
+    comparable_run_count = 0
+    blocked_tickers: list[str] = []
+    confidence_stddev_values: list[float] = []
+
+    for ticker, ticker_runs in sorted(by_ticker.items()):
+        completed_runs = [run for run in ticker_runs if isinstance(run.get("agentic"), dict)]
+        blocked_runs = [run for run in ticker_runs if run["status"] == "blocked"]
+        if blocked_runs:
+            blocked_tickers.append(ticker)
+        decisions = [str(run["agentic"]["decision"]) for run in completed_runs]
+        flip_detected = len(set(decisions)) > 1
+        if flip_detected:
+            unstable_ticker_count += 1
+        confidences = [float(run["agentic"]["confidence"]) for run in completed_runs]
+        confidence_stddev = statistics.stdev(confidences) if len(confidences) > 1 else 0.0
+        confidence_stddev_values.append(confidence_stddev)
+
+        fundamental_adjustments = sorted(
+            {
+                int(effect["raw_adjustment"])
+                for run in completed_runs
+                if isinstance((effect := run.get("fundamental_agent_effect")), dict)
+                and effect.get("raw_adjustment") is not None
+            }
+        )
+        decision_counts: dict[str, int] = {}
+        for decision in decisions:
+            decision_counts[decision] = decision_counts.get(decision, 0) + 1
+
+        for run in completed_runs:
+            comparable_run_count += 1
+            if _risk_fields_match(run.get("linear"), run.get("agentic")):
+                risk_match_count += 1
+            if _decision_rank(run.get("agentic", {}).get("decision")) > _decision_rank(run.get("linear", {}).get("decision")):
+                decision_upgrade_count += 1
+
+        ticker_summaries.append(
+            {
+                "ticker": ticker,
+                "expected_runs": len(ticker_runs),
+                "completed_runs": len(completed_runs),
+                "blocked_runs": len(blocked_runs),
+                "decision_counts": decision_counts,
+                "flip_detected": flip_detected,
+                "mean_confidence": statistics.mean(confidences) if confidences else None,
+                "confidence_stddev": confidence_stddev if confidences else None,
+                "fundamental_adjustments": fundamental_adjustments,
+            }
+        )
+
+    risk_number_equality_rate = (
+        risk_match_count / comparable_run_count if comparable_run_count else None
+    )
+    max_confidence_stddev = max(confidence_stddev_values, default=0.0)
+    failures: list[str] = []
+    if risk_number_equality_rate is not None and risk_number_equality_rate < CONSISTENCY_THRESHOLDS["risk_number_equality_rate"]:
+        failures.append("risk_number_equality_below_threshold")
+    if decision_upgrade_count > CONSISTENCY_THRESHOLDS["decision_upgrade_count"]:
+        failures.append("decision_upgrade_detected")
+    if unstable_ticker_count > CONSISTENCY_THRESHOLDS["unstable_ticker_count"]:
+        failures.append("flip_rate_exceeded")
+    if max_confidence_stddev > CONSISTENCY_THRESHOLDS["confidence_stddev_max"]:
+        failures.append("confidence_variance_exceeded")
+
+    if blocked_tickers:
+        status = "blocked"
+    elif failures:
+        status = "failed"
+    else:
+        status = "passed"
+
+    return {
+        "status": status,
+        "thresholds": CONSISTENCY_THRESHOLDS,
+        "blocked_tickers": blocked_tickers,
+        "comparable_run_count": comparable_run_count,
+        "risk_number_equality_rate": risk_number_equality_rate,
+        "decision_upgrade_count": decision_upgrade_count,
+        "unstable_ticker_count": unstable_ticker_count,
+        "max_confidence_stddev": max_confidence_stddev,
+        "failures": failures,
+        "tickers": ticker_summaries,
+    }
 
 
 def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
@@ -280,6 +395,19 @@ def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
             )
         )
     print(f"report\t{report_path}")
+
+
+def _risk_fields_match(linear: dict[str, Any] | None, agentic: dict[str, Any] | None) -> bool:
+    if not isinstance(linear, dict) or not isinstance(agentic, dict):
+        return False
+    return all(
+        linear.get(field_name) == agentic.get(field_name)
+        for field_name in ("entry_range", "stop_loss", "take_profit", "risk_reward", "position_size_eur")
+    )
+
+
+def _decision_rank(decision: Any) -> int:
+    return {"no_trade": 0, "watchlist": 1, "trade": 2}.get(str(decision), -1)
 
 
 def _serialize_error(exc: Exception) -> dict[str, Any]:
@@ -311,6 +439,21 @@ def _memo_text(trace: AnalysisTrace) -> str:
         if isinstance(text, str) and text.strip():
             return text
     return ""
+
+
+def _fundamental_effect_summary(effect: Any) -> dict[str, Any] | None:
+    if effect is None:
+        return None
+    return {
+        "mode": effect.mode,
+        "accepted": effect.accepted,
+        "assessment_status": effect.assessment_status,
+        "reason_codes": list(effect.reason_codes),
+        "raw_adjustment": effect.raw_adjustment,
+        "applied_adjustment": effect.applied_adjustment,
+        "baseline_decision": effect.baseline_decision,
+        "final_decision": effect.final_decision,
+    }
 
 
 def _memo_check_summary(
