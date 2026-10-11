@@ -27,6 +27,7 @@ from app.trust.invariants import (
     check_critic_shadow_persistence,
     evaluate_agentic_invariants,
 )
+from app.services.token_pricing import estimate_usage_cost_usd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MATRIX_PATH = REPO_ROOT / "scripts" / "trust_tickers.json"
@@ -229,9 +230,13 @@ def _response_summary(response: AnalyzeResponse) -> dict[str, Any]:
 
 
 def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
+    estimated_cost_usd = estimate_usage_cost_usd(get_settings().GEMINI_MODEL, trace.token_usage)
     return {
         "run_id": trace.run_id,
         "final_decision": trace.final_decision,
+        "total_latency_ms": trace.total_latency_ms,
+        "token_usage": dict(trace.token_usage),
+        "estimated_cost_usd": estimated_cost_usd,
         "warnings": list(trace.warnings),
         "entered_agent_layer": trace.entered_agent_layer,
         "adk_event_count": trace.adk_event_count,
@@ -270,8 +275,47 @@ def _build_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str
     counts["memo_failure_count"] = memo_failure_count
     counts["memo_warning_count"] = memo_warning_count
     counts["fundamental_unknown_citation_id_count"] = citation_unknown_count
+    counts["runtime"] = _runtime_summary(runs)
     counts["consistency"] = _build_consistency_summary(runs, repeat_count=repeat_count)
     return counts
+
+
+def _runtime_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    latencies = [
+        float(trace["total_latency_ms"])
+        for run in runs
+        if isinstance((trace := run.get("trace")), dict)
+        and run.get("status") in {"passed", "failed"}
+        and trace.get("estimated_cost_usd") is not None
+    ]
+    costs = [
+        float(trace["estimated_cost_usd"])
+        for run in runs
+        if isinstance((trace := run.get("trace")), dict)
+        and run.get("status") in {"passed", "failed"}
+        and trace.get("estimated_cost_usd") is not None
+    ]
+    if not latencies or not costs:
+        return {
+            "completed_run_count": 0,
+            "latency_ms": {"mean": None, "p50": None, "p95": None},
+            "estimated_cost_usd": {"mean": None, "p95": None, "total": 0.0},
+        }
+    ordered_latencies = sorted(latencies)
+    ordered_costs = sorted(costs)
+    return {
+        "completed_run_count": len(costs),
+        "latency_ms": {
+            "mean": statistics.mean(latencies),
+            "p50": _percentile(ordered_latencies, 0.50),
+            "p95": _percentile(ordered_latencies, 0.95),
+        },
+        "estimated_cost_usd": {
+            "mean": statistics.mean(costs),
+            "p95": _percentile(ordered_costs, 0.95),
+            "total": sum(costs),
+        },
+    }
 
 
 def _build_consistency_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str, Any]:
@@ -372,11 +416,19 @@ def _build_consistency_summary(runs: list[dict[str, Any]], *, repeat_count: int)
 
 
 def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
-    print("ticker\tsector\texpected\tstatus\tdecision\tviolations\tmemo_failures\tmemo_warnings\tcitation_unknown_ids")
+    print(
+        "ticker\tsector\texpected\tstatus\tdecision\tviolations\tmemo_failures\tmemo_warnings\tcitation_unknown_ids\tlatency_ms\testimated_cost_usd"
+    )
     for run in runs:
         decision = "-"
+        latency_ms = "-"
+        estimated_cost_usd = "-"
         if isinstance(run.get("agentic"), dict):
             decision = str(run["agentic"].get("decision"))
+        if isinstance(run.get("trace"), dict):
+            latency_ms = str(run["trace"].get("total_latency_ms", "-"))
+            cost_value = run["trace"].get("estimated_cost_usd")
+            estimated_cost_usd = "-" if cost_value is None else f"{float(cost_value):.6f}"
         memo_checks = run.get("memo_checks") or {}
         citation_summary = run.get("fundamental_citation_resolution") or {}
         print(
@@ -391,10 +443,19 @@ def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
                     str(memo_checks.get("failure_count", "-")),
                     str(memo_checks.get("warning_count", "-")),
                     str(citation_summary.get("unknown_id_count", "-")),
+                    latency_ms,
+                    estimated_cost_usd,
                 ]
             )
         )
     print(f"report\t{report_path}")
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    if len(values) == 1:
+        return values[0]
+    index = round((len(values) - 1) * percentile)
+    return values[index]
 
 
 def _risk_fields_match(linear: dict[str, Any] | None, agentic: dict[str, Any] | None) -> bool:

@@ -21,15 +21,15 @@ from app.schemas.fundamentals import (
     FundamentalAssessmentValidation,
     SCHEMA_VERSION,
 )
+from app.settings import get_settings
 from app.services.fundamental_analyst import FundamentalAnalyst, validate_fundamental_assessment
 from app.services.fundamental_context import compute_fundamental_context_hash
 from app.services.fundamental_policy import apply_fundamental_policy
+from app.services.token_pricing import estimate_usage_cost_usd, token_totals
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EVALUATION_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "fundamental_agent_eval" / "suite.json"
 REVIEW_SAMPLE_SIZE = 5
-INPUT_COST_USD_PER_MILLION_TOKENS = 0.10
-OUTPUT_COST_USD_PER_MILLION_TOKENS = 0.40
 STRUCTURED_OUTPUT_FAILURES = {
     "forbidden_response_field",
     "malformed_json",
@@ -523,10 +523,7 @@ def _is_neutral_fallback(result: FundamentalAssessmentResult) -> bool:
 
 
 def _token_totals(token_usage: dict[str, int]) -> tuple[int, int, int]:
-    prompt_tokens = int(token_usage.get("prompt_token_count", 0) or 0)
-    candidate_tokens = int(token_usage.get("candidates_token_count", 0) or 0)
-    total_token_count = int(token_usage.get("total_token_count", prompt_tokens + candidate_tokens) or 0)
-    return prompt_tokens, candidate_tokens, total_token_count
+    return token_totals(token_usage)
 
 
 def _latency_summary(latencies: list[float]) -> dict[str, float]:
@@ -546,10 +543,16 @@ def _token_summary(
     total_tokens: int,
     item_count: int,
 ) -> dict[str, float]:
-    estimated_cost_usd = (
-        total_prompt_tokens * INPUT_COST_USD_PER_MILLION_TOKENS / 1_000_000
-        + total_candidate_tokens * OUTPUT_COST_USD_PER_MILLION_TOKENS / 1_000_000
+    estimated_cost_usd = estimate_usage_cost_usd(
+        get_settings().GEMINI_MODEL,
+        {
+            "prompt_token_count": total_prompt_tokens,
+            "candidates_token_count": total_candidate_tokens,
+            "total_token_count": total_tokens,
+        },
     )
+    if estimated_cost_usd is None:
+        estimated_cost_usd = 0.0
     average_tokens = 0.0 if item_count == 0 else total_tokens / item_count
     return {
         "prompt_token_count": float(total_prompt_tokens),

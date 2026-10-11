@@ -26,16 +26,16 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.12']
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-      
+
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
@@ -43,12 +43,12 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e .[test]
-      
+
       - name: Syntax errors
         run: flake8 app agents tests --count --select=E9,F63,F7,F82 --show-source --statistics
 
@@ -68,6 +68,12 @@ jobs:
           DOCKER_COMPOSE: docker compose
         run: |
           make test
+
+      - name: Critic golden evaluation
+        env:
+          DOCKER_COMPOSE: docker compose
+        run: |
+          make eval-critic
 
       - name: Scorecard
         env:

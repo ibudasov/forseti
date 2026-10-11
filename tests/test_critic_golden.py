@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +30,7 @@ EXPECTED_CASES = {
     "upgrade_attempt_rejected",
     "stale_data_watchlist_cap",
     "missing_risk_fields_no_trade",
+    "no_price_data_watchlist_cap",
     "uncited_claim_penalty",
     "revise_then_accept",
     "revise_loop_bounded",
@@ -103,6 +105,12 @@ def test_live_fixture_directory_is_discovered_separately():
     discovered = set(live_critic_case_names())
 
     assert discovered == EXPECTED_LIVE_CASES
+
+
+def test_new_fixture_records_its_source():
+    case = load_critic_case(Path(__file__).resolve().parent / "fixtures" / "critic" / "no_price_data_watchlist_cap.json")
+
+    assert case.source.startswith("docs/trust/e2e-review.md")
 
 
 def test_full_suite_passes_and_renders_all_twelve_cases():

@@ -59,6 +59,7 @@ class CriticGoldenCase:
     filename: str
     case_type: Literal["policy", "workflow_revision", "model_failure", "live_model"]
     mode: Literal["off", "shadow", "enforced"]
+    source: str
     notes: str
     request: CritiqueRequest
     baseline: DraftRecommendation
@@ -678,6 +679,7 @@ def _case_from_payload(filename: str, payload: dict[str, Any]) -> CriticGoldenCa
         filename=filename,
         case_type=cast(Literal["policy", "workflow_revision", "model_failure", "live_model"], case_type),
         mode=cast(Literal["off", "shadow", "enforced"], mode),
+        source=str(payload.get("source", "")).strip(),
         notes=str(payload.get("notes", "")).strip(),
         request=request,
         baseline=baseline,
@@ -780,7 +782,11 @@ def _assert_live_expectations(
     _assert_category_subset(
         case.filename,
         "expected.live.required_model_categories",
-        actual_categories={objection.category for objection in critique_result.response.objections if objection.source == "model"},
+        actual_categories={
+            objection.category
+            for objection in critique_result.response.objections
+            if objection.source == "model"
+        },
         required_categories=_string_list(expectations.get("required_model_categories"), case.filename),
     )
 
