@@ -176,6 +176,7 @@ eval-critic: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --json
@@ -184,6 +185,7 @@ eval-critic-live: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --live --confirm-cost "$(CONFIRM_COST)" --json
