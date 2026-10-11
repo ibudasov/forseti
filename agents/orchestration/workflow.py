@@ -269,6 +269,29 @@ def _objection_counts_by_severity(objections: Iterable[CritiqueObjection]) -> di
     return dict(Counter(objection.severity for objection in objections))
 
 
+def _serialize_critic_objections(objections: Iterable[CritiqueObjection]) -> list[dict[str, str]]:
+    serialized: list[dict[str, str]] = []
+    for objection in objections:
+        references = []
+        if objection.metric_ids:
+            references.append(f"metrics={','.join(objection.metric_ids)}")
+        if objection.chunk_ids:
+            references.append(f"chunks={','.join(str(chunk_id) for chunk_id in objection.chunk_ids)}")
+        if objection.warning_codes:
+            references.append(f"warnings={','.join(objection.warning_codes)}")
+        reference_suffix = f" ({'; '.join(references)})" if references else ""
+        serialized.append(
+            {
+                "objection_code": objection.objection_id,
+                "category": objection.category,
+                "severity": objection.severity,
+                "source": objection.source,
+                "reason": f"{objection.category}: {objection.claim}{reference_suffix}"[:240],
+            }
+        )
+    return serialized
+
+
 def _update_critic_trace_output(step: _PendingTraceStep, effect: Any) -> None:
     if step.output is None:
         return
@@ -878,6 +901,7 @@ class AgenticAnalysisWorkflow:
             "status": critique_result.response.status,
             "verdict": critique_result.response.verdict,
             "objection_counts_by_severity": _objection_counts_by_severity(objections),
+            "objections": _serialize_critic_objections(objections),
             "baseline_decision": effect.baseline_decision,
             "final_decision": effect.final_decision,
             "accepted": critique_result.validation.accepted,

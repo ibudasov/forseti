@@ -1,0 +1,57 @@
+{
+  "source": "tests/fixtures/golden/clear_trade/cassette/003-event-000.json..004.json",
+  "run_id": "fixture-clear-trade",
+  "ticker": "TRDUP",
+  "steps": [
+    {
+      "sequence": 1,
+      "agent_name": "fundamental_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 14,
+        "candidates_token_count": 12,
+        "total_token_count": 26
+      }
+    },
+    {
+      "sequence": 2,
+      "agent_name": "technical_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 13,
+        "candidates_token_count": 11,
+        "total_token_count": 24
+      }
+    },
+    {
+      "sequence": 3,
+      "agent_name": "decision_synthesizer",
+      "status": "completed",
+      "tool_calls": [
+        "calculate_risk"
+      ],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 17,
+        "candidates_token_count": 9,
+        "total_token_count": 26
+      }
+    },
+    {
+      "sequence": 4,
+      "agent_name": "critic_guardrail",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 8,
+        "candidates_token_count": 7,
+        "total_token_count": 15
+      }
+    }
+  ]
+}

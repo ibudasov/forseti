@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -11,9 +12,10 @@ from sqlmodel import select
 
 from app.db.models import AgentRun, AgentRunStep
 from app.db.session import get_engine, get_session
+from app.settings import get_settings
 from tests.fixtures.critic.loader import (
     DEFAULT_FIXTURE_DIR,
-    CriticSuiteResult,
+    build_shadow_sample,
     build_shadow_report,
     evaluate_suite,
     load_critic_cases,
@@ -47,26 +49,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=200,
         help="Maximum persisted runs to include in --shadow-report mode.",
     )
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=0,
+        help="Export up to N objection sample rows in --shadow-report mode.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Write the objection sample CSV to this path in --shadow-report mode.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    _validate_shadow_report_export_args(args)
     if args.shadow_report:
         runs = _load_shadow_runs(limit=args.limit)
         steps = _load_shadow_steps([run.run_id for run in runs])
         report = build_shadow_report(runs, steps)
+        if args.sample > 0 and args.out is not None:
+            sample = build_shadow_sample(runs, steps, limit=args.sample)
+            _write_shadow_sample(args.out, sample)
         if args.json:
             print(json.dumps(report.to_dict(), indent=2))
             return 0
         print(render_shadow_markdown(report), end="")
         return 0
 
-    cases = load_critic_cases(args.fixture)
-    result = evaluate_suite(cases)
     if args.live:
         _require_live_confirmation(args.confirm_cost)
-        result = _with_live_note(result)
+    cases = load_critic_cases(args.fixture, include_live=args.live)
+    result = evaluate_suite(cases, live=args.live)
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))
@@ -78,20 +95,8 @@ def main(argv: list[str] | None = None) -> int:
 def _require_live_confirmation(confirm_cost: str) -> None:
     if confirm_cost.lower() != "yes":
         raise RuntimeError("Live evaluation requires --confirm-cost yes.")
-
-
-def _with_live_note(result: CriticSuiteResult) -> CriticSuiteResult:
-    live_note = (
-        "Live mode currently reuses the frozen offline critic fixtures; no live-only critic golden cases are defined yet."
-    )
-    return CriticSuiteResult(
-        total_cases=result.total_cases,
-        passed_cases=result.passed_cases,
-        failed_cases=result.failed_cases,
-        passed=result.passed,
-        cases=result.cases,
-        notes=(*result.notes, live_note),
-    )
+    if not get_settings().VERTEX_AI_PROJECT:
+        raise RuntimeError("Live evaluation requires VERTEX_AI_PROJECT.")
 
 
 def _load_shadow_runs(*, limit: int) -> list[AgentRun]:
@@ -116,6 +121,29 @@ def _load_shadow_steps(run_ids: list[str]) -> list[AgentRunStep]:
     )
     with get_session(engine) as session:
         return list(session.exec(statement).all())
+
+
+def _validate_shadow_report_export_args(args: argparse.Namespace) -> None:
+    if args.sample < 0:
+        raise ValueError("--sample must be >= 0.")
+    if args.out is not None and args.sample == 0:
+        raise ValueError("--out requires --sample.")
+    if args.sample > 0 and not args.shadow_report:
+        raise ValueError("--sample requires --shadow-report.")
+    if args.out is not None and not args.shadow_report:
+        raise ValueError("--out requires --shadow-report.")
+
+
+def _write_shadow_sample(path: Path, rows) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["run_id", "ticker", "objection_code", "severity", "source", "reason", "label"],
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.to_dict())
 
 
 if __name__ == "__main__":

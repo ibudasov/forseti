@@ -18,6 +18,9 @@ Each fixture declares a `case_type`:
   `AgenticAnalysisWorkflow`
 - `model_failure` — run the `Critic` wrapper with a fake failing model port,
   then feed the fallback result into policy
+- `live_model` — store a frozen `CritiqueRequest`/baseline/response snapshot in
+  `tests/fixtures/critic/live/`; these cases are skipped offline and only run
+  under `make eval-critic-live CONFIRM_COST=yes`
 
 ## Running the harness
 
@@ -37,6 +40,18 @@ Shadow aggregation from persisted runs:
 
 ```bash
 make critic-shadow-report
+```
+
+To export a manual review sample without raw evidence text:
+
+```bash
+make critic-shadow-report SAMPLE=20 OUT=reports/trust/critic-shadow-objections.csv
+```
+
+To accumulate shadow runs over the Trust ticker matrix:
+
+```bash
+make critic-shadow-batch CONFIRM_COST=yes REPEAT=1
 ```
 
 `make eval-critic` exits non-zero on any failing case. The suite is fully
@@ -109,8 +124,22 @@ Do not flip `CRITIC_MODE` to `enforced` until all of these hold:
 
 ## Live mode today
 
-The CLI exposes `--live` to mirror the fundamental-agent harness and to keep the
-manual confirmation gate explicit. Today it replays the same frozen critic
-fixtures after checking `--confirm-cost yes`; there are no live-only critic
-golden cases yet, so no live model or network calls happen and no
-`VERTEX_AI_PROJECT` check is required.
+`make eval-critic-live CONFIRM_COST=yes` now does two things:
+
+1. it replays the frozen offline fixtures, unchanged
+2. it additionally loads `tests/fixtures/critic/live/*.json`, builds the real
+   `Critic`, and performs a real Vertex/Gemini call for each live case
+
+Safety rules:
+
+- `CONFIRM_COST=yes` is mandatory
+- `VERTEX_AI_PROJECT` must be configured or the command fails immediately
+- live fixtures assert structural properties only: schema validity,
+  downgrade-only behavior, deterministic objection presence for seeded bad
+  drafts, and bounded/seeded decision changes where deterministic rules make
+  them stable
+- live cases are marked `@pytest.mark.live`, skipped by default, and therefore
+  excluded from `make test` and CI
+
+Each live result prints per-case latency/token metadata so shadow promotion can
+track cost and runtime alongside the qualitative review.

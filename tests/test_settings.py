@@ -68,3 +68,12 @@ def test_earnings_transcript_template_reads_env_var(monkeypatch):
     monkeypatch.setenv("EARNINGS_TRANSCRIPT_URL_TEMPLATE", "https://example.com/{ticker}")
     settings = Settings(_env_file=None)
     assert settings.EARNINGS_TRANSCRIPT_URL_TEMPLATE == "https://example.com/{ticker}"
+
+
+def test_model_pricing_defaults_include_gemini_flash():
+    settings = Settings(_env_file=None)
+
+    assert settings.MODEL_PRICING_USD_PER_MILLION["gemini-2.0-flash-001"] == {
+        "input": 0.10,
+        "output": 0.40,
+    }
