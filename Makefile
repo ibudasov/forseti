@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report trust-e2e up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -34,6 +34,7 @@ help:
 	@echo "  make eval-critic      # Run the frozen offline critic evaluation suite"
 	@echo "  make eval-critic-live CONFIRM_COST=yes # Run the manual live critic evaluation gate"
 	@echo "  make critic-shadow-report # Aggregate persisted critic shadow-mode runs"
+	@echo "  make trust-e2e CONFIRM_COST=yes # Run the manual live agentic-vs-linear trust matrix"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -196,6 +197,18 @@ critic-shadow-report: check-compose
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --shadow-report --json
+
+trust-e2e: check-compose
+	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
+		echo "Error: trust-e2e requires CONFIRM_COST=yes because it makes live network/model calls."; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e CRITIC_MODE=off \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust
 
 up: check-compose
 	$(DOCKER_COMPOSE) up --force-recreate app

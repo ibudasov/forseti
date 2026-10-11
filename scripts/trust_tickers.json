@@ -1,0 +1,51 @@
+{
+  "as_of_date": "2026-10-11",
+  "selection_basis": {
+    "universe_source": "app/ingestion/universe.py",
+    "selection_note": "Frozen from the active target-sector universe after `make migrate` plus `seed_universe()`. This sandbox had zero structured market/fundamental/RAG rows when the matrix was prepared, so the category labels below are the intended review coverage to exercise once a populated database and Vertex credentials are available."
+  },
+  "tickers": [
+    {
+      "ticker": "NVDA",
+      "sector": "ai",
+      "expected_case": "clear_trade",
+      "notes": "Large-cap AI leader; intended strong trade candidate once local data is populated."
+    },
+    {
+      "ticker": "LMT",
+      "sector": "defence",
+      "expected_case": "watchlist",
+      "notes": "Defence benchmark selected as the ambiguous/watchlist anchor."
+    },
+    {
+      "ticker": "OKLO",
+      "sector": "nuclear",
+      "expected_case": "hard_veto",
+      "notes": "High-beta nuclear name chosen to probe RSI/earnings veto handling."
+    },
+    {
+      "ticker": "FSLR",
+      "sector": "green_energy",
+      "expected_case": "clear_no_trade",
+      "notes": "Green-energy representative reserved for a deterministic no-trade outcome."
+    },
+    {
+      "ticker": "IONQ",
+      "sector": "quantum",
+      "expected_case": "incomplete_data",
+      "notes": "Quantum name selected to probe incomplete structured-data / evidence handling."
+    },
+    {
+      "ticker": "SERV",
+      "sector": "robotics",
+      "expected_case": "hard_veto",
+      "notes": "Momentum-heavy robotics name chosen as a second hard-veto candidate."
+    },
+    {
+      "ticker": "RKLB",
+      "sector": "space",
+      "expected_case": "clear_trade",
+      "notes": "Space representative intended to provide a second positive trace for manual review."
+    }
+  ]
+}
