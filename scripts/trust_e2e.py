@@ -13,13 +13,14 @@ from typing import Any, Iterator
 
 from agents.config import AGENTIC_PIPELINE_MODE, load_agent_config
 from agents.orchestration.workflow import AgenticAnalysisWorkflow, GoogleWorkflowError, load_trace
-from app.db.repository import list_active_securities
+from app.db.repository import get_latest_macro_daily, get_latest_technical_feature, list_active_securities
 from app.db.session import get_engine
 from app.ingestion.universe import seed_universe
 from app.rag.embedding import build_configured_embedding_client
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse
 from app.services.analyzer import analyze_request
 from app.settings import Settings, get_settings
+from app.trust.memo_checks import TechnicalIndicatorSnapshot, check_memo_consistency
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
     check_critic_shadow_persistence,
@@ -146,8 +147,18 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     if critic_mode == "shadow":
                         violations.extend(check_critic_shadow_persistence(agentic_response, persisted_trace))
+                    memo_text = _memo_text(persisted_trace)
                     run_report["agentic"] = _response_summary(agentic_response)
                     run_report["trace"] = _trace_summary(persisted_trace)
+                    run_report["memo_checks"] = _memo_check_summary(
+                        memo_text=memo_text,
+                        response=agentic_response,
+                        ticker=matrix_ticker.ticker,
+                        engine=engine,
+                    )
+                    run_report["fundamental_citation_resolution"] = _fundamental_citation_resolution_summary(
+                        persisted_trace
+                    )
                     run_report["violations"] = [violation.as_dict() for violation in violations]
                     run_report["status"] = "passed" if not violations else "failed"
                     run_report["error"] = None
@@ -228,18 +239,31 @@ def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
 
 def _build_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     counts = {"passed": 0, "failed": 0, "blocked": 0}
+    memo_failure_count = 0
+    memo_warning_count = 0
+    citation_unknown_count = 0
     for run in runs:
         counts[run["status"]] += 1
+        memo_checks = run.get("memo_checks") or {}
+        memo_failure_count += int(memo_checks.get("failure_count", 0) or 0)
+        memo_warning_count += int(memo_checks.get("warning_count", 0) or 0)
+        citation_summary = run.get("fundamental_citation_resolution") or {}
+        citation_unknown_count += int(citation_summary.get("unknown_id_count", 0) or 0)
     counts["total"] = len(runs)
+    counts["memo_failure_count"] = memo_failure_count
+    counts["memo_warning_count"] = memo_warning_count
+    counts["fundamental_unknown_citation_id_count"] = citation_unknown_count
     return counts
 
 
 def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
-    print("ticker\tsector\texpected\tstatus\tdecision\tviolations")
+    print("ticker\tsector\texpected\tstatus\tdecision\tviolations\tmemo_failures\tmemo_warnings\tcitation_unknown_ids")
     for run in runs:
         decision = "-"
         if isinstance(run.get("agentic"), dict):
             decision = str(run["agentic"].get("decision"))
+        memo_checks = run.get("memo_checks") or {}
+        citation_summary = run.get("fundamental_citation_resolution") or {}
         print(
             "\t".join(
                 [
@@ -249,6 +273,9 @@ def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
                     str(run["status"]),
                     decision,
                     str(len(run["violations"])),
+                    str(memo_checks.get("failure_count", "-")),
+                    str(memo_checks.get("warning_count", "-")),
+                    str(citation_summary.get("unknown_id_count", "-")),
                 ]
             )
         )
@@ -271,6 +298,123 @@ def _credential_probe() -> dict[str, Any]:
         "is_file": candidate.is_file(),
         "is_dir": candidate.is_dir(),
     }
+
+
+def _memo_text(trace: AnalysisTrace) -> str:
+    for step in reversed(trace.steps):
+        if step.agent_name != "decision_synthesizer" or not isinstance(step.output, dict):
+            continue
+        revision_text = step.output.get("revision_text")
+        if isinstance(revision_text, str) and revision_text.strip():
+            return revision_text
+        text = step.output.get("text")
+        if isinstance(text, str) and text.strip():
+            return text
+    return ""
+
+
+def _memo_check_summary(
+    *,
+    memo_text: str,
+    response: AnalyzeResponse,
+    ticker: str,
+    engine,
+) -> dict[str, Any]:
+    if not memo_text.strip():
+        return {
+            "status": "unavailable",
+            "failure_count": 0,
+            "warning_count": 0,
+            "issues": [],
+            "reason": "memo_text_missing",
+        }
+    result = check_memo_consistency(
+        memo_text,
+        response,
+        _technical_indicator_snapshot(ticker, engine),
+    )
+    return {
+        "status": "passed" if result.passed else "failed",
+        "failure_count": result.failure_count,
+        "warning_count": result.warning_count,
+        "issues": [
+            {
+                "code": issue.code,
+                "severity": issue.severity,
+                "field_name": issue.field_name,
+                "message": issue.message,
+                "claim_text": issue.claim_text,
+                "expected": issue.expected,
+                "actual": issue.actual,
+            }
+            for issue in result.issues
+        ],
+    }
+
+
+def _technical_indicator_snapshot(ticker: str, engine) -> TechnicalIndicatorSnapshot | None:
+    technical_feature = get_latest_technical_feature(ticker, engine=engine)
+    macro_row = get_latest_macro_daily(engine=engine)
+    if technical_feature is None and macro_row is None:
+        return None
+    return TechnicalIndicatorSnapshot(
+        rsi_14=float(technical_feature.rsi_14) if technical_feature and technical_feature.rsi_14 is not None else None,
+        sma_50=float(technical_feature.sma_50) if technical_feature and technical_feature.sma_50 is not None else None,
+        sma_200=float(technical_feature.sma_200) if technical_feature and technical_feature.sma_200 is not None else None,
+        vix=float(macro_row.vix) if macro_row and macro_row.vix is not None else None,
+        volume_trend=(
+            float(technical_feature.volume_trend)
+            if technical_feature and technical_feature.volume_trend is not None
+            else None
+        ),
+    )
+
+
+def _fundamental_citation_resolution_summary(trace: AnalysisTrace) -> dict[str, Any]:
+    builder_step = _trace_step(trace, "fundamental_context_builder")
+    analyst_step = _trace_step(trace, "fundamental_analyst")
+    if builder_step is None or not isinstance(builder_step.output, dict):
+        return {
+            "status": "unavailable",
+            "unknown_id_count": 0,
+            "reason_codes": [],
+            "reason": "fundamental_context_missing",
+        }
+    if analyst_step is None:
+        return {
+            "status": "unavailable",
+            "unknown_id_count": 0,
+            "reason_codes": [],
+            "reason": "fundamental_step_missing",
+        }
+    reason_codes = _unknown_citation_reason_codes(analyst_step)
+    return {
+        "status": "flagged" if reason_codes else "confirmed_zero",
+        "unknown_id_count": len(reason_codes),
+        "reason_codes": reason_codes,
+        "context_hash": builder_step.output.get("context_hash"),
+        "chunk_count": builder_step.output.get("chunk_count"),
+    }
+
+
+def _trace_step(trace: AnalysisTrace, agent_name: str):
+    for step in trace.steps:
+        if step.agent_name == agent_name:
+            return step
+    return None
+
+
+def _unknown_citation_reason_codes(step) -> list[str]:
+    if not isinstance(step.output, dict):
+        return []
+    detail = step.output.get("detail")
+    if not isinstance(detail, str):
+        return []
+    return [
+        reason_code
+        for reason_code in detail.split(",")
+        if reason_code in {"unknown_metric_citation", "unknown_chunk_citation"}
+    ]
 
 
 @contextmanager
