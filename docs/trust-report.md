@@ -1,7 +1,7 @@
 # Trust report
 
 - Scope: issue #98 for epic #92; lock offline trust regressions into CI, report runtime telemetry, and summarize current evidence.
-- Commit SHA: `f9c762888a045e48b74935ab71221774d7773e80`
+- Verified snapshot SHA: `f9c762888a045e48b74935ab71221774d7773e80`
 - Branch: `copilot/ibudasov-92-parent-session`
 
 ## Invariant results
