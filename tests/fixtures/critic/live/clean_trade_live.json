@@ -1,0 +1,107 @@
+{
+  "case_type": "live_model",
+  "mode": "shadow",
+  "notes": "Manual live clean-trade probe. The live model runs, but the structural gate only requires a schema-valid response with no high-severity model objection.",
+  "request": {
+    "schema_version": "1.0",
+    "run_id": "live-clean-1",
+    "context_hash": "live-clean-ctx-1",
+    "ticker": "NVDA",
+    "as_of_date": "2026-09-27",
+    "snapshot_at": "2026-09-27T12:00:00Z",
+    "draft": {
+      "decision": "trade",
+      "confidence": 0.72,
+      "reasons": ["baseline"],
+      "warnings": [],
+      "memo": "Draft memo",
+      "source": "decision_synthesizer",
+      "entry_range": [100.0, 101.0],
+      "stop_loss": 95.0,
+      "take_profit": [108.0, 110.0],
+      "risk_reward": 2.0,
+      "position_size_eur": 1000.0
+    },
+    "analyst_views": [
+      {
+        "agent_name": "fundamental_analyst",
+        "status": "completed",
+        "overall_signal": "positive",
+        "findings": [
+          {
+            "finding_id": "finding-1",
+            "category": "growth_quality",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "Claim finding-1",
+            "metric_ids": ["revenue_growth:2026-06-30"],
+            "chunk_ids": [10]
+          }
+        ],
+        "summary": "Analyst summary."
+      }
+    ],
+    "evidence_chunks": [
+      {
+        "chunk_id": 10,
+        "retrieval_question_id": "question-10",
+        "source_type": "filing",
+        "source_url": "https://example.com/10",
+        "source_hash": "hash-10",
+        "chunk_index": 0,
+        "published_at": "2026-09-01T12:00:00Z",
+        "quality_tier": "primary",
+        "text": "Primary evidence"
+      }
+    ],
+    "deterministic_warnings": [],
+    "allowed_actions": [
+      "accept",
+      "downgrade_confidence",
+      "downgrade_decision",
+      "force_no_trade",
+      "request_revision"
+    ],
+    "max_confidence_penalty": 0.3
+  },
+  "baseline": {
+    "decision": "trade",
+    "confidence": 0.72,
+    "reasons": ["baseline"],
+    "warnings": [],
+    "memo": "Draft memo",
+    "source": "deterministic",
+    "entry_range": [100.0, 101.0],
+    "stop_loss": 95.0,
+    "take_profit": [108.0, 110.0],
+    "risk_reward": 2.0,
+    "position_size_eur": 1000.0
+  },
+  "response": {
+    "ticker": "NVDA",
+    "decision": "trade",
+    "confidence": 0.72,
+    "reasons": ["draft"],
+    "warnings": [],
+    "engine_version": "v1.rules.0",
+    "trace_id": "trace-live-clean-1",
+    "entry_range": [100.0, 101.0],
+    "stop_loss": 95.0,
+    "take_profit": [108.0, 110.0],
+    "risk_reward": 2.0,
+    "position_size_eur": 1000.0
+  },
+  "deterministic_objections": {
+    "strategy": "literal",
+    "objections": []
+  },
+  "expected": {
+    "validation": {
+      "accepted": true,
+      "reason_codes": []
+    },
+    "live": {
+      "maximum_high_severity_model_objection_count": 0
+    }
+  }
+}

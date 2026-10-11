@@ -33,10 +33,12 @@ from app.settings import Settings
 
 FIXTURE_DIR = Path(__file__).resolve().parent
 DEFAULT_FIXTURE_DIR = FIXTURE_DIR
+LIVE_FIXTURE_DIR = FIXTURE_DIR / "live"
 _CONSTRUCT_KEY = "__construct__"
 _POLICY_LAYER: Literal["policy"] = "policy"
 _WORKFLOW_LAYER: Literal["workflow_revision"] = "workflow_revision"
 _MODEL_FAILURE_LAYER: Literal["model_failure"] = "model_failure"
+_LIVE_MODEL_LAYER: Literal["live_model"] = "live_model"
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,7 @@ class RevisionOutcomeFixture:
 class CriticGoldenCase:
     name: str
     filename: str
-    case_type: Literal["policy", "workflow_revision", "model_failure"]
+    case_type: Literal["policy", "workflow_revision", "model_failure", "live_model"]
     mode: Literal["off", "shadow", "enforced"]
     notes: str
     request: CritiqueRequest
@@ -69,6 +71,7 @@ class CriticGoldenCase:
     revision_outcome: RevisionOutcomeFixture | None = None
     model_failure: dict[str, Any] | None = None
     expected_validation: dict[str, Any] | None = None
+    expected_live: dict[str, Any] | None = None
     shadow_matches_off: bool = False
     decision_synthesizer_call_count: int | None = None
     critic_review_call_count: int | None = None
@@ -87,6 +90,9 @@ class CriticCaseResult:
     decision_synthesizer_call_count: int | None = None
     critic_review_call_count: int | None = None
     unused_critique_result_count: int | None = None
+    latency_ms: float | None = None
+    token_usage: dict[str, int] | None = None
+    model_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +108,9 @@ class CriticCaseResult:
             "decision_synthesizer_call_count": self.decision_synthesizer_call_count,
             "critic_review_call_count": self.critic_review_call_count,
             "unused_critique_result_count": self.unused_critique_result_count,
+            "latency_ms": self.latency_ms,
+            "token_usage": self.token_usage,
+            "model_name": self.model_name,
         }
 
 
@@ -135,6 +144,28 @@ class CriticShadowReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class CriticShadowSampleRow:
+    run_id: str
+    ticker: str
+    objection_code: str
+    severity: str
+    source: str
+    reason: str
+    label: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "run_id": self.run_id,
+            "ticker": self.ticker,
+            "objection_code": self.objection_code,
+            "severity": self.severity,
+            "source": self.source,
+            "reason": self.reason,
+            "label": self.label,
+        }
 
 
 class _NoopRecorder:
@@ -190,27 +221,53 @@ def critic_case_names(fixture_dir: Path = DEFAULT_FIXTURE_DIR) -> list[str]:
     return [path.stem for path in critic_case_paths(fixture_dir)]
 
 
+def live_critic_case_paths(fixture_dir: Path = DEFAULT_FIXTURE_DIR) -> list[Path]:
+    live_dir = fixture_dir / LIVE_FIXTURE_DIR.name
+    if not live_dir.exists():
+        return []
+    return sorted(path for path in live_dir.glob("*.json"))
+
+
+def live_critic_case_names(fixture_dir: Path = DEFAULT_FIXTURE_DIR) -> list[str]:
+    return [path.stem for path in live_critic_case_paths(fixture_dir)]
+
+
 def load_critic_case(path: Path) -> CriticGoldenCase:
+    filename = _fixture_filename(path)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name}: invalid JSON: {exc.msg}") from exc
+        raise ValueError(f"{filename}: invalid JSON: {exc.msg}") from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"{path.name}: top-level JSON value must be an object.")
-    return _case_from_payload(path.name, payload)
+        raise ValueError(f"{filename}: top-level JSON value must be an object.")
+    return _case_from_payload(filename, payload)
 
 
-def load_critic_cases(fixture_dir: Path = DEFAULT_FIXTURE_DIR) -> list[CriticGoldenCase]:
-    return [load_critic_case(path) for path in critic_case_paths(fixture_dir)]
+def load_critic_cases(
+    fixture_dir: Path = DEFAULT_FIXTURE_DIR,
+    *,
+    include_live: bool = False,
+) -> list[CriticGoldenCase]:
+    paths = critic_case_paths(fixture_dir)
+    if include_live:
+        paths.extend(live_critic_case_paths(fixture_dir))
+    return [load_critic_case(path) for path in paths]
 
 
-def evaluate_suite(cases: list[CriticGoldenCase]) -> CriticSuiteResult:
-    results = tuple(run_critic_case(case) for case in cases)
+def evaluate_suite(
+    cases: list[CriticGoldenCase],
+    *,
+    live: bool = False,
+    critic: Critic | None = None,
+) -> CriticSuiteResult:
+    results = tuple(run_critic_case(case, live=live, critic=critic) for case in cases)
     passed_cases = sum(1 for result in results if result.passed)
     failed_cases = len(results) - passed_cases
     notes: list[str] = []
     if not any(case.case_type == _MODEL_FAILURE_LAYER for case in cases):
         notes.append("No model-failure cases were discovered.")
+    if live and not any(case.case_type == _LIVE_MODEL_LAYER for case in cases):
+        notes.append("No live-model cases were discovered.")
     return CriticSuiteResult(
         total_cases=len(results),
         passed_cases=passed_cases,
@@ -222,17 +279,33 @@ def evaluate_suite(cases: list[CriticGoldenCase]) -> CriticSuiteResult:
 
 
 def render_suite_markdown(result: CriticSuiteResult) -> str:
+    include_runtime = any(case.latency_ms is not None or case.token_usage for case in result.cases)
     lines = [
         "# Critic evaluation",
         "",
-        "| Case | Layer | Result | Detail |",
-        "| --- | --- | --- | --- |",
+        (
+            "| Case | Layer | Result | Detail | Latency (ms) | Tokens |"
+            if include_runtime
+            else "| Case | Layer | Result | Detail |"
+        ),
+        (
+            "| --- | --- | --- | --- | --- | --- |"
+            if include_runtime
+            else "| --- | --- | --- | --- |"
+        ),
     ]
     for case in result.cases:
         detail = case.failure_message or "ok"
-        lines.append(
-            f"| {case.name} | {case.layer} | {'pass' if case.passed else 'fail'} | {detail} |"
-        )
+        if include_runtime:
+            total_tokens = ""
+            if case.token_usage:
+                total_tokens = str(int(case.token_usage.get("total_token_count", 0) or 0))
+            latency = "" if case.latency_ms is None else f"{case.latency_ms:.1f}"
+            lines.append(
+                f"| {case.name} | {case.layer} | {'pass' if case.passed else 'fail'} | {detail} | {latency} | {total_tokens} |"
+            )
+            continue
+        lines.append(f"| {case.name} | {case.layer} | {'pass' if case.passed else 'fail'} | {detail} |")
     lines.extend(
         [
             "",
@@ -245,7 +318,12 @@ def render_suite_markdown(result: CriticSuiteResult) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_critic_case(case: CriticGoldenCase) -> CriticCaseResult:
+def run_critic_case(
+    case: CriticGoldenCase,
+    *,
+    live: bool = False,
+    critic: Critic | None = None,
+) -> CriticCaseResult:
     try:
         if case.case_type == _POLICY_LAYER:
             return _run_policy_case(case)
@@ -253,6 +331,10 @@ def run_critic_case(case: CriticGoldenCase) -> CriticCaseResult:
             return _run_workflow_case(case)
         if case.case_type == _MODEL_FAILURE_LAYER:
             return _run_model_failure_case(case)
+        if case.case_type == _LIVE_MODEL_LAYER:
+            if not live:
+                raise ValueError(f"{case.filename}: live_model cases require live=True.")
+            return _run_live_model_case(case, critic=critic)
         raise ValueError(f"Unsupported case_type '{case.case_type}'.")
     except Exception as exc:  # broad by design to keep suite reporting complete
         return CriticCaseResult(
@@ -322,6 +404,44 @@ def render_shadow_markdown(report: CriticShadowReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_shadow_sample(
+    runs: list[AgentRun],
+    steps: list[AgentRunStep],
+    *,
+    limit: int,
+) -> list[CriticShadowSampleRow]:
+    if limit <= 0:
+        return []
+
+    step_by_run_id = {
+        step.run_id: step
+        for step in steps
+        if step.agent_name == "critic_guardrail" and isinstance(step.output, dict)
+    }
+    rows: list[CriticShadowSampleRow] = []
+    for run in runs:
+        effect = run.critic_effect or {}
+        if effect.get("mode") != "shadow":
+            continue
+        step = step_by_run_id.get(run.run_id)
+        if step is None:
+            continue
+        for objection in _shadow_objections(step):
+            rows.append(
+                CriticShadowSampleRow(
+                    run_id=run.run_id,
+                    ticker=run.ticker,
+                    objection_code=str(objection.get("objection_code", "")),
+                    severity=str(objection.get("severity", "")),
+                    source=str(objection.get("source", "")),
+                    reason=str(objection.get("reason", "")),
+                )
+            )
+            if len(rows) >= limit:
+                return rows
+    return rows
+
+
 def _run_policy_case(case: CriticGoldenCase) -> CriticCaseResult:
     critique_result = _require_value(case.critique_result, case.filename, "critique_result")
     deterministic_objections = _deterministic_objections(case)
@@ -344,6 +464,9 @@ def _run_policy_case(case: CriticGoldenCase) -> CriticCaseResult:
         failure_message=None,
         effect=effect,
         validation=critique_result.validation,
+        latency_ms=critique_result.latency_ms,
+        token_usage=critique_result.token_usage,
+        model_name=critique_result.model_name,
     )
 
 
@@ -371,6 +494,38 @@ def _run_model_failure_case(case: CriticGoldenCase) -> CriticCaseResult:
         failure_message=None,
         effect=effect,
         validation=critique_result.validation,
+        latency_ms=critique_result.latency_ms,
+        token_usage=critique_result.token_usage,
+        model_name=critique_result.model_name,
+    )
+
+
+def _run_live_model_case(case: CriticGoldenCase, *, critic: Critic | None = None) -> CriticCaseResult:
+    resolved_critic = critic or Critic()
+    critique_result = resolved_critic.review(case.request)
+    deterministic_objections = _deterministic_objections(case)
+    effect = apply_critic_policy(
+        mode=case.mode,
+        response=case.response.model_copy(deep=True),
+        request=case.request,
+        baseline=case.baseline,
+        critique_result=critique_result,
+        deterministic_objections=deterministic_objections,
+    )
+    _assert_effect(case, effect)
+    _assert_validation(case, critique_result.validation)
+    _assert_live_expectations(case, critique_result, deterministic_objections, effect)
+    return CriticCaseResult(
+        name=case.name,
+        case_type=case.case_type,
+        layer=_LIVE_MODEL_LAYER,
+        passed=True,
+        failure_message=None,
+        effect=effect,
+        validation=critique_result.validation,
+        latency_ms=critique_result.latency_ms,
+        token_usage=critique_result.token_usage,
+        model_name=critique_result.model_name,
     )
 
 
@@ -496,7 +651,7 @@ def _run_workflow_case(case: CriticGoldenCase) -> CriticCaseResult:
 
 def _case_from_payload(filename: str, payload: dict[str, Any]) -> CriticGoldenCase:
     case_type = _required_str(payload, filename, "case_type")
-    if case_type not in {_POLICY_LAYER, _WORKFLOW_LAYER, _MODEL_FAILURE_LAYER}:
+    if case_type not in {_POLICY_LAYER, _WORKFLOW_LAYER, _MODEL_FAILURE_LAYER, _LIVE_MODEL_LAYER}:
         raise ValueError(f"{filename}: unknown case_type '{case_type}'.")
     mode = _required_str(payload, filename, "mode")
     if mode not in {"off", "shadow", "enforced"}:
@@ -521,7 +676,7 @@ def _case_from_payload(filename: str, payload: dict[str, Any]) -> CriticGoldenCa
     return CriticGoldenCase(
         name=Path(filename).stem,
         filename=filename,
-        case_type=cast(Literal["policy", "workflow_revision", "model_failure"], case_type),
+        case_type=cast(Literal["policy", "workflow_revision", "model_failure", "live_model"], case_type),
         mode=cast(Literal["off", "shadow", "enforced"], mode),
         notes=str(payload.get("notes", "")).strip(),
         request=request,
@@ -535,6 +690,7 @@ def _case_from_payload(filename: str, payload: dict[str, Any]) -> CriticGoldenCa
         revision_outcome=revision_outcome,
         model_failure=_optional_mapping(payload.get("model_failure"), filename, "model_failure"),
         expected_validation=_optional_mapping(expected.get("validation"), filename, "expected.validation"),
+        expected_live=_optional_mapping(expected.get("live"), filename, "expected.live"),
         shadow_matches_off=bool(expected.get("shadow_matches_off", False)),
         decision_synthesizer_call_count=_optional_int(
             expected.get("decision_synthesizer_call_count"),
@@ -603,6 +759,87 @@ def _assert_validation(case: CriticGoldenCase, validation: CritiqueValidation) -
             )
     if mismatches:
         raise AssertionError(f"{case.filename}: validation mismatch\n" + "\n".join(mismatches))
+
+
+def _assert_live_expectations(
+    case: CriticGoldenCase,
+    critique_result: CritiqueResult,
+    deterministic_objections: list[CritiqueObjection],
+    effect: CriticEffect,
+) -> None:
+    expectations = case.expected_live
+    if expectations is None:
+        return
+
+    _assert_category_subset(
+        case.filename,
+        "expected.live.required_deterministic_categories",
+        actual_categories={objection.category for objection in deterministic_objections},
+        required_categories=_string_list(expectations.get("required_deterministic_categories"), case.filename),
+    )
+    _assert_category_subset(
+        case.filename,
+        "expected.live.required_model_categories",
+        actual_categories={objection.category for objection in critique_result.response.objections if objection.source == "model"},
+        required_categories=_string_list(expectations.get("required_model_categories"), case.filename),
+    )
+
+    expected_total_objections = _optional_int(
+        expectations.get("minimum_total_objection_count"),
+        case.filename,
+        "expected.live.minimum_total_objection_count",
+    )
+    if expected_total_objections is not None:
+        actual_total = len(deterministic_objections) + len(critique_result.response.objections)
+        if actual_total < expected_total_objections:
+            raise AssertionError(
+                f"{case.filename}: expected at least {expected_total_objections} objections, got {actual_total}"
+            )
+
+    expected_model_objections = _optional_int(
+        expectations.get("minimum_model_objection_count"),
+        case.filename,
+        "expected.live.minimum_model_objection_count",
+    )
+    if expected_model_objections is not None:
+        actual_model = len([objection for objection in critique_result.response.objections if objection.source == "model"])
+        if actual_model < expected_model_objections:
+            raise AssertionError(
+                f"{case.filename}: expected at least {expected_model_objections} model objections, got {actual_model}"
+            )
+
+    maximum_high_severity = _optional_int(
+        expectations.get("maximum_high_severity_model_objection_count"),
+        case.filename,
+        "expected.live.maximum_high_severity_model_objection_count",
+    )
+    if maximum_high_severity is not None:
+        high_severity_model_count = len(
+            [
+                objection
+                for objection in critique_result.response.objections
+                if objection.source == "model" and objection.severity == "high"
+            ]
+        )
+        if high_severity_model_count > maximum_high_severity:
+            raise AssertionError(
+                f"{case.filename}: expected at most {maximum_high_severity} high-severity model objections, "
+                f"got {high_severity_model_count}"
+            )
+
+    required_reason_codes = _string_list(expectations.get("required_reason_codes"), case.filename)
+    missing_reason_codes = [code for code in required_reason_codes if code not in effect.reason_codes]
+    if missing_reason_codes:
+        raise AssertionError(f"{case.filename}: missing expected reason_codes {missing_reason_codes}")
+
+    if bool(expectations.get("require_decision_downgrade_from_response", False)):
+        response_decision_rank = _decision_rank(case.response.decision)
+        effect_decision_rank = _decision_rank(effect.final_decision)
+        if effect_decision_rank >= response_decision_rank:
+            raise AssertionError(
+                f"{case.filename}: expected live effect to downgrade response decision "
+                f"from {case.response.decision} to below, got {effect.final_decision}"
+            )
 
 
 def _assert_shadow_matches_off(
@@ -675,6 +912,22 @@ def _values_match(actual: Any, expected: Any) -> bool:
     return actual == expected
 
 
+def _assert_category_subset(
+    filename: str,
+    label: str,
+    *,
+    actual_categories: set[str],
+    required_categories: list[str],
+) -> None:
+    missing_categories = [category for category in required_categories if category not in actual_categories]
+    if missing_categories:
+        raise AssertionError(f"{filename}: {label} missing categories {missing_categories}")
+
+
+def _decision_rank(decision: str) -> int:
+    return {"no_trade": 0, "watchlist": 1, "trade": 2}[decision]
+
+
 def _severity_counts(step: AgentRunStep) -> dict[str, int]:
     output = step.output or {}
     counts = output.get("objection_counts_by_severity") or {}
@@ -682,6 +935,26 @@ def _severity_counts(step: AgentRunStep) -> dict[str, int]:
         severity: int(counts.get(severity, 0))
         for severity in ("high", "medium", "low")
     }
+
+
+def _shadow_objections(step: AgentRunStep) -> list[dict[str, str]]:
+    output = step.output or {}
+    objections = output.get("objections") or []
+    if not isinstance(objections, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for objection in objections:
+        if not isinstance(objection, dict):
+            continue
+        normalized.append(
+            {
+                "objection_code": str(objection.get("objection_code", "")),
+                "severity": str(objection.get("severity", "")),
+                "source": str(objection.get("source", "")),
+                "reason": str(objection.get("reason", "")),
+            }
+        )
+    return normalized
 
 
 def _rate(numerator: int, denominator: int) -> float:
@@ -861,6 +1134,13 @@ def _mapping(payload: Any, filename: str, label: str) -> dict[str, Any]:
     return deepcopy(payload)
 
 
+def _fixture_filename(path: Path) -> str:
+    try:
+        return path.relative_to(DEFAULT_FIXTURE_DIR).as_posix()
+    except ValueError:
+        return path.name
+
+
 def _optional_mapping(payload: Any, filename: str, label: str) -> dict[str, Any] | None:
     if payload is None:
         return None
@@ -873,6 +1153,14 @@ def _optional_int(payload: Any, filename: str, label: str) -> int | None:
     if not isinstance(payload, int):
         raise ValueError(f"{filename}: '{label}' must be an integer.")
     return payload
+
+
+def _string_list(payload: Any, filename: str) -> list[str]:
+    if payload is None:
+        return []
+    if not isinstance(payload, list) or not all(isinstance(value, str) for value in payload):
+        raise ValueError(f"{filename}: expected a list of strings.")
+    return [value for value in payload if value]
 
 
 def _strip_construct(mapping: dict[str, Any]) -> tuple[bool, dict[str, Any]]:

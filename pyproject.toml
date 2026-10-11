@@ -49,6 +49,11 @@ python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = true
 
+[tool.pytest.ini_options]
+markers = [
+  "live: tests that require external model access and must be enabled explicitly",
+]
+
 # this list may only shrink; new files may never be added to it.
 [[tool.mypy.overrides]]
 module = [

@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import date
 
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse, DecisionDiagnosis, TraceStep
+from app.schemas.critique import CriticEffect, CriticVersionStamp
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
+    check_critic_shadow_persistence,
     check_data_gate_warning_propagation,
     check_downgrade_only_behavior,
     check_risk_field_equality,
@@ -65,6 +67,40 @@ def _trace(*, critic_status: str = "completed", critic_reason: str | None = None
                 output=critic_output,
             ),
         ],
+    )
+
+
+def _shadow_effect(
+    *,
+    mode: str = "shadow",
+    revisions_requested: int = 0,
+    revisions_performed: int = 0,
+) -> CriticEffect:
+    return CriticEffect(
+        mode=mode,
+        accepted=True,
+        status="completed",
+        verdict="accept",
+        reason_codes=[],
+        objection_counts={},
+        deterministic_objection_ids=[],
+        model_objection_ids=[],
+        baseline_decision="trade",
+        proposed_decision=None,
+        final_decision="trade",
+        decision_changed=False,
+        baseline_confidence=0.7,
+        applied_confidence_penalty=0.0,
+        final_confidence=0.7,
+        revisions_requested=revisions_requested,
+        revisions_performed=revisions_performed,
+        versions=CriticVersionStamp(
+            request_schema_version="1.0",
+            critique_schema_version="1.0",
+            prompt_version="critic-guardrail.v1",
+            model_name="fixture-critic",
+            policy_version="1.0",
+        ),
     )
 
 
@@ -149,4 +185,24 @@ def test_evaluate_agentic_invariants_aggregates_every_check():
         "decision_upgrade",
         "confidence_upgrade",
         "missing_data_gate_warning",
+    }
+
+
+def test_critic_shadow_persistence_accepts_matching_persisted_effect():
+    effect = _shadow_effect()
+    response = _response().model_copy(update={"critic_effect": effect})
+    trace = _trace().model_copy(update={"critic_effect": effect})
+
+    assert check_critic_shadow_persistence(response, trace) == []
+
+
+def test_critic_shadow_persistence_rejects_missing_or_excessive_revision_state():
+    response = _response().model_copy(update={"critic_effect": _shadow_effect(revisions_performed=2)})
+    trace = _trace().model_copy(update={"critic_effect": None})
+
+    violations = check_critic_shadow_persistence(response, trace)
+
+    assert {violation.code for violation in violations} == {
+        "missing_persisted_critic_effect",
+        "critic_revision_limit_exceeded",
     }

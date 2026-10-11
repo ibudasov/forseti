@@ -20,7 +20,11 @@ from app.rag.embedding import build_configured_embedding_client
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse
 from app.services.analyzer import analyze_request
 from app.settings import Settings, get_settings
-from app.trust.invariants import CRITIC_OFF_ALLOWED_SKIPS, evaluate_agentic_invariants
+from app.trust.invariants import (
+    CRITIC_OFF_ALLOWED_SKIPS,
+    check_critic_shadow_persistence,
+    evaluate_agentic_invariants,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MATRIX_PATH = REPO_ROOT / "scripts" / "trust_tickers.json"
@@ -39,6 +43,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", default=str(DEFAULT_MATRIX_PATH))
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR))
+    parser.add_argument("--repeat", type=int, default=1)
     return parser.parse_args(argv)
 
 
@@ -47,8 +52,12 @@ def main(argv: list[str] | None = None) -> int:
     matrix_path = Path(args.matrix).resolve()
     report_dir = Path(args.report_dir).resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
+    if args.repeat < 1:
+        raise ValueError("--repeat must be >= 1")
 
     matrix_payload = _load_matrix(matrix_path)
+    settings = get_settings()
+    critic_mode = settings.CRITIC_MODE.strip().lower()
     as_of_date = date.fromisoformat(str(matrix_payload["as_of_date"]))
     tickers = [
         MatrixTicker(
@@ -70,8 +79,9 @@ def main(argv: list[str] | None = None) -> int:
         "as_of_date": as_of_date.isoformat(),
         "matrix_path": str(matrix_path.relative_to(REPO_ROOT)),
         "report_dir": str(report_dir.relative_to(REPO_ROOT)),
-        "critic_mode": "off",
+        "critic_mode": critic_mode,
         "pipeline_mode": AGENTIC_PIPELINE_MODE,
+        "repeat_count": args.repeat,
         "seeded_universe_inserted_count": seeded,
         "active_universe_size": active_universe_size,
         "credential_probe": _credential_probe(),
@@ -98,55 +108,59 @@ def main(argv: list[str] | None = None) -> int:
             embedding_client=embedding_client,
         )
 
-    for matrix_ticker in tickers:
-        linear_response = analyze_request(
-            AnalyzeRequest(ticker=matrix_ticker.ticker, as_of_date=as_of_date),
-            engine=engine,
-        )
-        run_report: dict[str, Any] = {
-            "ticker": matrix_ticker.ticker,
-            "sector": matrix_ticker.sector,
-            "expected_case": matrix_ticker.expected_case,
-            "notes": matrix_ticker.notes,
-            "linear": _response_summary(linear_response),
-            "agentic": None,
-            "trace": None,
-            "violations": [],
-            "status": "blocked" if workflow is None else "pending",
-            "error": workflow_error,
-        }
+    for iteration in range(1, args.repeat + 1):
+        for matrix_ticker in tickers:
+            linear_response = analyze_request(
+                AnalyzeRequest(ticker=matrix_ticker.ticker, as_of_date=as_of_date),
+                engine=engine,
+            )
+            run_report: dict[str, Any] = {
+                "iteration": iteration,
+                "ticker": matrix_ticker.ticker,
+                "sector": matrix_ticker.sector,
+                "expected_case": matrix_ticker.expected_case,
+                "notes": matrix_ticker.notes,
+                "linear": _response_summary(linear_response),
+                "agentic": None,
+                "trace": None,
+                "violations": [],
+                "status": "blocked" if workflow is None else "pending",
+                "error": workflow_error,
+            }
 
-        if workflow is not None:
-            try:
-                with _settings_override(CRITIC_MODE="off"):
-                    agentic_response = workflow.analyze(
-                        matrix_ticker.ticker,
-                        request=AnalyzeRequest(ticker=matrix_ticker.ticker, as_of_date=as_of_date),
+            if workflow is not None:
+                try:
+                    with _settings_override(CRITIC_MODE=critic_mode):
+                        agentic_response = workflow.analyze(
+                            matrix_ticker.ticker,
+                            request=AnalyzeRequest(ticker=matrix_ticker.ticker, as_of_date=as_of_date),
+                        )
+                    persisted_trace = load_trace(agentic_response.trace_id, engine=engine) or agentic_response.trace
+                    if persisted_trace is None:
+                        raise RuntimeError(f"persisted trace not found for run_id={agentic_response.trace_id}")
+                    violations = evaluate_agentic_invariants(
+                        deterministic_response=linear_response,
+                        agentic_response=agentic_response,
+                        trace=persisted_trace,
+                        allowed_skip_reasons=CRITIC_OFF_ALLOWED_SKIPS if critic_mode == "off" else None,
                     )
-                persisted_trace = load_trace(agentic_response.trace_id, engine=engine) or agentic_response.trace
-                if persisted_trace is None:
-                    raise RuntimeError(f"persisted trace not found for run_id={agentic_response.trace_id}")
-                violations = evaluate_agentic_invariants(
-                    deterministic_response=linear_response,
-                    agentic_response=agentic_response,
-                    trace=persisted_trace,
-                    allowed_skip_reasons=CRITIC_OFF_ALLOWED_SKIPS,
-                )
-                run_report["agentic"] = _response_summary(agentic_response)
-                run_report["trace"] = _trace_summary(persisted_trace)
-                run_report["violations"] = [violation.as_dict() for violation in violations]
-                run_report["status"] = "passed" if not violations else "failed"
-                run_report["error"] = None
-                if violations:
+                    if critic_mode == "shadow":
+                        violations.extend(check_critic_shadow_persistence(agentic_response, persisted_trace))
+                    run_report["agentic"] = _response_summary(agentic_response)
+                    run_report["trace"] = _trace_summary(persisted_trace)
+                    run_report["violations"] = [violation.as_dict() for violation in violations]
+                    run_report["status"] = "passed" if not violations else "failed"
+                    run_report["error"] = None
+                    if violations:
+                        exit_code = 1
+                except Exception as exc:
+                    run_report["status"] = "blocked"
+                    run_report["error"] = _serialize_error(exc)
                     exit_code = 1
-            except Exception as exc:
-                run_report["status"] = "blocked"
-                run_report["error"] = _serialize_error(exc)
-                exit_code = 1
-        report["runs"].append(run_report)
+            report["runs"].append(run_report)
 
     report["summary"] = _build_summary(report["runs"])
-    report_path = report_dir / f"trust-e2e-{generated_at.strftime('%Y%m%dT%H%M%SZ')}.json"
+    report_path = report_dir / f"trust-e2e-{critic_mode}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     _print_summary(report["runs"], report_path)

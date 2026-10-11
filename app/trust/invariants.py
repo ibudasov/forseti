@@ -173,6 +173,72 @@ def check_data_gate_warning_propagation(
     ]
 
 
+def check_critic_shadow_persistence(
+    agentic_response: AnalyzeResponse,
+    trace: AnalysisTrace,
+) -> list[InvariantViolation]:
+    violations: list[InvariantViolation] = []
+    response_effect = agentic_response.critic_effect
+    persisted_effect = trace.critic_effect
+
+    if response_effect is None:
+        violations.append(
+            InvariantViolation(
+                code="missing_critic_effect",
+                message="Shadow-mode response is missing critic_effect.",
+            )
+        )
+        return violations
+
+    if response_effect.mode != "shadow":
+        violations.append(
+            InvariantViolation(
+                code="critic_mode_mismatch",
+                message="Shadow-mode response critic_effect.mode must be 'shadow'.",
+                details={"actual_mode": response_effect.mode},
+            )
+        )
+
+    if persisted_effect is None:
+        violations.append(
+            InvariantViolation(
+                code="missing_persisted_critic_effect",
+                message="Persisted trace is missing critic_effect for a shadow-mode run.",
+            )
+        )
+    elif persisted_effect != response_effect:
+        violations.append(
+            InvariantViolation(
+                code="persisted_critic_effect_mismatch",
+                message="Persisted trace critic_effect does not match the response critic_effect.",
+            )
+        )
+
+    if response_effect.revisions_requested > 1 or response_effect.revisions_performed > 1:
+        violations.append(
+            InvariantViolation(
+                code="critic_revision_limit_exceeded",
+                message="Critic requested or performed more than one revision.",
+                details={
+                    "revisions_requested": response_effect.revisions_requested,
+                    "revisions_performed": response_effect.revisions_performed,
+                },
+            )
+        )
+
+    critic_steps = [step for step in trace.steps if step.agent_name == CRITIC_NAME]
+    if len(critic_steps) != 1:
+        violations.append(
+            InvariantViolation(
+                code="critic_step_count_mismatch",
+                message="Expected exactly one critic_guardrail step in the persisted trace.",
+                details={"critic_step_count": len(critic_steps)},
+            )
+        )
+
+    return violations
+
+
 def evaluate_agentic_invariants(
     *,
     deterministic_response: AnalyzeResponse,
