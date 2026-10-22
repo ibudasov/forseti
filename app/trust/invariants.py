@@ -256,7 +256,29 @@ def evaluate_agentic_invariants(
     violations.extend(check_risk_field_equality(deterministic_response, agentic_response))
     violations.extend(check_downgrade_only_behavior(deterministic_response, agentic_response))
     violations.extend(check_data_gate_warning_propagation(deterministic_response, agentic_response))
+    violations.extend(check_technical_agent_effect_rank(agentic_response))
     return violations
+
+
+def check_technical_agent_effect_rank(agentic_response: AnalyzeResponse) -> list[InvariantViolation]:
+    effect = agentic_response.technical_agent_effect
+    if effect is None:
+        return []
+    if DECISION_RANK[effect.final_decision] <= DECISION_RANK[effect.baseline_decision]:
+        return []
+    return [
+        InvariantViolation(
+            code="technical_agent_effect_rank_upgrade",
+            message=(
+                f"technical_agent_effect.final_decision '{effect.final_decision}' ranks above "
+                f"baseline_decision '{effect.baseline_decision}'."
+            ),
+            details={
+                "baseline_decision": effect.baseline_decision,
+                "final_decision": effect.final_decision,
+            },
+        )
+    ]
 
 
 CRITIC_OFF_ALLOWED_SKIPS = {CRITIC_NAME: {"critic_mode_off"}}

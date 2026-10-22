@@ -71,6 +71,7 @@ test: check-compose
 		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
@@ -178,6 +179,7 @@ eval-fundamental-agent: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_fundamental_agent --json
@@ -186,6 +188,7 @@ eval-fundamental-agent-live: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_fundamental_agent --live --confirm-cost "$(CONFIRM_COST)" --json
@@ -202,6 +205,7 @@ eval-critic: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --json
@@ -211,6 +215,7 @@ eval-critic-live: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --live --confirm-cost "$(CONFIRM_COST)" --json

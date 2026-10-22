@@ -170,6 +170,48 @@ class TechnicalAssessmentResult(BaseModel):
     prompt_version: str
 
 
+class TechnicalAgentVersionStamp(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    context_schema_version: str
+    assessment_schema_version: str
+    prompt_version: str
+    model_name: str
+    policy_version: str
+
+
+class TechnicalAgentEffect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["off", "shadow", "enforced"]
+    accepted: bool
+    assessment_status: Literal["completed", "insufficient_data", "failed"]
+    overall_signal: Literal[
+        "strong_negative",
+        "negative",
+        "neutral",
+        "positive",
+        "strong_positive",
+    ]
+    trend_state: Literal["uptrend", "downtrend", "range", "transition", "unknown"]
+    momentum_state: Literal["strengthening", "stable", "weakening", "overextended", "unknown"]
+    reason_codes: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    raw_adjustment: int
+    applied_adjustment: int
+    baseline_technical_score: int = Field(ge=0)
+    adjusted_technical_score: int = Field(ge=0)
+    baseline_total_score: int = Field(ge=0)
+    adjusted_total_score: int = Field(ge=0)
+    baseline_decision: Literal["trade", "watchlist", "no_trade"]
+    counterfactual_decision: Literal["trade", "watchlist", "no_trade"]
+    final_decision: Literal["trade", "watchlist", "no_trade"]
+    decision_changed: bool
+    baseline_confidence: float = Field(ge=0, le=1)
+    final_confidence: float = Field(ge=0, le=1)
+    versions: TechnicalAgentVersionStamp
+
+
 def _assert_unique_technical_finding_ids(*groups: list[TechnicalFinding]) -> None:
     finding_ids = [finding.finding_id for group in groups for finding in group]
     if len(finding_ids) != len(set(finding_ids)):

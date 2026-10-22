@@ -4,6 +4,28 @@ The Critic is the last agentic step. It may downgrade confidence, downgrade the
 final decision, or request one bounded rewrite of the memo, but it may never
 invent risk numbers or upgrade the deterministic baseline.
 
+## Composition order
+
+The agentic pipeline applies guardrails in a fixed sequence, each one working
+from the decision the previous stage produced:
+
+`deterministic -> fundamental -> technical -> critic`
+
+- The deterministic checklist score and decision are the starting baseline.
+- The fundamental policy (`app/services/fundamental_policy.py`) may raise or
+  lower the decision; see `docs/technical-analyst.md` and
+  `app/services/fundamental_policy.py` for its authority limits.
+- The technical policy (`app/services/technical_policy.py`) is strictly
+  downgrade-only: its proposed adjustments are always `<= 0`, and its
+  counterfactual decision can never rank above whatever decision the
+  fundamental stage left behind, even in `enforced` mode. When it does
+  downgrade a trade, it clears the trade-only fields the same way the
+  analyzer does for non-trade decisions and recomputes confidence with the
+  analyzer's formula, taking `min(current, recomputed)` — it never recomputes
+  risk.
+- The Critic runs last and sees whatever response the fundamental and
+  technical stages produced.
+
 ## What the Critic checks
 
 The deterministic layer in `app/services/critic_rules.py` emits six objection

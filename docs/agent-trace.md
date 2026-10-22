@@ -32,6 +32,9 @@ For `failed` and `skipped`, `TraceStep.output.reason` is always present.
 - `adk_event_count` — number of observed ADK events
 - `observed_agents` — ADK event authors in first-seen order
 - `fundamental_agent_effect` — persisted summary of the fundamental analyst guardrail outcome
+- `technical_agent_effect` — persisted summary of the technical analyst guardrail outcome; always
+  downgrade-only relative to the post-fundamental decision it was computed against (see
+  [`docs/critic-guardrail.md`](critic-guardrail.md) for the full composition order)
 - `critic_effect` — persisted summary of the critic guardrail outcome, including objections, decisions, and revisions
 
 ## Output truncation
