@@ -25,6 +25,7 @@ from app.trust.memo_checks import TechnicalIndicatorSnapshot, check_memo_consist
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
     check_critic_shadow_persistence,
+    check_technical_numeric_claims_grounded,
     evaluate_agentic_invariants,
 )
 from app.services.token_pricing import estimate_usage_cost_usd
@@ -161,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     if critic_mode == "shadow":
                         violations.extend(check_critic_shadow_persistence(agentic_response, persisted_trace))
+                    if technical_mode != "off" and workflow.last_technical_assessment is not None:
+                        violations.extend(
+                            check_technical_numeric_claims_grounded(
+                                workflow.last_technical_assessment.response,
+                                workflow.last_technical_request,
+                            )
+                        )
                     memo_text = _memo_text(persisted_trace)
                     run_report["agentic"] = _response_summary(agentic_response)
                     run_report["trace"] = _trace_summary(persisted_trace)

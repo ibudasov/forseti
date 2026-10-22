@@ -2,49 +2,69 @@
   "as_of_date": "2026-10-11",
   "selection_basis": {
     "universe_source": "app/ingestion/universe.py",
-    "selection_note": "Frozen from the active target-sector universe after `make migrate` plus `seed_universe()`. This sandbox had zero structured market/fundamental/RAG rows when the matrix was prepared, so the category labels below are the intended review coverage to exercise once a populated database and Vertex credentials are available."
+    "selection_note": "Frozen from the active target-sector universe after `make migrate` plus `seed_universe()`. This sandbox had zero structured market/fundamental/RAG rows when the matrix was prepared, so the category labels below are the intended review coverage to exercise once a populated database and Vertex credentials are available.",
+    "technical_archetype_coverage": {
+      "note": "TA-7 asks for the matrix to cover six technical archetypes: clean uptrend, overextended, below SMA200, recent death cross, pre-earnings, and thin/stale data. The seven existing tickers already target four of these through their `expected_case`/sector labels (see each ticker's `technical_archetype` below); this sandbox has no GCP ADC and no ingested market data, so the per-ticker technical state (RSI, SMA relationships, cross events) cannot be verified or newly assigned beyond documenting the intended mapping. The remaining archetypes are flagged as pending below.",
+      "covered_by_existing_tickers": {
+        "clean_uptrend": "NVDA, RKLB (expected_case clear_trade)",
+        "overextended": "OKLO, SERV (expected_case hard_veto; high-beta names intended to probe RSI veto handling)",
+        "below_sma200": "FSLR (expected_case clear_no_trade)",
+        "thin_or_stale_data": "IONQ (expected_case incomplete_data)"
+      },
+      "pending_live_ingestion": {
+        "recent_death_cross": "No ticker in this frozen matrix is currently labelled for a 50/200-day moving-average death cross. Requires `make ingest` with enough trailing daily bars to observe an actual SMA50/SMA200 crossunder, then a ticker addition or re-labelling here.",
+        "pre_earnings": "No ticker in this frozen matrix is currently labelled for an imminent-earnings window. Requires `make ingest` to populate earnings-calendar data so an `as_of_date` can be chosen inside the pre-earnings blackout for a chosen ticker."
+      }
+    }
   },
   "tickers": [
     {
       "ticker": "NVDA",
       "sector": "ai",
       "expected_case": "clear_trade",
+      "technical_archetype": "clean_uptrend",
       "notes": "Large-cap AI leader; intended strong trade candidate once local data is populated."
     },
     {
       "ticker": "LMT",
       "sector": "defence",
       "expected_case": "watchlist",
+      "technical_archetype": "mixed_or_neutral",
       "notes": "Defence benchmark selected as the ambiguous/watchlist anchor."
     },
     {
       "ticker": "OKLO",
       "sector": "nuclear",
       "expected_case": "hard_veto",
+      "technical_archetype": "overextended",
       "notes": "High-beta nuclear name chosen to probe RSI/earnings veto handling."
     },
     {
       "ticker": "FSLR",
       "sector": "green_energy",
       "expected_case": "clear_no_trade",
+      "technical_archetype": "below_sma200",
       "notes": "Green-energy representative reserved for a deterministic no-trade outcome."
     },
     {
       "ticker": "IONQ",
       "sector": "quantum",
       "expected_case": "incomplete_data",
+      "technical_archetype": "thin_or_stale_data",
       "notes": "Quantum name selected to probe incomplete structured-data / evidence handling."
     },
     {
       "ticker": "SERV",
       "sector": "robotics",
       "expected_case": "hard_veto",
+      "technical_archetype": "overextended",
       "notes": "Momentum-heavy robotics name chosen as a second hard-veto candidate."
     },
     {
       "ticker": "RKLB",
       "sector": "space",
       "expected_case": "clear_trade",
+      "technical_archetype": "clean_uptrend",
       "notes": "Space representative intended to provide a second positive trace for manual review."
     }
   ]

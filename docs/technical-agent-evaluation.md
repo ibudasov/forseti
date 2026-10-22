@@ -135,27 +135,31 @@ SAMPLE=20 OUT=...` exports one row per shadow run (`run_id`, `ticker`,
 `momentum_state`, `reason_codes`) and never includes raw model output or
 prompts.
 
-## Promotion criteria: `shadow` -> `enforced` (draft, finalized in TA-7)
+## Promotion criteria: `shadow` -> `enforced` (final, TA-7)
 
-Do not flip `TECHNICAL_AGENT_MODE` to `enforced` until all of these hold:
+Do not flip `TECHNICAL_AGENT_MODE` to `enforced` until all of these hold.
+The `Status` column reflects what this sandbox can verify right now: items
+that only require the frozen offline suite are marked `met`/`not met`
+honestly; every item that needs live shadow-run collection (no GCP ADC and
+no ingested market data are available here, see `docs/trust-report.md`) is
+marked `pending`. See `docs/trust/technical-shadow.md` for the full
+evidence table once live data lands.
 
-1. all frozen golden cases pass in CI and locally
-2. at least 100 shadow runs have been collected across multiple
-   tickers/sectors
-3. zero observed cases of shadow mode proposing a positive adjustment or
-   mutating risk-math fields outside of a recorded decision downgrade
-4. zero cases where an invalid/rejected assessment silently changed the
-   deterministic or post-fundamental baseline
-5. manual review of a representative shadow sample shows the adjustment is
-   well-supported (cites a real, uncontested risk) in at least 95% of
-   negative-adjustment runs
-6. the shadow report stays stable for 14 consecutive days with no
-   unexplained reason-code or adjustment-distribution spikes
-7. a human reviewer signs off on the shadow report, golden output, and
-   scorecard
+| # | Criterion | Status | Evidence |
+| --- | --- | --- | --- |
+| 1 | All TA-6 offline golden cases pass in CI | **met** | `make eval-technical-agent` passes: all fixtures in `tests/fixtures/technical/` (`assessment`/`policy`/`workflow` cases) pass, 0 failures. |
+| 2 | >= 100 shadow runs across >= 5 sectors | pending | Requires `make technical-shadow-batch CONFIRM_COST=yes REPEAT=<N>` against an environment with GCP ADC + ingested market data. |
+| 3 | 0 invariant violations: no upgrades, no changed risk numbers, no ungrounded numeric claims | pending | The 4 invariants (`check_technical_agent_effect_rank`, `check_technical_risk_fields_untouched_in_shadow`, `check_technical_numeric_claims_grounded`, `check_technical_step_zero_tokens_in_typed_mode`) are implemented and unit-tested offline in `tests/test_trust_invariants.py`; they still need to run clean against real shadow data via `scripts/trust_e2e.py`. |
+| 4 | Assessment rejection rate <= 10%, no single reason code above 5% | pending | Needs `make technical-shadow-report` against a real persisted shadow sample. |
+| 5 | Counterfactual downgrade rate between 5% and 40% | pending | Needs the same real shadow sample as above. |
+| 6 | Manual review: >= 80% of sampled downgrades judged justified | pending | Needs `make technical-shadow-report SAMPLE=20 OUT=reports/trust/technical-shadow-sample.csv` plus owner labelling. |
+| 7 | Usefulness: mean forward 20-day return of downgraded runs is below that of neutral runs (reported with sample size, no significance claim) | pending | `scripts/technical_backtest.py` is implemented and unit-tested offline against synthetic bars (`tests/test_technical_backtest.py`); it needs real persisted shadow runs plus stored price bars to produce the real table via `make technical-backtest`. |
+| 8 | p95 added latency <= 8s, mean added cost per run reported | pending | Needs a real shadow sample; `scripts/trust_e2e.py` already prints per-run latency/token usage. |
+| 9 | Human sign-off | pending | Blocked on all of the above. |
 
-This list is a draft baseline; TA-7 is expected to finalize exact thresholds
-once enough shadow data has accumulated.
+See `docs/trust/technical-shadow.md` for the exact commands required to move
+each `pending` row to `met`/`not met` once an environment with working GCP
+ADC and ingested market data is available.
 
 ## Live mode today
 

@@ -43,7 +43,7 @@ from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
 from app.schemas.fundamentals import FundamentalAssessmentResult
-from app.schemas.technicals import TechnicalAgentEffect, TechnicalAssessmentResult
+from app.schemas.technicals import TechnicalAgentEffect, TechnicalAnalysisRequest, TechnicalAssessmentResult
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
@@ -404,9 +404,19 @@ class AgenticAnalysisWorkflow:
         self.runner_factory = runner_factory or self._default_runner_factory
         self.llm_io_recorder = llm_io_recorder
         self.embedding_client = embedding_client
+        # Trust-tooling hook (TA-7): exposes the raw in-process TA-3
+        # assessment response/request from the most recent `analyze()` call
+        # so offline trust scripts (`scripts/trust_e2e.py`) can re-run the
+        # numeric-claim grounding check without widening the public
+        # `AnalyzeResponse` contract. `None` whenever TECHNICAL_AGENT_MODE
+        # is `off` or the assessment step was never reached.
+        self.last_technical_assessment: Optional[TechnicalAssessmentResult] = None
+        self.last_technical_request: Optional[TechnicalAnalysisRequest] = None
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         run_id = str(uuid4())
+        self.last_technical_assessment = None
+        self.last_technical_request = None
         recorder = self.llm_io_recorder or build_llm_io_recorder(run_id, config=self.config)
         trace_recorder = TraceRecorder()
         warnings: list[str] = []
@@ -1387,6 +1397,8 @@ class AgenticAnalysisWorkflow:
         )
         _apply_technical_effect_to_response(effect, response)
         response.technical_agent_effect = effect
+        self.last_technical_assessment = assessment_result
+        self.last_technical_request = context
         return assessment_result
 
     def _build_trace(
