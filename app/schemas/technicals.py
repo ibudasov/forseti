@@ -86,6 +86,96 @@ class TechnicalAnalysisRequest(BaseModel):
         return self
 
 
+class TechnicalFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    finding_id: str
+    category: Literal[
+        "trend",
+        "momentum",
+        "overextension",
+        "support_resistance",
+        "volume_confirmation",
+        "volatility",
+        "event_risk",
+        "data_quality",
+        "other",
+    ]
+    direction: Literal["positive", "negative", "mixed"]
+    materiality: Literal["low", "medium", "high"]
+    claim: str
+    metric_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> "TechnicalFinding":
+        if not self.claim.strip():
+            raise ValueError("Finding claim must not be empty.")
+        if self.materiality in {"medium", "high"} and not self.metric_ids:
+            raise ValueError("Medium/high-materiality findings must cite at least one metric_id.")
+        return self
+
+
+class TechnicalAssessmentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["1.0"] = SCHEMA_VERSION
+    run_id: str
+    context_hash: str
+    agent_name: Literal["technical_analyst"] = "technical_analyst"
+    status: Literal["completed", "insufficient_data", "failed"]
+    overall_signal: Literal[
+        "strong_negative",
+        "negative",
+        "neutral",
+        "positive",
+        "strong_positive",
+    ]
+    trend_state: Literal["uptrend", "downtrend", "range", "transition", "unknown"]
+    momentum_state: Literal["strengthening", "stable", "weakening", "overextended", "unknown"]
+    proposed_score_adjustment: int
+    findings: list[TechnicalFinding] = Field(default_factory=list)
+    contradictions: list[TechnicalFinding] = Field(default_factory=list)
+    risk_flags: list[TechnicalFinding] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    summary: str
+
+    @model_validator(mode="after")
+    def _validate_response(self) -> "TechnicalAssessmentResponse":
+        if self.proposed_score_adjustment > 0:
+            raise ValueError("Technical adjustments are downgrade-only.")
+        if self.status in {"insufficient_data", "failed"} and self.proposed_score_adjustment != 0:
+            raise ValueError("Insufficient-data and failed responses must propose adjustment 0.")
+        if not self.summary.strip():
+            raise ValueError("Assessment summary must not be empty.")
+        _assert_unique_technical_finding_ids(self.findings, self.contradictions, self.risk_flags)
+        return self
+
+
+class TechnicalAssessmentValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    accepted: bool
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class TechnicalAssessmentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    response: TechnicalAssessmentResponse
+    validation: TechnicalAssessmentValidation
+    raw_output: str = ""
+    latency_ms: float = Field(ge=0, default=0.0)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    model_name: str
+    prompt_version: str
+
+
+def _assert_unique_technical_finding_ids(*groups: list[TechnicalFinding]) -> None:
+    finding_ids = [finding.finding_id for group in groups for finding in group]
+    if len(finding_ids) != len(set(finding_ids)):
+        raise ValueError("Finding IDs must be unique across the full assessment response.")
+
+
 def _assert_unique_metric_ids(facts: list[TechnicalFact]) -> None:
     metric_ids = [fact.metric_id for fact in facts]
     if len(metric_ids) != len(set(metric_ids)):
