@@ -247,16 +247,21 @@ def count_document_chunks(ticker: str, engine=None) -> int:
         return session.exec(statement).one()
 
 
-def get_latest_technical_feature(ticker: str, engine=None) -> Optional[TechnicalFeature]:
+def get_latest_technical_feature(
+    ticker: str,
+    engine=None,
+    as_of_date: Optional[date] = None,
+) -> Optional[TechnicalFeature]:
     engine = engine or get_engine()
     ticker = _normalize_ticker(ticker)
     stmt = (
         select(TechnicalFeature)
         .join(Security)
         .where(Security.ticker == ticker)
-        .order_by(TechnicalFeature.as_of_date.desc())
-        .limit(1)
     )
+    if as_of_date is not None:
+        stmt = stmt.where(TechnicalFeature.as_of_date <= as_of_date)
+    stmt = stmt.order_by(TechnicalFeature.as_of_date.desc()).limit(1)
     with get_session(engine) as session:
         return session.exec(stmt).first()
 
@@ -365,9 +370,12 @@ def get_next_earnings_event(ticker: str, on_or_after: date, engine=None) -> Opti
         return session.exec(stmt).first()
 
 
-def get_latest_macro_daily(engine=None) -> Optional[MacroDaily]:
+def get_latest_macro_daily(engine=None, as_of_date: Optional[date] = None) -> Optional[MacroDaily]:
     engine = engine or get_engine()
-    stmt = select(MacroDaily).order_by(MacroDaily.obs_date.desc()).limit(1)
+    stmt = select(MacroDaily)
+    if as_of_date is not None:
+        stmt = stmt.where(MacroDaily.obs_date <= as_of_date)
+    stmt = stmt.order_by(MacroDaily.obs_date.desc()).limit(1)
     with get_session(engine) as session:
         return session.exec(stmt).first()
 

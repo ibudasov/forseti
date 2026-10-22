@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import date
-from typing import Any, Literal, Mapping, Sequence
+from typing import Literal, Sequence
 
 from app.schemas.analyze import AnalyzeResponse, DecisionDiagnosis
 from app.schemas.critique import AnalystView, CritiqueRequest, DraftRecommendation
 from app.schemas.fundamentals import EvidenceChunkInput, FundamentalAssessmentResult
+from app.services.context_hash import compute_context_hash
 from app.services.fundamental_context import build_fundamental_analysis_request
 
 CONTEXT_VERSION = "1.0"
@@ -88,16 +87,6 @@ def build_critique_request(
     )
     payload = request.model_dump(exclude={"context_hash", "run_id", "snapshot_at"})
     return request.model_copy(update={"context_hash": compute_context_hash(payload)})
-
-
-def compute_context_hash(payload: Mapping[str, Any]) -> str:
-    canonical = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _build_fundamental_view(
