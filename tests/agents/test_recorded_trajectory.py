@@ -3,18 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agents.orchestration.registry import DECISION_SYNTHESIZER_NAME, SPECIALIST_ORDER
+from agents.orchestration.registry import DECISION_SYNTHESIZER_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
 from app.schemas.analyze import AnalysisTrace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "clear_trade_trajectory.json"
+TYPED_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_technical_view_trajectory.json"
 ALLOWED_TOOL_CALLS = {
     DECISION_SYNTHESIZER_NAME: {"calculate_risk"},
 }
 
 
-def _load_trace() -> tuple[str, AnalysisTrace]:
-    payload = json.loads(TRACE_FIXTURE.read_text(encoding="utf-8"))
+def _load_trace(fixture_path: Path = TRACE_FIXTURE) -> tuple[str, AnalysisTrace]:
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     source = str(payload["source"]).strip()
     trace = AnalysisTrace.model_validate(
         {
@@ -46,3 +47,25 @@ def test_recorded_trace_matches_specialist_order_and_tool_policy():
     for step in trace.steps:
         allowed_tool_calls = ALLOWED_TOOL_CALLS.get(step.agent_name, set())
         assert set(step.tool_calls).issubset(allowed_tool_calls)
+
+
+def test_typed_mode_trace_fixture_matches_specialist_order_and_tool_policy():
+    _, trace = _load_trace(TYPED_TRACE_FIXTURE)
+
+    assert [step.agent_name for step in trace.steps] == list(SPECIALIST_ORDER)
+    assert all(step.status == "completed" for step in trace.steps)
+
+    for step in trace.steps:
+        allowed_tool_calls = ALLOWED_TOOL_CALLS.get(step.agent_name, set())
+        assert set(step.tool_calls).issubset(allowed_tool_calls)
+
+
+def test_typed_mode_trace_records_zero_tokens_and_typed_assessment_output_for_technical_step():
+    _, trace = _load_trace(TYPED_TRACE_FIXTURE)
+
+    technical_step = next(step for step in trace.steps if step.agent_name == TECHNICAL_ANALYST_NAME)
+
+    assert technical_step.token_usage == {}
+    assert technical_step.output is not None
+    assert technical_step.output["source"] == "typed_assessment"
+    assert technical_step.output["status"] == "completed"
