@@ -7,6 +7,7 @@ from typing import Iterable, Literal, Sequence
 
 from app.schemas.analyze import AnalyzeResponse
 from app.schemas.fundamentals import FundamentalAnalysisRequest, FundamentalAssessmentResponse
+from app.schemas.technicals import TechnicalAnalysisRequest, TechnicalAssessmentResponse
 
 ABSOLUTE_TOLERANCE = 0.01
 _NUMBER = r"[-+]?\d+(?:,\d{3})*(?:\.\d+)?"
@@ -146,8 +147,51 @@ def resolve_fundamental_citations(
     known_metric_ids.update(metric.metric_id for metric in request.deterministic_result.metrics)
     known_chunk_ids = {str(chunk.chunk_id) for chunk in request.evidence_chunks}
 
+    return CitationResolutionResult(
+        run_id=response.run_id,
+        context_hash=response.context_hash,
+        issues=tuple(
+            _citation_resolution_issues(
+                _all_findings(response),
+                known_metric_ids=known_metric_ids,
+                known_chunk_ids=known_chunk_ids,
+            )
+        ),
+    )
+
+
+def resolve_technical_citations(
+    response: TechnicalAssessmentResponse,
+    request: TechnicalAnalysisRequest,
+) -> CitationResolutionResult:
+    """Grounding check mirroring `resolve_fundamental_citations` for the
+    Technical Analyst: every cited `metric_id` must resolve to a known
+    deterministic fact or metric. Technical findings never carry `chunk_ids`.
+    """
+    known_metric_ids = {fact.metric_id for fact in request.facts}
+    known_metric_ids.update(metric.metric_id for metric in request.deterministic_result.metrics)
+
+    return CitationResolutionResult(
+        run_id=response.run_id,
+        context_hash=response.context_hash,
+        issues=tuple(
+            _citation_resolution_issues(
+                _all_technical_findings(response),
+                known_metric_ids=known_metric_ids,
+                known_chunk_ids=set(),
+            )
+        ),
+    )
+
+
+def _citation_resolution_issues(
+    findings: Iterable,
+    *,
+    known_metric_ids: set[str],
+    known_chunk_ids: set[str],
+) -> list[CitationResolutionIssue]:
     issues: list[CitationResolutionIssue] = []
-    for finding in _all_findings(response):
+    for finding in findings:
         missing_metric_ids = tuple(sorted(set(finding.metric_ids) - known_metric_ids))
         if missing_metric_ids:
             issues.append(
@@ -157,7 +201,8 @@ def resolve_fundamental_citations(
                     missing_ids=missing_metric_ids,
                 )
             )
-        missing_chunk_ids = tuple(sorted({str(chunk_id) for chunk_id in finding.chunk_ids} - known_chunk_ids))
+        chunk_ids = getattr(finding, "chunk_ids", [])
+        missing_chunk_ids = tuple(sorted({str(chunk_id) for chunk_id in chunk_ids} - known_chunk_ids))
         if missing_chunk_ids:
             issues.append(
                 CitationResolutionIssue(
@@ -166,15 +211,15 @@ def resolve_fundamental_citations(
                     missing_ids=missing_chunk_ids,
                 )
             )
-    return CitationResolutionResult(
-        run_id=response.run_id,
-        context_hash=response.context_hash,
-        issues=tuple(issues),
-    )
+    return issues
 
 
 def _all_findings(response: FundamentalAssessmentResponse):
     return [*response.findings, *response.contradictions, *response.material_red_flags]
+
+
+def _all_technical_findings(response: TechnicalAssessmentResponse):
+    return [*response.findings, *response.contradictions, *response.risk_flags]
 
 
 def _single_number_check(

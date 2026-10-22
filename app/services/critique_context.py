@@ -4,12 +4,12 @@ from datetime import date
 from typing import Literal, Sequence
 
 from app.schemas.analyze import AnalyzeResponse, DecisionDiagnosis
-from app.schemas.critique import AnalystView, CritiqueRequest, DraftRecommendation
+from app.schemas.critique import AnalystFinding, AnalystView, CritiqueRequest, DraftRecommendation
 from app.schemas.fundamentals import EvidenceChunkInput, FundamentalAssessmentResult
+from app.schemas.technicals import TechnicalAssessmentResult
 from app.services.context_hash import compute_context_hash
 from app.services.fundamental_context import build_fundamental_analysis_request
 
-CONTEXT_VERSION = "1.0"
 MAX_EVIDENCE_CHUNKS = 24
 MAX_EVIDENCE_CHARACTERS = 60_000
 DEFAULT_ALLOWED_ACTIONS = (
@@ -45,7 +45,7 @@ def build_draft_from_response(
 def build_analyst_views(
     *,
     fundamental: FundamentalAssessmentResult | None = None,
-    technical: object | None = None,
+    technical: TechnicalAssessmentResult | None = None,
 ) -> list[AnalystView]:
     views = [
         _build_fundamental_view(fundamental),
@@ -72,7 +72,6 @@ def build_critique_request(
         engine=engine,
     )
     request = CritiqueRequest(
-        schema_version=CONTEXT_VERSION,
         run_id=run_id,
         context_hash="pending",
         ticker=context.ticker,
@@ -100,25 +99,48 @@ def _build_fundamental_view(
         status=response.status,
         overall_signal=response.overall_signal,
         findings=[
-            *response.findings,
-            *response.contradictions,
-            *response.material_red_flags,
+            *_cited_findings(response.findings, origin="finding"),
+            *_cited_findings(response.contradictions, origin="contradiction"),
+            *_cited_findings(response.material_red_flags, origin="risk_flag"),
         ],
         summary=response.summary,
     )
 
 
-def _build_technical_view(technical: object | None) -> AnalystView:
+def _cited_findings(
+    findings: Sequence,
+    *,
+    origin: Literal["finding", "contradiction", "risk_flag"],
+) -> list[AnalystFinding]:
+    return [
+        AnalystFinding.from_cited_finding(finding, source_agent="fundamental_analyst", origin=origin)
+        for finding in findings
+    ]
+
+
+def _build_technical_view(technical: TechnicalAssessmentResult | None) -> AnalystView:
     if technical is None:
         return _absent_view("technical_analyst")
-    payload = getattr(technical, "response", technical)
+    response = technical.response
     return AnalystView(
         agent_name="technical_analyst",
-        status=getattr(payload, "status"),
-        overall_signal=getattr(payload, "overall_signal"),
-        findings=list(getattr(payload, "findings", [])),
-        summary=getattr(payload, "summary", ""),
+        status=response.status,
+        overall_signal=response.overall_signal,
+        findings=[
+            *_technical_findings(response.findings, origin="finding"),
+            *_technical_findings(response.contradictions, origin="contradiction"),
+            *_technical_findings(response.risk_flags, origin="risk_flag"),
+        ],
+        summary=response.summary,
     )
+
+
+def _technical_findings(
+    findings: Sequence,
+    *,
+    origin: Literal["finding", "contradiction", "risk_flag"],
+) -> list[AnalystFinding]:
+    return [AnalystFinding.from_technical_finding(finding, origin=origin) for finding in findings]
 
 
 def _absent_view(agent_name: Literal["fundamental_analyst", "technical_analyst"]) -> AnalystView:

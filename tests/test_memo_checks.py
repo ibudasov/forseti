@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from app.domain.fundamentals import DeterministicFundamentalAnalysis, FundamentalMetricRef, FundamentalRuleResult
+from app.domain.technicals import DeterministicTechnicalAnalysis, TechnicalMetricRef, TechnicalRuleResult
 from app.schemas.analyze import AnalyzeResponse, DecisionDiagnosis
 from app.schemas.critique import AnalystView, CritiqueRequest, DraftRecommendation
 from app.schemas.fundamentals import (
@@ -17,6 +18,13 @@ from app.schemas.fundamentals import (
     MetricSeries,
     MetricSeriesPoint,
 )
+from app.schemas.technicals import (
+    TechnicalAnalysisRequest,
+    TechnicalAssessmentResponse,
+    TechnicalContextCoverage,
+    TechnicalFact,
+    TechnicalFinding,
+)
 from app.services.critic_rules import evaluate_deterministic_objections
 from app.services.critique_context import build_analyst_views
 from app.services.fundamental_analyst import FundamentalAnalyst, ModelOutput
@@ -25,6 +33,7 @@ from app.trust.memo_checks import (
     TechnicalIndicatorSnapshot,
     check_memo_consistency,
     resolve_fundamental_citations,
+    resolve_technical_citations,
 )
 
 
@@ -123,6 +132,111 @@ def test_citation_resolution_reports_zero_unknown_ids_for_supported_response() -
     assert result.context_hash == request.context_hash
     assert result.unknown_id_count == 0
     assert result.issues == ()
+
+
+def test_technical_citation_resolution_reports_zero_unknown_ids_for_supported_response() -> None:
+    request = _technical_request()
+    result = resolve_technical_citations(_technical_assessment_response(request), request)
+
+    assert result.run_id == request.run_id
+    assert result.context_hash == request.context_hash
+    assert result.unknown_id_count == 0
+    assert result.issues == ()
+
+
+def test_technical_citation_resolution_flags_unknown_metric_id() -> None:
+    request = _technical_request()
+    response = _technical_assessment_response(request, metric_ids=["unknown_metric:2026-09-08"])
+
+    result = resolve_technical_citations(response, request)
+
+    assert result.unknown_id_count == 1
+    assert result.issues[0].citation_type == "metric_id"
+    assert result.issues[0].missing_ids == ("unknown_metric:2026-09-08",)
+
+
+def _technical_request() -> TechnicalAnalysisRequest:
+    return TechnicalAnalysisRequest(
+        run_id="run-technical-1",
+        context_hash="ctx-technical-1",
+        ticker="NVDA",
+        sector="ai",
+        snapshot_at=datetime(2026, 9, 8, 23, 59, 59, tzinfo=timezone.utc),
+        as_of_date=date(2026, 9, 8),
+        deterministic_result=DeterministicTechnicalAnalysis(
+            ticker="NVDA",
+            as_of_date=date(2026, 9, 8),
+            score=1,
+            maximum_score=5,
+            rule_results=[
+                TechnicalRuleResult(
+                    rule_id="rsi_healthy",
+                    status="passed",
+                    points_awarded=1,
+                    points_available=1,
+                    metric_ids=["rsi_14:2026-09-08"],
+                    explanation="rsi_14 55.00 within healthy range",
+                )
+            ],
+            warnings=[],
+            metrics=[
+                TechnicalMetricRef(
+                    metric_id="rsi_14:2026-09-08",
+                    metric_name="rsi_14",
+                    value=Decimal("55.00"),
+                    unit="rsi_points",
+                    as_of_date=date(2026, 9, 8),
+                )
+            ],
+        ),
+        facts=[
+            TechnicalFact(
+                metric_id="dist_sma50_pct:2026-09-08",
+                name="dist_sma50_pct",
+                value=Decimal("0.0523"),
+                unit="pct",
+                derivation="(close - sma_50) / sma_50",
+            )
+        ],
+        series=[],
+        coverage=TechnicalContextCoverage(
+            bar_count=200,
+            required_facts_missing=[],
+            latest_bar_date=date(2026, 9, 8),
+            bars_stale=False,
+            series_truncated=False,
+        ),
+    )
+
+
+def _technical_assessment_response(
+    request: TechnicalAnalysisRequest,
+    *,
+    metric_ids: list[str] | None = None,
+) -> TechnicalAssessmentResponse:
+    return TechnicalAssessmentResponse(
+        run_id=request.run_id,
+        context_hash=request.context_hash,
+        status="completed",
+        overall_signal="positive",
+        trend_state="uptrend",
+        momentum_state="stable",
+        proposed_score_adjustment=0,
+        findings=[
+            TechnicalFinding(
+                finding_id="technical-finding-1",
+                category="trend",
+                direction="positive",
+                materiality="high",
+                claim="Price trades above both the 50-day and 200-day moving averages.",
+                metric_ids=metric_ids or ["dist_sma50_pct:2026-09-08"],
+            )
+        ],
+        contradictions=[],
+        risk_flags=[],
+        missing_information=[],
+        summary="Technical structure is constructive.",
+    )
 
 
 def test_empty_evidence_short_circuits_without_increasing_confidence() -> None:
@@ -377,7 +491,6 @@ def _critique_request(
     draft: DraftRecommendation,
 ) -> CritiqueRequest:
     return CritiqueRequest(
-        schema_version="1.0",
         run_id="run-1",
         context_hash="ctx-1",
         ticker="NVDA",

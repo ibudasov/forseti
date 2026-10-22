@@ -3,8 +3,15 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 
-from app.schemas.critique import AnalystView, CritiqueObjection, CritiqueRequest, CritiqueResponse, DraftRecommendation
-from app.schemas.fundamentals import CitedFinding, EvidenceChunkInput
+from app.schemas.critique import (
+    AnalystFinding,
+    AnalystView,
+    CritiqueObjection,
+    CritiqueRequest,
+    CritiqueResponse,
+    DraftRecommendation,
+)
+from app.schemas.fundamentals import EvidenceChunkInput
 from app.services.critic import (
     MAX_RAW_OUTPUT_CHARS,
     Critic,
@@ -317,7 +324,18 @@ def _request(
                     ),
                 ],
             ),
-            _view(agent_name="technical_analyst", finding_id="technical-finding-1", metric_ids=["rsi:2026-09-27"]),
+            _view(
+                agent_name="technical_analyst",
+                finding_id="technical-finding-1",
+                findings=[
+                    _finding(
+                        finding_id="technical-finding-1",
+                        metric_ids=["rsi:2026-09-27"],
+                        chunk_ids=[],
+                        source_agent="technical_analyst",
+                    )
+                ],
+            ),
         ],
         evidence_chunks=[
             _chunk(10, "Primary evidence"),
@@ -365,7 +383,7 @@ def _draft(*, decision: str) -> DraftRecommendation:
 def _view(
     *,
     agent_name: str,
-    findings: list[CitedFinding] | None = None,
+    findings: list[AnalystFinding] | None = None,
     finding_id: str = "finding-1",
     metric_ids: list[str] | None = None,
 ) -> AnalystView:
@@ -383,8 +401,9 @@ def _finding(
     finding_id: str = "finding-1",
     metric_ids: list[str] | None = None,
     chunk_ids: list[int] | None = None,
-) -> CitedFinding:
-    return CitedFinding(
+    source_agent: str = "fundamental_analyst",
+) -> AnalystFinding:
+    return AnalystFinding(
         finding_id=finding_id,
         category="growth_quality",
         direction="positive",
@@ -392,6 +411,7 @@ def _finding(
         claim="Claim",
         metric_ids=metric_ids or ["revenue_growth:2026-06-30"],
         chunk_ids=chunk_ids or [10],
+        source_agent=source_agent,
     )
 
 

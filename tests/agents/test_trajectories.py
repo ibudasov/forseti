@@ -254,7 +254,6 @@ def _critique_request(draft):
     from app.schemas.critique import CritiqueRequest
 
     return CritiqueRequest(
-        schema_version="1.0",
         run_id="run-1",
         context_hash="ctx-1",
         ticker="NVDA",

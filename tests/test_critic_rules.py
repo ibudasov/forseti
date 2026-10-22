@@ -5,8 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.critique import AnalystView, CritiqueRequest, DraftRecommendation
-from app.schemas.fundamentals import CitedFinding
+from app.schemas.critique import AnalystFinding, AnalystView, CritiqueRequest, DraftRecommendation
 from app.services.critic_rules import (
     FLOAT_ABSOLUTE_TOLERANCE,
     HARD_BLOCKER_WARNINGS,
@@ -246,7 +245,7 @@ def test_non_trade_or_complete_trade_draft_does_not_raise_missing_field_objectio
 
 
 def test_unsupported_claim_flags_uncited_material_finding() -> None:
-    uncited_finding = CitedFinding.model_construct(
+    uncited_finding = AnalystFinding.model_construct(
         finding_id="finding-uncited",
         category="growth_quality",
         direction="positive",
@@ -254,6 +253,8 @@ def test_unsupported_claim_flags_uncited_material_finding() -> None:
         claim="Revenue growth is exceptional.",
         metric_ids=[],
         chunk_ids=[],
+        source_agent="fundamental_analyst",
+        origin="finding",
     )
     request = _request(
         views=[
@@ -439,7 +440,7 @@ def _view(
     agent_name: str,
     status: str = "completed",
     overall_signal: str = "positive",
-    findings: list[CitedFinding] | None = None,
+    findings: list[AnalystFinding] | None = None,
 ) -> AnalystView:
     return AnalystView(
         agent_name=agent_name,
@@ -455,7 +456,7 @@ def _unsafe_view(
     agent_name: str,
     status: str = "completed",
     overall_signal: str = "positive",
-    findings: list[CitedFinding] | None = None,
+    findings: list[AnalystFinding] | None = None,
 ) -> AnalystView:
     return AnalystView.model_construct(
         agent_name=agent_name,
@@ -474,8 +475,15 @@ def _absent_technical_view() -> AnalystView:
     return AnalystView(agent_name="technical_analyst", status="absent", overall_signal="neutral")
 
 
-def _finding(*, materiality: str = "high", metric_ids=None, chunk_ids=None) -> CitedFinding:
-    return CitedFinding(
+def _finding(
+    *,
+    materiality: str = "high",
+    metric_ids=None,
+    chunk_ids=None,
+    source_agent: str = "fundamental_analyst",
+    origin: str = "finding",
+) -> AnalystFinding:
+    return AnalystFinding(
         finding_id="finding-1",
         category="growth_quality",
         direction="positive",
@@ -483,4 +491,6 @@ def _finding(*, materiality: str = "high", metric_ids=None, chunk_ids=None) -> C
         claim="Claim",
         metric_ids=metric_ids or [],
         chunk_ids=chunk_ids or [],
+        source_agent=source_agent,
+        origin=origin,
     )

@@ -37,6 +37,9 @@ EXPECTED_CASES = {
     "model_failure_degrades",
     "invalid_citation_ignored",
     "shadow_mode_no_change",
+    "technical_conflict_on_trade",
+    "technical_high_risk_flag",
+    "technical_absent_no_objection",
 }
 
 EXPECTED_LIVE_CASES = {
@@ -113,7 +116,7 @@ def test_new_fixture_records_its_source():
     assert case.source.startswith("docs/trust/e2e-review.md")
 
 
-def test_full_suite_passes_and_renders_all_twelve_cases():
+def test_full_suite_passes_and_renders_all_discovered_cases():
     suite = evaluate_suite(load_critic_cases())
     table = render_suite_markdown(suite)
 

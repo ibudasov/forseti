@@ -220,6 +220,7 @@ def _cited_finding_payload() -> dict:
         "claim": "Revenue growth accelerated.",
         "metric_ids": ["revenue_growth:2026-06-30"],
         "chunk_ids": [1],
+        "source_agent": "fundamental_analyst",
     }
 
 
@@ -272,7 +273,7 @@ def _decision_diagnosis_payload() -> dict:
 
 def _critique_request_payload() -> dict:
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "run_id": "run-123",
         "context_hash": "context-abc",
         "ticker": "NVDA",

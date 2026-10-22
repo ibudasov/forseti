@@ -1234,7 +1234,6 @@ def _low_model_objection() -> CritiqueObjection:
 
 def _critique_request(draft: DraftRecommendation) -> CritiqueRequest:
     return CritiqueRequest(
-        schema_version="1.0",
         run_id="run-1",
         context_hash="ctx-1",
         ticker="NVDA",

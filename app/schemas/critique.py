@@ -2,14 +2,29 @@ from __future__ import annotations
 
 from importlib import import_module
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.fundamentals import CitedFinding, EvidenceChunkInput, SCHEMA_VERSION
+from app.schemas.technicals import TechnicalFinding
 
 if TYPE_CHECKING:
     from app.schemas.analyze import DecisionDiagnosis
+
+# Critic request schema version bumped to 1.1 in TA-5: `AnalystView.findings`
+# moved from the fundamental-only `CitedFinding` to the generalised
+# `AnalystFinding`, which adds `source_agent`/`origin` and widens `category`
+# to the union of fundamental and technical categories. See
+# docs/critic-guardrail.md for the migration note.
+CRITIQUE_REQUEST_SCHEMA_VERSION: Literal["1.1"] = "1.1"
+
+# Single source of truth for the allowed finding categories: the union of
+# whatever the fundamental and technical analyst schemas declare, so the two
+# literal lists never drift out of sync with this module.
+_FUNDAMENTAL_FINDING_CATEGORIES = frozenset(get_args(CitedFinding.model_fields["category"].annotation))
+_TECHNICAL_FINDING_CATEGORIES = frozenset(get_args(TechnicalFinding.model_fields["category"].annotation))
+ALLOWED_FINDING_CATEGORIES = _FUNDAMENTAL_FINDING_CATEGORIES | _TECHNICAL_FINDING_CATEGORIES
 
 
 class DraftRecommendation(BaseModel):
@@ -48,6 +63,82 @@ class DraftRecommendation(BaseModel):
         return self
 
 
+class AnalystFinding(BaseModel):
+    """A finding cited by either analyst, normalised for the Critic.
+
+    Generalises `CitedFinding` (fundamental-only) and `TechnicalFinding`
+    (technical-only, no `chunk_ids`) behind a single shape so the Critic's
+    citation and contradiction checks never need to special-case the
+    originating analyst.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    finding_id: str
+    category: str
+    direction: Literal["positive", "negative", "mixed"]
+    materiality: Literal["low", "medium", "high"]
+    claim: str
+    metric_ids: list[str] = Field(default_factory=list)
+    chunk_ids: list[int] = Field(default_factory=list)
+    source_agent: Literal["fundamental_analyst", "technical_analyst"]
+    # Which response bucket the finding came from (`findings`, `contradictions`,
+    # or the analyst's risk/red-flag bucket). Needed so deterministic Critic
+    # rules such as `technical_risk_flag_on_trade` can target risk flags
+    # specifically after fundamental and technical findings are merged into
+    # one list.
+    origin: Literal["finding", "contradiction", "risk_flag"] = "finding"
+
+    @model_validator(mode="after")
+    def _validate_finding(self) -> "AnalystFinding":
+        if not self.claim.strip():
+            raise ValueError("Finding claim must not be empty.")
+        if self.category not in ALLOWED_FINDING_CATEGORIES:
+            raise ValueError(f"Unknown finding category '{self.category}'.")
+        if self.materiality in {"medium", "high"} and not (self.metric_ids or self.chunk_ids):
+            raise ValueError("Medium/high-materiality findings must include at least one citation.")
+        return self
+
+    @classmethod
+    def from_cited_finding(
+        cls,
+        finding: CitedFinding,
+        *,
+        source_agent: Literal["fundamental_analyst", "technical_analyst"] = "fundamental_analyst",
+        origin: Literal["finding", "contradiction", "risk_flag"] = "finding",
+    ) -> "AnalystFinding":
+        return cls(
+            finding_id=finding.finding_id,
+            category=finding.category,
+            direction=finding.direction,
+            materiality=finding.materiality,
+            claim=finding.claim,
+            metric_ids=list(finding.metric_ids),
+            chunk_ids=list(finding.chunk_ids),
+            source_agent=source_agent,
+            origin=origin,
+        )
+
+    @classmethod
+    def from_technical_finding(
+        cls,
+        finding: TechnicalFinding,
+        *,
+        origin: Literal["finding", "contradiction", "risk_flag"] = "finding",
+    ) -> "AnalystFinding":
+        return cls(
+            finding_id=finding.finding_id,
+            category=finding.category,
+            direction=finding.direction,
+            materiality=finding.materiality,
+            claim=finding.claim,
+            metric_ids=list(finding.metric_ids),
+            chunk_ids=[],
+            source_agent="technical_analyst",
+            origin=origin,
+        )
+
+
 class AnalystView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -60,7 +151,7 @@ class AnalystView(BaseModel):
         "positive",
         "strong_positive",
     ]
-    findings: list[CitedFinding] = Field(default_factory=list)
+    findings: list[AnalystFinding] = Field(default_factory=list)
     summary: str = ""
 
     @model_validator(mode="after")
@@ -79,7 +170,7 @@ class AnalystView(BaseModel):
 class CritiqueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["1.0"] = SCHEMA_VERSION
+    schema_version: Literal["1.1"] = CRITIQUE_REQUEST_SCHEMA_VERSION
     run_id: str
     context_hash: str
     ticker: str

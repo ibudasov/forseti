@@ -4,7 +4,7 @@
   "source": "docs/trust/e2e-review.md (trust-e2e-20261011T183114Z.json; sandbox linear baselines returned no_price_data across the matrix)",
   "notes": "The deterministic no_price_data warning caps an otherwise trade-shaped draft at watchlist.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",
