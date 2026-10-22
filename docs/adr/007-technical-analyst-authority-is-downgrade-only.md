@@ -114,3 +114,24 @@ codebase (Critic, and now Technical Analyst) is downgrade-only by design.
 Rejected because the Fundamental Analyst precedent shows a pure, versioned
 contract is what keeps the specialist testable without a database and gives
 the model stable `metric_id`s to cite instead of free-floating numbers.
+
+## Addendum (TA-5): the narrative ADK step is removed in typed mode
+
+When `TECHNICAL_AGENT_MODE != off`, the ADK spine's `technical_analyst` slot
+is no longer a narrative `LlmAgent` making its own, second interpretation of
+the indicators. It is filled by the deterministic
+`agents/orchestration/typed_view_agent.py::TypedTechnicalViewAgent`, which
+renders the already-validated `TechnicalAssessmentResult` from this ADR's
+service into the `technical_view` session-state key and makes no model or
+tool call.
+
+This closes a gap introduced between TA-4 and TA-5: before this addendum, a
+run with `TECHNICAL_AGENT_MODE` enabled would compute the typed assessment
+*and* still run the narrative LLM agent, meaning the Decision Synthesizer and
+Critic could see two independent, potentially disagreeing technical
+interpretations per run, and only one of them (the narrative one) actually
+reached them. TA-5 makes the validated, downgrade-only assessment the single
+source of technical interpretation downstream, consistent with the authority
+limits this ADR already establishes. The narrative `LlmAgent` path is kept,
+unchanged, for `TECHNICAL_AGENT_MODE=off` (the default) until a future issue
+promotes typed mode to the only mode.

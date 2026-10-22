@@ -102,3 +102,36 @@ make assess-technicals ticker=NVDA as_of=2026-09-08
 
 The command prints the full JSON `TechnicalAssessmentResult`, including validation reason codes, sanitized raw
 output, latency, and token usage.
+
+## How the view reaches downstream agents
+
+The `TechnicalAssessmentResult` computed above (TA-4's
+`apply_technical_policy`) is the single source of technical interpretation
+for the rest of the workflow once `TECHNICAL_AGENT_MODE != off` (TA-5):
+
+- **Critic.** `app/services/critique_context.py::build_analyst_views` builds
+  the Critic's `technical_analyst` view directly from it: `findings +
+  contradictions + risk_flags` are normalised into `AnalystFinding`s tagged
+  `source_agent="technical_analyst"` (see
+  [`docs/critic-guardrail.md`](critic-guardrail.md)). The Critic's citation
+  checks and `app/trust/memo_checks.py::resolve_technical_citations` treat
+  the response's `metric_id`s as known references.
+- **Decision Synthesizer and the ADK trace.** The narrative `technical_analyst`
+  `LlmAgent` is replaced by the deterministic
+  `agents/orchestration/typed_view_agent.py::TypedTechnicalViewAgent`, which
+  makes **no model or tool call**. It writes a compact JSON rendering of the
+  assessment (status, signals, states, findings with `metric_ids`,
+  `proposed_score_adjustment`, and `summary`) to the `technical_view` session
+  state key the Decision Synthesizer and Critic prompts already interpolate,
+  and emits exactly one event so the trace and `observed_agents` still record
+  a `technical_analyst` step with zero tokens (`output.source ==
+  "typed_assessment"`; see [`docs/agent-trace.md`](agent-trace.md)).
+  `SPECIALIST_ORDER` is unchanged.
+- **`off` mode.** When `TECHNICAL_AGENT_MODE` is `off`, none of the above
+  applies: `build_specialist_agents` keeps the original narrative `LlmAgent`
+  for `technical_analyst`, and the Critic's technical view stays the absent
+  placeholder (`status="absent"`), exactly as before TA-5.
+
+This removes the "two technical LLM calls per run" risk that existed between
+TA-4 (the typed service) and the pre-TA-5 narrative ADK step — see the ADR
+007 addendum.

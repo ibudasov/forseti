@@ -250,7 +250,7 @@ def _analyst_signal_conflict_objections(
         return []
     completed_views = [view for view in request.analyst_views if view.status == "completed"]
     positive_view = _first_view_with_signal(completed_views, _STRONG_OR_POSITIVE_SIGNALS)
-    negative_view = _first_view_with_signal(completed_views, {"strong_negative"})
+    negative_view = _first_view_with_signal(completed_views, frozenset({"strong_negative"}))
     if positive_view is None or negative_view is None or positive_view is negative_view:
         return []
     metric_ids, chunk_ids, warning_codes = _view_references(
