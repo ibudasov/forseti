@@ -1,0 +1,69 @@
+{
+  "case_type": "assessment",
+  "description": "RSI 68 and 18% above the 50-day SMA: a well-supported overextension risk flag the deterministic rules miss.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-eval",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 1,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [
+      {
+        "metric_id": "rsi_14:2026-09-08",
+        "name": "rsi_14",
+        "value": "68.00",
+        "unit": "rsi_points",
+        "derivation": "Wilder RSI-14"
+      },
+      {
+        "metric_id": "dist_sma50_pct:2026-09-08",
+        "name": "dist_sma50_pct",
+        "value": "0.18",
+        "unit": "pct",
+        "derivation": "(close - sma_50) / sma_50"
+      }
+    ],
+    "series": [],
+    "coverage": {
+      "bar_count": 200,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-09-08",
+      "bars_stale": false,
+      "series_truncated": false
+    }
+  },
+  "model_output": "{\"schema_version\": \"1.0\", \"run_id\": \"__RUN_ID__\", \"context_hash\": \"__CONTEXT_HASH__\", \"agent_name\": \"technical_analyst\", \"status\": \"completed\", \"overall_signal\": \"negative\", \"trend_state\": \"uptrend\", \"momentum_state\": \"overextended\", \"proposed_score_adjustment\": -1, \"findings\": [], \"contradictions\": [], \"risk_flags\": [{\"finding_id\": \"risk-1\", \"category\": \"overextension\", \"direction\": \"negative\", \"materiality\": \"high\", \"claim\": \"RSI at 68.00 and price 18% above the 50-day SMA signal an overextended uptrend.\", \"metric_ids\": [\"rsi_14:2026-09-08\", \"dist_sma50_pct:2026-09-08\"]}], \"missing_information\": [], \"summary\": \"Momentum is overextended despite a constructive trend.\"}",
+  "expected": {
+    "accepted": true,
+    "status": "completed",
+    "proposed_score_adjustment": -1,
+    "model_call_count": 1
+  }
+}

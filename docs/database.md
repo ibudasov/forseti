@@ -20,6 +20,10 @@ Entities:
   - Computed indicators derived from raw price bars.
 - `recommendation`
   - Append-only trading recommendations, including full API response payload and engine version.
+- `agent_runs`
+  - One row per agentic workflow run, including persisted `fundamental_agent_effect`,
+    `technical_agent_effect`, and `critic_effect` guardrail outcomes as nullable `JSONB` columns.
+    See [`docs/agent-trace.md`](agent-trace.md) for the trace fields and SQL examples.
 
 ## Key design constraints
 

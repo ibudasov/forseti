@@ -3,7 +3,7 @@
   "mode": "enforced",
   "notes": "Stale-price warning caps the response at watchlist.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",

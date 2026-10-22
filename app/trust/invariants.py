@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from agents.orchestration.registry import CRITIC_NAME, SPECIALIST_ORDER
+from agents.orchestration.registry import CRITIC_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse
 from app.services.decision_diagnosis import MISSING_DATA_WARNINGS
+
+if TYPE_CHECKING:
+    # Deferred to a function-local import at runtime (see
+    # `check_technical_numeric_claims_grounded`): `app.services.technical_analyst`
+    # imports `app.trust.memo_checks`, which would otherwise create an
+    # import-time cycle back into this module through `app.trust.__init__`.
+    from app.schemas.technicals import TechnicalAnalysisRequest, TechnicalAssessmentResponse
 
 RISK_FIELDS = (
     "entry_range",
@@ -256,6 +263,156 @@ def evaluate_agentic_invariants(
     violations.extend(check_risk_field_equality(deterministic_response, agentic_response))
     violations.extend(check_downgrade_only_behavior(deterministic_response, agentic_response))
     violations.extend(check_data_gate_warning_propagation(deterministic_response, agentic_response))
+    violations.extend(check_technical_agent_effect_rank(agentic_response))
+    violations.extend(check_technical_risk_fields_untouched_in_shadow(agentic_response))
+    violations.extend(check_technical_step_zero_tokens_in_typed_mode(trace))
+    return violations
+
+
+def check_technical_agent_effect_rank(agentic_response: AnalyzeResponse) -> list[InvariantViolation]:
+    """TA-7 invariant `technical_never_upgrades`: `rank(final) <= rank(baseline)`.
+
+    The Technical Analyst's policy is downgrade-only by construction (see
+    ``app.services.technical_policy``), so a persisted effect that ranks the
+    final decision above its own baseline can only mean a future regression
+    in that policy; it must never reach a caller.
+    """
+    effect = agentic_response.technical_agent_effect
+    if effect is None:
+        return []
+    if DECISION_RANK[effect.final_decision] <= DECISION_RANK[effect.baseline_decision]:
+        return []
+    return [
+        InvariantViolation(
+            code="technical_agent_effect_rank_upgrade",
+            message=(
+                f"technical_agent_effect.final_decision '{effect.final_decision}' ranks above "
+                f"baseline_decision '{effect.baseline_decision}'."
+            ),
+            details={
+                "baseline_decision": effect.baseline_decision,
+                "final_decision": effect.final_decision,
+            },
+        )
+    ]
+
+
+def check_technical_risk_fields_untouched_in_shadow(
+    agentic_response: AnalyzeResponse,
+) -> list[InvariantViolation]:
+    """TA-7 invariant `technical_risk_fields_untouched_in_shadow`.
+
+    In `shadow` mode the Technical Analyst may only *observe*: it computes a
+    `counterfactual_decision` for later analysis, but the decision, risk
+    fields, and confidence actually returned to the caller must stay exactly
+    whatever the deterministic/fundamental stages already produced. This
+    re-checks the persisted `TechnicalAgentEffect` fields directly (rather
+    than only comparing response-level numbers), so it also catches a
+    regression in `apply_technical_policy` itself, not just in how its
+    output happens to be applied to the response.
+    """
+    effect = agentic_response.technical_agent_effect
+    if effect is None or effect.mode != "shadow":
+        return []
+
+    violations: list[InvariantViolation] = []
+    if effect.final_decision != effect.baseline_decision:
+        violations.append(
+            InvariantViolation(
+                code="technical_shadow_decision_mutated",
+                message=(
+                    f"Shadow-mode final_decision '{effect.final_decision}' differs from "
+                    f"baseline_decision '{effect.baseline_decision}'."
+                ),
+                details={
+                    "baseline_decision": effect.baseline_decision,
+                    "final_decision": effect.final_decision,
+                },
+            )
+        )
+    if effect.decision_changed:
+        violations.append(
+            InvariantViolation(
+                code="technical_shadow_decision_changed_flag_set",
+                message="Shadow-mode technical_agent_effect.decision_changed must be False.",
+            )
+        )
+    if effect.final_confidence != effect.baseline_confidence:
+        violations.append(
+            InvariantViolation(
+                code="technical_shadow_confidence_mutated",
+                message=(
+                    f"Shadow-mode final_confidence {effect.final_confidence} differs from "
+                    f"baseline_confidence {effect.baseline_confidence}."
+                ),
+                details={
+                    "baseline_confidence": effect.baseline_confidence,
+                    "final_confidence": effect.final_confidence,
+                },
+            )
+        )
+    return violations
+
+
+def check_technical_numeric_claims_grounded(
+    response: TechnicalAssessmentResponse,
+    request: TechnicalAnalysisRequest,
+) -> list[InvariantViolation]:
+    """TA-7 invariant `technical_numeric_claims_grounded`.
+
+    Re-runs the TA-3 numeric-claim check (`validate_technical_assessment`)
+    over a persisted assessment response/request pair, and reports a
+    violation only for the specific `uncited_numeric_claim` reason code --
+    the other reason codes `validate_technical_assessment` can return
+    (identity, bounds, metric-citation existence, negative-adjustment
+    support) are already covered by `TechnicalAssessmentResult.validation`
+    and the `apply_technical_policy` acceptance gate, so re-asserting them
+    here would duplicate, not extend, existing coverage.
+    """
+    from app.services.technical_analyst import validate_technical_assessment
+
+    validation = validate_technical_assessment(response, request)
+    if "uncited_numeric_claim" not in validation.reason_codes:
+        return []
+    return [
+        InvariantViolation(
+            code="technical_numeric_claim_ungrounded",
+            message=(
+                f"Technical assessment run_id={response.run_id} cites a numeric claim that does "
+                "not match any known fact or metric value."
+            ),
+            details={"run_id": response.run_id, "context_hash": response.context_hash},
+        )
+    ]
+
+
+def check_technical_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> list[InvariantViolation]:
+    """TA-7 invariant `technical_step_zero_tokens_in_typed_mode`.
+
+    The ADK step for `technical_analyst` is the typed view from TA-5
+    (`agents.orchestration.typed_view_agent.TypedTechnicalViewAgent`): it
+    only serialises the already-computed `TechnicalAssessmentResult` into
+    session state and must never make a model call. Any persisted
+    `technical_analyst` trace step whose output carries
+    `source: "typed_assessment"` must therefore report zero tokens across
+    every usage field, or a future refactor could silently start
+    double-billing (and double-latency-ing) the same assessment.
+    """
+    violations: list[InvariantViolation] = []
+    for step in trace.steps:
+        if step.agent_name != TECHNICAL_ANALYST_NAME or not isinstance(step.output, dict):
+            continue
+        if step.output.get("source") != "typed_assessment":
+            continue
+        nonzero_token_usage = {key: value for key, value in step.token_usage.items() if value}
+        if nonzero_token_usage:
+            violations.append(
+                InvariantViolation(
+                    code="technical_typed_view_step_nonzero_tokens",
+                    message="Typed-view technical_analyst trace step must report zero tokens.",
+                    details={"sequence": step.sequence, "token_usage": nonzero_token_usage},
+                )
+            )
     return violations
 
 

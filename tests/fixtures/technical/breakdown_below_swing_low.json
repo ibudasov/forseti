@@ -1,0 +1,69 @@
+{
+  "case_type": "assessment",
+  "description": "Close breaks below the 20-day swing low with a negative SMA-50 slope: a severe breakdown.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-eval",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 1,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [
+      {
+        "metric_id": "swing_low_20:2026-09-08",
+        "name": "swing_low_20",
+        "value": "100.50",
+        "unit": "price",
+        "derivation": "min(low) over the last 20 bars"
+      },
+      {
+        "metric_id": "sma50_slope:2026-09-08",
+        "name": "sma50_slope",
+        "value": "-0.02",
+        "unit": "pct",
+        "derivation": "(sma_50 - sma_50 10 bars ago) / sma_50 10 bars ago"
+      }
+    ],
+    "series": [],
+    "coverage": {
+      "bar_count": 200,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-09-08",
+      "bars_stale": false,
+      "series_truncated": false
+    }
+  },
+  "model_output": "{\"schema_version\": \"1.0\", \"run_id\": \"__RUN_ID__\", \"context_hash\": \"__CONTEXT_HASH__\", \"agent_name\": \"technical_analyst\", \"status\": \"completed\", \"overall_signal\": \"strong_negative\", \"trend_state\": \"downtrend\", \"momentum_state\": \"weakening\", \"proposed_score_adjustment\": -2, \"findings\": [], \"contradictions\": [], \"risk_flags\": [{\"finding_id\": \"risk-1\", \"category\": \"support_resistance\", \"direction\": \"negative\", \"materiality\": \"high\", \"claim\": \"Price closed below swing_low_20 at 100.50 while the 50-day SMA slope is -2.00%, a severe breakdown.\", \"metric_ids\": [\"swing_low_20:2026-09-08\", \"sma50_slope:2026-09-08\"]}], \"missing_information\": [], \"summary\": \"Severe breakdown below key support with a weakening trend.\"}",
+  "expected": {
+    "accepted": true,
+    "status": "completed",
+    "proposed_score_adjustment": -2,
+    "model_call_count": 1
+  }
+}

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Callable, Literal, Optional
 
-from app.schemas.critique import AnalystView, CritiqueObjection, CritiqueRequest, DraftRecommendation
-from app.schemas.fundamentals import CitedFinding
+from app.schemas.critique import AnalystFinding, AnalystView, CritiqueObjection, CritiqueRequest, DraftRecommendation
 from app.services.fundamental_policy import HARD_BLOCKER_WARNINGS
 
 RULES_VERSION = "1.0"
@@ -35,6 +34,8 @@ _ObjectionCategory = Literal[
 ]
 _ObjectionSeverity = Literal["low", "medium", "high"]
 _Signal = Literal["strong_negative", "negative", "neutral", "positive", "strong_positive"]
+_STRONG_OR_POSITIVE_SIGNALS = frozenset({"strong_positive", "positive"})
+_MATERIALITY_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
 def evaluate_deterministic_objections(
@@ -49,6 +50,8 @@ def evaluate_deterministic_objections(
         _analyst_contradiction_objections,
         _missing_trade_field_objections,
         _unsupported_claim_objections,
+        _analyst_signal_conflict_objections,
+        _technical_risk_flag_on_trade_objections,
     )
     objections: list[CritiqueObjection] = []
     for evaluator in evaluators:
@@ -237,8 +240,90 @@ def _opposite_polarity_objections(
     ]
 
 
-def _unsupported_findings(views: list[AnalystView]) -> list[tuple[AnalystView, CitedFinding]]:
-    findings: list[tuple[AnalystView, CitedFinding]] = []
+def _analyst_signal_conflict_objections(
+    *,
+    request: CritiqueRequest,
+    baseline: DraftRecommendation,
+) -> list[CritiqueObjection]:
+    del baseline
+    if request.draft.decision != "trade":
+        return []
+    completed_views = [view for view in request.analyst_views if view.status == "completed"]
+    positive_view = _first_view_with_signal(completed_views, _STRONG_OR_POSITIVE_SIGNALS)
+    negative_view = _first_view_with_signal(completed_views, frozenset({"strong_negative"}))
+    if positive_view is None or negative_view is None or positive_view is negative_view:
+        return []
+    metric_ids, chunk_ids, warning_codes = _view_references(
+        [positive_view, negative_view],
+        f"analyst_signal_conflict:{positive_view.agent_name}:{negative_view.agent_name}",
+        finding_selector=_strongest_finding,
+    )
+    return [
+        _objection(
+            objection_id="det:analyst_signal_conflict:1",
+            category="analyst_contradiction",
+            severity="medium",
+            claim=(
+                f"{positive_view.agent_name} signals {positive_view.overall_signal} while "
+                f"{negative_view.agent_name} signals strong_negative on a trade decision."
+            ),
+            metric_ids=metric_ids,
+            chunk_ids=chunk_ids,
+            warning_codes=warning_codes,
+        )
+    ]
+
+
+def _technical_risk_flag_on_trade_objections(
+    *,
+    request: CritiqueRequest,
+    baseline: DraftRecommendation,
+) -> list[CritiqueObjection]:
+    del baseline
+    if request.draft.decision != "trade":
+        return []
+    view = _completed_view(request.analyst_views, "technical_analyst")
+    if view is None:
+        return []
+    high_risk_flags = [
+        finding
+        for finding in view.findings
+        if finding.origin == "risk_flag" and finding.materiality == "high"
+    ]
+    if not high_risk_flags:
+        return []
+    metric_ids = _unique_strings(metric_id for finding in high_risk_flags for metric_id in finding.metric_ids)
+    warning_codes = [] if metric_ids else ["technical_risk_flag_on_trade"]
+    return [
+        _objection(
+            objection_id="det:technical_risk_flag_on_trade:1",
+            category="analyst_contradiction",
+            severity="medium",
+            claim="Technical analysis flags a high-materiality risk on a trade decision.",
+            metric_ids=metric_ids,
+            warning_codes=warning_codes,
+        )
+    ]
+
+
+def _first_view_with_signal(
+    views: list[AnalystView],
+    signals: frozenset[str],
+) -> AnalystView | None:
+    for view in views:
+        if view.overall_signal in signals:
+            return view
+    return None
+
+
+def _strongest_finding(view: AnalystView) -> AnalystFinding | None:
+    if not view.findings:
+        return None
+    return max(view.findings, key=lambda finding: _MATERIALITY_RANK[finding.materiality])
+
+
+def _unsupported_findings(views: list[AnalystView]) -> list[tuple[AnalystView, AnalystFinding]]:
+    findings: list[tuple[AnalystView, AnalystFinding]] = []
     for view in views:
         if view.status != "completed":
             continue
@@ -251,19 +336,16 @@ def _unsupported_findings(views: list[AnalystView]) -> list[tuple[AnalystView, C
 def _view_references(
     views: list[AnalystView],
     fallback_warning_code: str,
+    *,
+    finding_selector: Callable[[AnalystView], Optional[AnalystFinding]] | None = None,
 ) -> tuple[list[str], list[int], list[str]]:
-    metric_ids = _unique_strings(
-        metric_id
-        for view in views
-        for finding in view.findings
-        for metric_id in finding.metric_ids
+    findings = (
+        [finding for view in views for finding in view.findings]
+        if finding_selector is None
+        else [finding for finding in (finding_selector(view) for view in views) if finding is not None]
     )
-    chunk_ids = _unique_ints(
-        chunk_id
-        for view in views
-        for finding in view.findings
-        for chunk_id in finding.chunk_ids
-    )
+    metric_ids = _unique_strings(metric_id for finding in findings for metric_id in finding.metric_ids)
+    chunk_ids = _unique_ints(chunk_id for finding in findings for chunk_id in finding.chunk_ids)
     if metric_ids or chunk_ids:
         return metric_ids, chunk_ids, []
     return [], [], [fallback_warning_code]

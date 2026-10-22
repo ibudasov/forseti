@@ -25,6 +25,7 @@ from app.trust.memo_checks import TechnicalIndicatorSnapshot, check_memo_consist
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
     check_critic_shadow_persistence,
+    check_technical_numeric_claims_grounded,
     evaluate_agentic_invariants,
 )
 from app.services.token_pricing import estimate_usage_cost_usd
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     matrix_payload = _load_matrix(matrix_path)
     settings = get_settings()
     critic_mode = settings.CRITIC_MODE.strip().lower()
+    technical_mode = settings.TECHNICAL_AGENT_MODE.strip().lower()
     as_of_date = date.fromisoformat(str(matrix_payload["as_of_date"]))
     tickers = [
         MatrixTicker(
@@ -91,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         "report_dir": str(report_dir.relative_to(REPO_ROOT)),
         "criteria_path": str(CRITERIA_PATH.relative_to(REPO_ROOT)),
         "critic_mode": critic_mode,
+        "technical_agent_mode": technical_mode,
         "pipeline_mode": AGENTIC_PIPELINE_MODE,
         "repeat_count": args.repeat,
         "seeded_universe_inserted_count": seeded,
@@ -135,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                 "agentic": None,
                 "trace": None,
                 "fundamental_agent_effect": None,
+                "technical_agent_effect": None,
                 "violations": [],
                 "status": "blocked" if workflow is None else "pending",
                 "error": workflow_error,
@@ -142,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
 
             if workflow is not None:
                 try:
-                    with _settings_override(CRITIC_MODE=critic_mode):
+                    with _settings_override(CRITIC_MODE=critic_mode, TECHNICAL_AGENT_MODE=technical_mode):
                         agentic_response = workflow.analyze(
                             matrix_ticker.ticker,
                             request=AnalyzeRequest(ticker=matrix_ticker.ticker, as_of_date=as_of_date),
@@ -158,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     if critic_mode == "shadow":
                         violations.extend(check_critic_shadow_persistence(agentic_response, persisted_trace))
+                    if technical_mode != "off" and workflow.last_technical_assessment is not None:
+                        violations.extend(
+                            check_technical_numeric_claims_grounded(
+                                workflow.last_technical_assessment.response,
+                                workflow.last_technical_request,
+                            )
+                        )
                     memo_text = _memo_text(persisted_trace)
                     run_report["agentic"] = _response_summary(agentic_response)
                     run_report["trace"] = _trace_summary(persisted_trace)
@@ -169,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     run_report["fundamental_agent_effect"] = _fundamental_effect_summary(
                         persisted_trace.fundamental_agent_effect or agentic_response.fundamental_agent_effect
+                    )
+                    run_report["technical_agent_effect"] = _technical_effect_summary(
+                        persisted_trace.technical_agent_effect or agentic_response.technical_agent_effect
                     )
                     run_report["fundamental_citation_resolution"] = _fundamental_citation_resolution_summary(
                         persisted_trace
@@ -514,6 +528,23 @@ def _fundamental_effect_summary(effect: Any) -> dict[str, Any] | None:
         "applied_adjustment": effect.applied_adjustment,
         "baseline_decision": effect.baseline_decision,
         "final_decision": effect.final_decision,
+    }
+
+
+def _technical_effect_summary(effect: Any) -> dict[str, Any] | None:
+    if effect is None:
+        return None
+    return {
+        "mode": effect.mode,
+        "accepted": effect.accepted,
+        "assessment_status": effect.assessment_status,
+        "reason_codes": list(effect.reason_codes),
+        "raw_adjustment": effect.raw_adjustment,
+        "applied_adjustment": effect.applied_adjustment,
+        "baseline_decision": effect.baseline_decision,
+        "final_decision": effect.final_decision,
+        "baseline_confidence": effect.baseline_confidence,
+        "final_confidence": effect.final_confidence,
     }
 
 

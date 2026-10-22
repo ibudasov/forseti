@@ -1,0 +1,72 @@
+{
+  "source": "synthetic: typed-view technical_analyst step (TECHNICAL_AGENT_MODE=enforced), derived from tests/fixtures/trust/clear_trade_trajectory.json",
+  "run_id": "fixture-clear-trade-typed",
+  "ticker": "TRDUP",
+  "steps": [
+    {
+      "sequence": 1,
+      "agent_name": "fundamental_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 14,
+        "candidates_token_count": 12,
+        "total_token_count": 26
+      }
+    },
+    {
+      "sequence": 2,
+      "agent_name": "technical_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {},
+      "output": {
+        "source": "typed_assessment",
+        "status": "completed",
+        "overall_signal": "positive",
+        "trend_state": "uptrend",
+        "momentum_state": "strengthening",
+        "proposed_score_adjustment": 0,
+        "findings": [
+          {
+            "finding_id": "trend-50dma",
+            "category": "trend",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "Price above the 50-day moving average.",
+            "metric_ids": ["trend_50dma:2026-09-08"]
+          }
+        ],
+        "summary": "Uptrend confirmed with strengthening momentum."
+      }
+    },
+    {
+      "sequence": 3,
+      "agent_name": "decision_synthesizer",
+      "status": "completed",
+      "tool_calls": [
+        "calculate_risk"
+      ],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 17,
+        "candidates_token_count": 9,
+        "total_token_count": 26
+      }
+    },
+    {
+      "sequence": 4,
+      "agent_name": "critic_guardrail",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 8,
+        "candidates_token_count": 7,
+        "total_token_count": 15
+      }
+    }
+  ]
+}

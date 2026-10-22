@@ -4,6 +4,7 @@ from datetime import date
 
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse, DecisionDiagnosis, TraceStep
 from app.schemas.critique import CriticEffect, CriticVersionStamp
+from app.schemas.technicals import TechnicalAgentEffect, TechnicalAgentVersionStamp, TechnicalAssessmentResponse
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
     check_critic_shadow_persistence,
@@ -11,8 +12,13 @@ from app.trust.invariants import (
     check_downgrade_only_behavior,
     check_risk_field_equality,
     check_specialist_sequence,
+    check_technical_agent_effect_rank,
+    check_technical_numeric_claims_grounded,
+    check_technical_risk_fields_untouched_in_shadow,
+    check_technical_step_zero_tokens_in_typed_mode,
     evaluate_agentic_invariants,
 )
+from tests.fixtures.technical.factory import build_request
 
 
 def _response(
@@ -101,6 +107,129 @@ def _shadow_effect(
             model_name="fixture-critic",
             policy_version="1.0",
         ),
+    )
+
+
+def _technical_effect(
+    *,
+    mode: str = "shadow",
+    baseline_decision: str = "trade",
+    final_decision: str = "trade",
+    decision_changed: bool = False,
+    baseline_confidence: float = 0.7,
+    final_confidence: float = 0.7,
+) -> TechnicalAgentEffect:
+    return TechnicalAgentEffect(
+        mode=mode,
+        accepted=True,
+        assessment_status="completed",
+        overall_signal="negative",
+        trend_state="uptrend",
+        momentum_state="overextended",
+        reason_codes=["shadow_mode"] if mode == "shadow" else [],
+        missing_information=[],
+        raw_adjustment=-1,
+        applied_adjustment=-1,
+        baseline_technical_score=1,
+        adjusted_technical_score=0,
+        baseline_total_score=8,
+        adjusted_total_score=7,
+        baseline_decision=baseline_decision,
+        counterfactual_decision="watchlist",
+        final_decision=final_decision,
+        decision_changed=decision_changed,
+        baseline_confidence=baseline_confidence,
+        final_confidence=final_confidence,
+        versions=TechnicalAgentVersionStamp(
+            context_schema_version="1.0",
+            assessment_schema_version="1.0",
+            prompt_version="technical-analyst.v1",
+            model_name="fixture-technical",
+            policy_version="1.0",
+        ),
+    )
+
+
+_TECHNICAL_REQUEST_PAYLOAD = {
+    "run_id": "run-123",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+        "ticker": "NVDA",
+        "as_of_date": "2026-09-08",
+        "score": 1,
+        "maximum_score": 5,
+        "rule_results": [
+            {
+                "rule_id": "volume_trend",
+                "status": "passed",
+                "points_awarded": 1,
+                "points_available": 1,
+                "metric_ids": ["volume_trend:2026-09-08"],
+                "explanation": "volume_trend 1.20 >= 1.0 minimum",
+            }
+        ],
+        "warnings": [],
+        "metrics": [
+            {
+                "metric_id": "volume_trend:2026-09-08",
+                "metric_name": "volume_trend",
+                "value": "1.20",
+                "unit": "ratio",
+                "as_of_date": "2026-09-08",
+            }
+        ],
+    },
+    "facts": [
+        {
+            "metric_id": "rsi_14:2026-09-08",
+            "name": "rsi_14",
+            "value": "68.00",
+            "unit": "rsi_points",
+            "derivation": "Wilder RSI-14",
+        }
+    ],
+    "series": [],
+    "coverage": {
+        "bar_count": 200,
+        "required_facts_missing": [],
+        "latest_bar_date": "2026-09-08",
+        "bars_stale": False,
+        "series_truncated": False,
+    },
+}
+
+
+def _technical_finding(*, finding_id: str, claim: str, metric_ids: list[str]) -> dict:
+    return {
+        "finding_id": finding_id,
+        "category": "overextension",
+        "direction": "negative",
+        "materiality": "high",
+        "claim": claim,
+        "metric_ids": metric_ids,
+    }
+
+
+def _technical_assessment_response(*, findings: list[dict]) -> TechnicalAssessmentResponse:
+    request = build_request(_TECHNICAL_REQUEST_PAYLOAD)
+    return TechnicalAssessmentResponse.model_validate(
+        {
+            "run_id": request.run_id,
+            "context_hash": request.context_hash,
+            "status": "completed",
+            "overall_signal": "negative",
+            "trend_state": "uptrend",
+            "momentum_state": "overextended",
+            "proposed_score_adjustment": -1,
+            "findings": [],
+            "contradictions": [],
+            "risk_flags": findings,
+            "missing_information": [],
+            "summary": "Overextended momentum despite a constructive trend.",
+        }
     )
 
 
@@ -206,3 +335,143 @@ def test_critic_shadow_persistence_rejects_missing_or_excessive_revision_state()
         "missing_persisted_critic_effect",
         "critic_revision_limit_exceeded",
     }
+
+
+def test_technical_agent_effect_rank_passes_for_downgrade_only_effect():
+    response = _response().model_copy(
+        update={"technical_agent_effect": _technical_effect(baseline_decision="trade", final_decision="watchlist")}
+    )
+
+    assert check_technical_agent_effect_rank(response) == []
+
+
+def test_technical_agent_effect_rank_rejects_upgrade():
+    response = _response().model_copy(
+        update={"technical_agent_effect": _technical_effect(baseline_decision="watchlist", final_decision="trade")}
+    )
+
+    violations = check_technical_agent_effect_rank(response)
+
+    assert [violation.code for violation in violations] == ["technical_agent_effect_rank_upgrade"]
+
+
+def test_technical_risk_fields_untouched_in_shadow_passes_when_baseline_is_preserved():
+    response = _response().model_copy(update={"technical_agent_effect": _technical_effect(mode="shadow")})
+
+    assert check_technical_risk_fields_untouched_in_shadow(response) == []
+
+
+def test_technical_risk_fields_untouched_in_shadow_ignores_non_shadow_modes():
+    effect = _technical_effect(mode="enforced", baseline_decision="trade", final_decision="watchlist", decision_changed=True)
+    response = _response().model_copy(update={"technical_agent_effect": effect})
+
+    assert check_technical_risk_fields_untouched_in_shadow(response) == []
+
+
+def test_technical_risk_fields_untouched_in_shadow_rejects_mutated_decision_and_confidence():
+    effect = _technical_effect(
+        mode="shadow",
+        baseline_decision="trade",
+        final_decision="watchlist",
+        decision_changed=True,
+        baseline_confidence=0.7,
+        final_confidence=0.5,
+    )
+    response = _response().model_copy(update={"technical_agent_effect": effect})
+
+    violations = check_technical_risk_fields_untouched_in_shadow(response)
+
+    assert {violation.code for violation in violations} == {
+        "technical_shadow_decision_mutated",
+        "technical_shadow_decision_changed_flag_set",
+        "technical_shadow_confidence_mutated",
+    }
+
+
+def test_technical_numeric_claims_grounded_passes_for_cited_number():
+    response = _technical_assessment_response(
+        findings=[
+            _technical_finding(
+                finding_id="risk-1",
+                claim="RSI at 68.00 signals an overextended uptrend.",
+                metric_ids=["rsi_14:2026-09-08"],
+            )
+        ]
+    )
+    request = build_request(_TECHNICAL_REQUEST_PAYLOAD)
+
+    assert check_technical_numeric_claims_grounded(response, request) == []
+
+
+def test_technical_numeric_claims_grounded_rejects_ungrounded_number():
+    response = _technical_assessment_response(
+        findings=[
+            _technical_finding(
+                finding_id="risk-1",
+                claim="RSI at 91.00 signals an overextended uptrend.",
+                metric_ids=["rsi_14:2026-09-08"],
+            )
+        ]
+    )
+    request = build_request(_TECHNICAL_REQUEST_PAYLOAD)
+
+    violations = check_technical_numeric_claims_grounded(response, request)
+
+    assert [violation.code for violation in violations] == ["technical_numeric_claim_ungrounded"]
+
+
+def test_technical_step_zero_tokens_in_typed_mode_passes_for_zero_token_step():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(
+                    sequence=2,
+                    agent_name="technical_analyst",
+                    status="completed",
+                    output={"source": "typed_assessment", "status": "completed"},
+                    token_usage={},
+                )
+            ]
+        }
+    )
+
+    assert check_technical_step_zero_tokens_in_typed_mode(trace) == []
+
+
+def test_technical_step_zero_tokens_in_typed_mode_ignores_non_typed_steps():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(
+                    sequence=2,
+                    agent_name="technical_analyst",
+                    status="completed",
+                    output={"status": "completed"},
+                    token_usage={"total_token_count": 42},
+                )
+            ]
+        }
+    )
+
+    assert check_technical_step_zero_tokens_in_typed_mode(trace) == []
+
+
+def test_technical_step_zero_tokens_in_typed_mode_rejects_nonzero_tokens():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(
+                    sequence=2,
+                    agent_name="technical_analyst",
+                    status="completed",
+                    output={"source": "typed_assessment", "status": "completed"},
+                    token_usage={"total_token_count": 42},
+                )
+            ]
+        }
+    )
+
+    violations = check_technical_step_zero_tokens_in_typed_mode(trace)
+
+    assert [violation.code for violation in violations] == ["technical_typed_view_step_nonzero_tokens"]
+    assert violations[0].details["token_usage"] == {"total_token_count": 42}

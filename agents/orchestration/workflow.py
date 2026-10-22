@@ -43,6 +43,7 @@ from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
 from app.schemas.fundamentals import FundamentalAssessmentResult
+from app.schemas.technicals import TechnicalAgentEffect, TechnicalAnalysisRequest, TechnicalAssessmentResult
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
@@ -55,6 +56,9 @@ from app.services.fundamental_analyst import FundamentalAnalyst
 from app.services.fundamental_context import build_fundamental_analysis_request
 from app.services.fundamental_policy import apply_fundamental_policy
 from app.services.risk import RiskConfig, RiskDowngrade, calculate_risk_levels
+from app.services.technical_analyst import TechnicalAnalyst
+from app.services.technical_context import build_technical_analysis_request
+from app.services.technical_policy import apply_technical_policy
 from app.services.time_stop import calculate_time_stop_at
 from app.services.analyzer import analyze_request
 from app.settings import get_settings
@@ -265,6 +269,21 @@ def _merged_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str
     return merged
 
 
+def _typed_technical_trace_output(text: str) -> dict[str, Any]:
+    """Build the trace `output` payload for the typed-view technical step.
+
+    The typed-view agent emits the rendered assessment as its event text
+    (see `agents.orchestration.typed_view_agent`); this re-parses it so the
+    trace records `source: "typed_assessment"` alongside the rendered
+    fields, rather than a raw `text` blob.
+    """
+    try:
+        rendered = json.loads(text) if text else {}
+    except (TypeError, ValueError):
+        rendered = {"text": text}
+    return {"source": "typed_assessment", **rendered}
+
+
 def _objection_counts_by_severity(objections: Iterable[CritiqueObjection]) -> dict[str, int]:
     return dict(Counter(objection.severity for objection in objections))
 
@@ -300,6 +319,28 @@ def _update_critic_trace_output(step: _PendingTraceStep, effect: Any) -> None:
     step.output["reason_codes"] = list(effect.reason_codes)
 
 
+def _apply_technical_effect_to_response(effect: TechnicalAgentEffect, response: AnalyzeResponse) -> None:
+    """Mutate ``response`` for an enforced technical downgrade.
+
+    Technical adjustments are downgrade-only, so unlike the fundamental
+    policy this never recomputes risk levels: it either leaves the response
+    untouched or clears the trade fields exactly as the analyzer does for
+    non-trade decisions (see ``app.services.analyzer._evaluate_trade``).
+    """
+    if effect.final_decision == response.decision:
+        return
+    response.decision = effect.final_decision
+    response.confidence = effect.final_confidence
+    if effect.final_decision == "trade":
+        return
+    response.entry_range = None
+    response.stop_loss = None
+    response.take_profit = None
+    response.risk_reward = None
+    response.position_size_eur = None
+    response.time_stop_at = None
+
+
 def _analysis_date(request: AnalyzeRequest) -> date | None:
     return request.as_of_date
 
@@ -308,6 +349,13 @@ def _fundamental_agent_mode() -> Literal["off", "shadow", "enforced"]:
     mode = get_settings().FUNDAMENTAL_AGENT_MODE.strip().lower()
     if mode not in {"off", "shadow", "enforced"}:
         raise ValueError("FUNDAMENTAL_AGENT_MODE must be one of ('off', 'shadow', 'enforced').")
+    return cast(Literal["off", "shadow", "enforced"], mode)
+
+
+def _technical_agent_mode() -> Literal["off", "shadow", "enforced"]:
+    mode = get_settings().TECHNICAL_AGENT_MODE.strip().lower()
+    if mode not in {"off", "shadow", "enforced"}:
+        raise ValueError("TECHNICAL_AGENT_MODE must be one of ('off', 'shadow', 'enforced').")
     return cast(Literal["off", "shadow", "enforced"], mode)
 
 
@@ -356,9 +404,19 @@ class AgenticAnalysisWorkflow:
         self.runner_factory = runner_factory or self._default_runner_factory
         self.llm_io_recorder = llm_io_recorder
         self.embedding_client = embedding_client
+        # Trust-tooling hook (TA-7): exposes the raw in-process TA-3
+        # assessment response/request from the most recent `analyze()` call
+        # so offline trust scripts (`scripts/trust_e2e.py`) can re-run the
+        # numeric-claim grounding check without widening the public
+        # `AnalyzeResponse` contract. `None` whenever TECHNICAL_AGENT_MODE
+        # is `off` or the assessment step was never reached.
+        self.last_technical_assessment: Optional[TechnicalAssessmentResult] = None
+        self.last_technical_request: Optional[TechnicalAnalysisRequest] = None
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         run_id = str(uuid4())
+        self.last_technical_assessment = None
+        self.last_technical_request = None
         recorder = self.llm_io_recorder or build_llm_io_recorder(run_id, config=self.config)
         trace_recorder = TraceRecorder()
         warnings: list[str] = []
@@ -368,13 +426,23 @@ class AgenticAnalysisWorkflow:
         request = request or AnalyzeRequest(ticker=resolved_ticker)
         analysis_date = _analysis_date(request)
         response = self._run_deterministic_pipeline(request, trace_recorder)
+        deterministic_snapshot = response.model_copy(deep=True)
         fundamental_assessment = self._apply_fundamental_policy_if_enabled(
             run_id=run_id,
             request=request,
             response=response,
             trace_recorder=trace_recorder,
         )
-        registry = self._build_registry(trace_recorder, warnings, today=analysis_date)
+        technical_assessment = self._apply_technical_policy_if_enabled(
+            run_id=run_id,
+            request=request,
+            deterministic_response=deterministic_snapshot,
+            response=response,
+            trace_recorder=trace_recorder,
+        )
+        registry = self._build_registry(
+            trace_recorder, warnings, today=analysis_date, technical_assessment=technical_assessment
+        )
 
         self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
         user_message = f"Analyze ticker {resolved_ticker}"
@@ -390,6 +458,7 @@ class AgenticAnalysisWorkflow:
                 response=response,
                 baseline=build_draft_from_response(response, source="deterministic"),
                 fundamental_assessment=fundamental_assessment,
+                technical_assessment=technical_assessment,
                 recorder=recorder,
             )
         except _AdkExecutionError as exc:
@@ -495,6 +564,7 @@ class AgenticAnalysisWorkflow:
         warnings: list[str],
         *,
         today: date | None,
+        technical_assessment: TechnicalAssessmentResult | None = None,
     ) -> AgentRegistry:
         registry_kwargs = {
             "config": self.config,
@@ -503,6 +573,8 @@ class AgenticAnalysisWorkflow:
         }
         if self.embedding_client is not None:
             registry_kwargs["embedding_client"] = self.embedding_client
+        if technical_assessment is not None:
+            registry_kwargs["technical_assessment"] = technical_assessment
         registry = build_agent_registry(**registry_kwargs)
         if _runner_ignores_registry(self.runner_factory):
             return registry
@@ -522,6 +594,7 @@ class AgenticAnalysisWorkflow:
         response: AnalyzeResponse,
         baseline: DraftRecommendation,
         fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
         recorder=None,
     ) -> _AdkRunResult:
         token_usage: dict[str, int] = {}
@@ -586,6 +659,7 @@ class AgenticAnalysisWorkflow:
                         response=response,
                         baseline=baseline,
                         fundamental_assessment=fundamental_assessment,
+                        technical_assessment=technical_assessment,
                         warnings=warnings,
                         tool_calls=tool_calls,
                         latency_ms=latency_ms,
@@ -604,6 +678,18 @@ class AgenticAnalysisWorkflow:
                         critic_result.step,
                     )
                     pending_synthesis = None
+                    continue
+
+                if author == TECHNICAL_ANALYST_NAME and technical_assessment is not None:
+                    self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+                    pending_synthesis = None
+                    trace_recorder.record_completed(
+                        author,
+                        tool_calls=tool_calls,
+                        output=_typed_technical_trace_output(text),
+                        latency_ms=latency_ms,
+                        token_usage=usage,
+                    )
                     continue
 
                 self._flush_pending_synthesis(trace_recorder, pending_synthesis)
@@ -787,12 +873,15 @@ class AgenticAnalysisWorkflow:
         response: AnalyzeResponse,
         baseline: DraftRecommendation,
         fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
         warnings: list[str],
         tool_calls: list[str],
         latency_ms: float,
         token_usage: dict[str, int],
         pending_synthesis: _PendingTraceStep | None,
     ) -> _CriticStepResult:
+        # `technical_assessment` threads TA-4's validated result into the
+        # Critic, so there is a single technical interpretation per run.
         del trace_recorder
         mode = _critic_mode()
         if mode == "off":
@@ -815,7 +904,9 @@ class AgenticAnalysisWorkflow:
                 memo=self._synthesizer_memo(pending_synthesis),
                 source="decision_synthesizer",
             ),
-            analyst_views=build_analyst_views(fundamental=fundamental_assessment),
+            analyst_views=build_analyst_views(
+                fundamental=fundamental_assessment, technical=technical_assessment
+            ),
             deterministic_warnings=response.warnings,
             deterministic_diagnosis=response.diagnosis,
             as_of=request.as_of_date,
@@ -1243,6 +1334,73 @@ class AgenticAnalysisWorkflow:
         response.time_stop_at = calculate_time_stop_at(request.as_of_date or date.today())
         return effect
 
+    def _apply_technical_policy_if_enabled(
+        self,
+        *,
+        run_id: str,
+        request: AnalyzeRequest,
+        deterministic_response: AnalyzeResponse,
+        response: AnalyzeResponse,
+        trace_recorder: TraceRecorder,
+    ) -> TechnicalAssessmentResult | None:
+        mode = _technical_agent_mode()
+        if mode == "off":
+            return None
+
+        context_started_at = time.monotonic()
+        context = build_technical_analysis_request(
+            request.ticker,
+            run_id,
+            as_of=request.as_of_date,
+            engine=self.engine,
+        )
+        trace_recorder.record_completed(
+            "technical_context_builder",
+            latency_ms=(time.monotonic() - context_started_at) * 1000,
+            output={
+                "context_hash": context.context_hash,
+                "fact_count": len(context.facts),
+                "bar_count": context.coverage.bar_count,
+            },
+        )
+
+        assessment_started_at = time.monotonic()
+        assessment_result = TechnicalAnalyst().assess(context)
+        assessment_latency_ms = (time.monotonic() - assessment_started_at) * 1000
+        if assessment_result.validation.accepted:
+            trace_recorder.record_completed(
+                TECHNICAL_ANALYST_NAME,
+                latency_ms=assessment_latency_ms,
+                token_usage=assessment_result.token_usage,
+                output={
+                    "status": assessment_result.response.status,
+                    "proposed_score_adjustment": assessment_result.response.proposed_score_adjustment,
+                    "trend_state": assessment_result.response.trend_state,
+                },
+            )
+        else:
+            trace_recorder.record_degraded(
+                TECHNICAL_ANALYST_NAME,
+                "assessment_invalid",
+                detail=",".join(assessment_result.validation.reason_codes),
+                latency_ms=assessment_latency_ms,
+                token_usage=assessment_result.token_usage,
+                output={"status": assessment_result.response.status},
+            )
+
+        effect = apply_technical_policy(
+            mode=mode,
+            deterministic_response=deterministic_response,
+            post_fundamental_response=response.model_copy(deep=True),
+            request=context,
+            assessment_result=assessment_result,
+        )
+        _apply_technical_effect_to_response(effect, response)
+        response.technical_agent_effect = effect
+        self.last_technical_assessment = assessment_result
+        self.last_technical_request = context
+        return assessment_result
+
     def _build_trace(
         self,
         *,
@@ -1268,6 +1426,7 @@ class AgenticAnalysisWorkflow:
             adk_event_count=adk_event_count,
             observed_agents=observed_agents,
             fundamental_agent_effect=response.fundamental_agent_effect,
+            technical_agent_effect=response.technical_agent_effect,
             critic_effect=response.critic_effect,
         )
 
@@ -1312,6 +1471,11 @@ class AgenticAnalysisWorkflow:
                 if trace.fundamental_agent_effect is not None
                 else None
             ),
+            technical_agent_effect=(
+                trace.technical_agent_effect.model_dump(mode="json")
+                if trace.technical_agent_effect is not None
+                else None
+            ),
             critic_effect=(
                 trace.critic_effect.model_dump(mode="json")
                 if trace.critic_effect is not None
@@ -1343,5 +1507,6 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         adk_event_count=run.adk_event_count,
         observed_agents=run.observed_agents,
         fundamental_agent_effect=run.fundamental_agent_effect,
+        technical_agent_effect=run.technical_agent_effect,
         critic_effect=run.critic_effect,
     )

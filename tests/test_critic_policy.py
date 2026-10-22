@@ -327,7 +327,6 @@ def test_invalid_upgrade_proposal_is_ignored_and_recorded():
 
 def _request(*, max_confidence_penalty: float = 0.30) -> CritiqueRequest:
     return CritiqueRequest(
-        schema_version="1.0",
         run_id="run-1",
         context_hash="ctx-1",
         ticker="NVDA",

@@ -91,6 +91,10 @@ class Settings(BaseSettings):
         default="off",
         validation_alias="FUNDAMENTAL_AGENT_MODE",
     )
+    TECHNICAL_AGENT_MODE: str = Field(
+        default="off",
+        validation_alias="TECHNICAL_AGENT_MODE",
+    )
     CRITIC_MODE: str = Field(
         default="off",
         validation_alias="CRITIC_MODE",

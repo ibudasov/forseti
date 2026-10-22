@@ -1,0 +1,91 @@
+{
+  "case_type": "policy",
+  "description": "Enforced mode downgrades a score-8 trade to watchlist on a -1 adjustment; trade risk fields clear and confidence is not raised.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-eval",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 1,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [
+      {
+        "metric_id": "rsi_14:2026-09-08",
+        "name": "rsi_14",
+        "value": "68.00",
+        "unit": "rsi_points",
+        "derivation": "Wilder RSI-14"
+      }
+    ],
+    "series": [],
+    "coverage": {
+      "bar_count": 200,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-09-08",
+      "bars_stale": false,
+      "series_truncated": false
+    }
+  },
+  "assessment": {
+    "response": {
+      "status": "completed",
+      "overall_signal": "negative",
+      "trend_state": "uptrend",
+      "momentum_state": "overextended",
+      "proposed_score_adjustment": -1,
+      "findings": [],
+      "contradictions": [],
+      "risk_flags": [
+        {
+          "finding_id": "risk-1",
+          "category": "overextension",
+          "direction": "negative",
+          "materiality": "high",
+          "claim": "RSI at 68.00 signals an overextended uptrend.",
+          "metric_ids": ["rsi_14:2026-09-08"]
+        }
+      ],
+      "missing_information": [],
+      "summary": "Overextended momentum despite a constructive trend."
+    }
+  },
+  "deterministic_response": {
+    "decision": "trade",
+    "confidence": 0.8,
+    "checklist_score": 8
+  },
+  "expected": {
+    "applied_adjustment": -1,
+    "final_decision": "watchlist",
+    "decision_changed": true,
+    "reason_codes_include": ["adjustment_applied", "enforced_mode"],
+    "final_confidence_not_raised": true,
+    "risk_fields_unchanged_or_cleared": true
+  }
+}
