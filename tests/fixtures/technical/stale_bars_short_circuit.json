@@ -1,0 +1,54 @@
+{
+  "case_type": "assessment",
+  "description": "Coverage reports stale bars, so the analyst must short-circuit to insufficient_coverage without ever invoking the model.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-eval",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 1,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [],
+    "series": [],
+    "coverage": {
+      "bar_count": 40,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-08-20",
+      "bars_stale": true,
+      "series_truncated": false
+    }
+  },
+  "expected": {
+    "accepted": false,
+    "reason_codes": ["insufficient_coverage"],
+    "status": "insufficient_data",
+    "proposed_score_adjustment": 0,
+    "model_call_count": 0
+  }
+}
