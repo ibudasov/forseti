@@ -192,6 +192,7 @@ def test_happy_trajectory_records_observed_steps(monkeypatch):
         "status": "completed",
         "verdict": "accept",
         "objection_counts_by_severity": {},
+        "objections": [],
         "baseline_decision": "no_trade",
         "final_decision": "no_trade",
         "accepted": True,
@@ -555,6 +556,32 @@ def test_critic_trace_output_summarizes_objections_and_decision_change(monkeypat
         "status": "completed",
         "verdict": "reject",
         "objection_counts_by_severity": {"high": 1, "medium": 1, "low": 1},
+        "objections": [
+            {
+                "objection_code": "model:1",
+                "category": "unsupported_claim",
+                "severity": "high",
+                "source": "model",
+                "reason": (
+                    "unsupported_claim: Unsupported claim. "
+                    "(metrics=revenue_growth:2026-06-30; chunks=10; warnings=warn:stale_data)"
+                ),
+            },
+            {
+                "objection_code": "model:2",
+                "category": "internal_inconsistency",
+                "severity": "medium",
+                "source": "model",
+                "reason": "internal_inconsistency: Medium severity objection. (metrics=revenue_growth:2026-06-30)",
+            },
+            {
+                "objection_code": "model:3",
+                "category": "stale_or_incomplete_data",
+                "severity": "low",
+                "source": "model",
+                "reason": "stale_or_incomplete_data: Low severity objection.",
+            },
+        ],
         "baseline_decision": "watchlist",
         "final_decision": "no_trade",
         "accepted": True,

@@ -15,3 +15,4 @@ ENV/
 
 # Local environment
 .env
+reports/trust/

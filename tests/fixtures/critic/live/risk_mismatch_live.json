@@ -1,0 +1,99 @@
+{
+  "case_type": "live_model",
+  "mode": "shadow",
+  "notes": "Manual live deterministic-risk-mismatch probe. Deterministic objections must restore the lower baseline decision even if the live model accepts the draft.",
+  "request": {
+    "schema_version": "1.0",
+    "run_id": "live-mismatch-1",
+    "context_hash": "live-mismatch-ctx-1",
+    "ticker": "RKLB",
+    "as_of_date": "2026-09-27",
+    "snapshot_at": "2026-09-27T12:00:00Z",
+    "draft": {
+      "decision": "trade",
+      "confidence": 0.72,
+      "reasons": ["baseline"],
+      "warnings": [],
+      "memo": "Draft memo",
+      "source": "decision_synthesizer",
+      "entry_range": [100.0, 101.0],
+      "stop_loss": 94.0,
+      "take_profit": [108.0, 110.0],
+      "risk_reward": 2.0,
+      "position_size_eur": 1000.0
+    },
+    "analyst_views": [],
+    "evidence_chunks": [
+      {
+        "chunk_id": 10,
+        "retrieval_question_id": "question-10",
+        "source_type": "filing",
+        "source_url": "https://example.com/10",
+        "source_hash": "hash-10",
+        "chunk_index": 0,
+        "published_at": "2026-09-01T12:00:00Z",
+        "quality_tier": "primary",
+        "text": "Primary evidence"
+      }
+    ],
+    "deterministic_warnings": [],
+    "allowed_actions": [
+      "accept",
+      "downgrade_confidence",
+      "downgrade_decision",
+      "force_no_trade",
+      "request_revision"
+    ],
+    "max_confidence_penalty": 0.3
+  },
+  "baseline": {
+    "decision": "watchlist",
+    "confidence": 0.61,
+    "reasons": ["baseline"],
+    "warnings": [],
+    "memo": "Draft memo",
+    "source": "deterministic",
+    "entry_range": [100.0, 101.0],
+    "stop_loss": 95.0,
+    "take_profit": [108.0, 110.0],
+    "risk_reward": 2.0,
+    "position_size_eur": 1000.0
+  },
+  "response": {
+    "ticker": "RKLB",
+    "decision": "trade",
+    "confidence": 0.72,
+    "reasons": ["draft"],
+    "warnings": [],
+    "engine_version": "v1.rules.0",
+    "trace_id": "trace-live-mismatch-1",
+    "entry_range": [100.0, 101.0],
+    "stop_loss": 94.0,
+    "take_profit": [108.0, 110.0],
+    "risk_reward": 2.0,
+    "position_size_eur": 1000.0
+  },
+  "deterministic_objections": {
+    "strategy": "evaluate",
+    "objections": []
+  },
+  "expected": {
+    "effect": {
+      "reason_codes": ["guardrail_rejected: risk_number_mismatch"],
+      "deterministic_objection_ids": ["det:risk_number_mismatch:1", "det:decision_upgrade:1"],
+      "final_decision": "watchlist",
+      "final_confidence": 0.61,
+      "decision_changed": false
+    },
+    "validation": {
+      "accepted": true,
+      "reason_codes": []
+    },
+    "live": {
+      "required_deterministic_categories": ["risk_number_mismatch", "internal_inconsistency"],
+      "minimum_total_objection_count": 2,
+      "require_decision_downgrade_from_response": true,
+      "required_reason_codes": ["guardrail_rejected: risk_number_mismatch"]
+    }
+  }
+}
