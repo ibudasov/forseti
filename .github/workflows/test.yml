@@ -75,6 +75,12 @@ jobs:
         run: |
           make eval-critic
 
+      - name: Technical agent golden evaluation
+        env:
+          DOCKER_COMPOSE: docker compose
+        run: |
+          make eval-technical-agent
+
       - name: Scorecard
         env:
           DOCKER_COMPOSE: docker compose

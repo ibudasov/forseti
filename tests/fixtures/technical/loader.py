@@ -128,6 +128,58 @@ class TechnicalShadowReport:
         }
 
 
+@dataclass(frozen=True)
+class TechnicalShadowSampleRow:
+    run_id: str
+    ticker: str
+    applied_adjustment: int
+    final_decision: str
+    decision_changed: bool
+    trend_state: str
+    momentum_state: str
+    reason_codes: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "ticker": self.ticker,
+            "applied_adjustment": self.applied_adjustment,
+            "final_decision": self.final_decision,
+            "decision_changed": self.decision_changed,
+            "trend_state": self.trend_state,
+            "momentum_state": self.momentum_state,
+            "reason_codes": self.reason_codes,
+        }
+
+
+def build_shadow_sample(
+    runs: list[AgentRun],
+    *,
+    limit: int,
+) -> list[TechnicalShadowSampleRow]:
+    """Export structured, per-run shadow fields only -- never raw model output."""
+    rows: list[TechnicalShadowSampleRow] = []
+    for run in runs:
+        effect = run.technical_agent_effect
+        if effect is None or effect.get("mode") != "shadow":
+            continue
+        rows.append(
+            TechnicalShadowSampleRow(
+                run_id=run.run_id,
+                ticker=run.ticker,
+                applied_adjustment=int(effect.get("applied_adjustment", 0)),
+                final_decision=str(effect.get("final_decision", "")),
+                decision_changed=bool(effect.get("decision_changed")),
+                trend_state=str(effect.get("trend_state", "unknown")),
+                momentum_state=str(effect.get("momentum_state", "unknown")),
+                reason_codes=",".join(effect.get("reason_codes", [])),
+            )
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 class _SequenceModelPort:
     """Replay canned raw outputs or raise provider errors, in order."""
 
@@ -432,38 +484,50 @@ def _assert_assessment_expectations(case: TechnicalGoldenCase, result) -> None:
 
 
 def _assert_effect_expectations(case: TechnicalGoldenCase, effect: TechnicalAgentEffect) -> None:
+    _assert_effect_field(case, effect, "applied_adjustment", lambda e: e.applied_adjustment, cast_int=True)
+    _assert_effect_field(case, effect, "final_decision", lambda e: e.final_decision)
+    _assert_effect_field(case, effect, "counterfactual_decision", lambda e: e.counterfactual_decision)
+    _assert_effect_field(case, effect, "decision_changed", lambda e: e.decision_changed, cast_bool=True)
+    _assert_reason_codes_include(case, effect)
+    _assert_final_confidence_not_raised(case, effect)
+
+
+def _assert_effect_field(
+    case: TechnicalGoldenCase,
+    effect: TechnicalAgentEffect,
+    key: str,
+    actual_getter,
+    *,
+    cast_int: bool = False,
+    cast_bool: bool = False,
+) -> None:
+    if key not in case.expected:
+        return
+    expected_value = case.expected[key]
+    if cast_int:
+        expected_value = int(expected_value)
+    if cast_bool:
+        expected_value = bool(expected_value)
+    actual_value = actual_getter(effect)
+    if actual_value != expected_value:
+        raise AssertionError(f"{case.filename}: {key} expected {expected_value!r}, got {actual_value!r}")
+
+
+def _assert_reason_codes_include(case: TechnicalGoldenCase, effect: TechnicalAgentEffect) -> None:
     expected = case.expected
-    if "applied_adjustment" in expected:
-        if effect.applied_adjustment != int(expected["applied_adjustment"]):
-            raise AssertionError(
-                f"{case.filename}: applied_adjustment expected {expected['applied_adjustment']}, "
-                f"got {effect.applied_adjustment}"
-            )
-    if "final_decision" in expected:
-        if effect.final_decision != expected["final_decision"]:
-            raise AssertionError(
-                f"{case.filename}: final_decision expected {expected['final_decision']!r}, "
-                f"got {effect.final_decision!r}"
-            )
-    if "counterfactual_decision" in expected:
-        if effect.counterfactual_decision != expected["counterfactual_decision"]:
-            raise AssertionError(
-                f"{case.filename}: counterfactual_decision expected "
-                f"{expected['counterfactual_decision']!r}, got {effect.counterfactual_decision!r}"
-            )
-    if "decision_changed" in expected:
-        if effect.decision_changed != bool(expected["decision_changed"]):
-            raise AssertionError(
-                f"{case.filename}: decision_changed expected {expected['decision_changed']}, "
-                f"got {effect.decision_changed}"
-            )
-    if "reason_codes_include" in expected:
-        missing = [code for code in expected["reason_codes_include"] if code not in effect.reason_codes]
-        if missing:
-            raise AssertionError(f"{case.filename}: missing expected reason codes {missing}")
-    if "final_confidence_not_raised" in expected and bool(expected["final_confidence_not_raised"]):
-        if effect.final_confidence > effect.baseline_confidence:
-            raise AssertionError(f"{case.filename}: final_confidence was raised above baseline_confidence")
+    if "reason_codes_include" not in expected:
+        return
+    missing = [code for code in expected["reason_codes_include"] if code not in effect.reason_codes]
+    if missing:
+        raise AssertionError(f"{case.filename}: missing expected reason codes {missing}")
+
+
+def _assert_final_confidence_not_raised(case: TechnicalGoldenCase, effect: TechnicalAgentEffect) -> None:
+    expected = case.expected
+    if not bool(expected.get("final_confidence_not_raised", False)):
+        return
+    if effect.final_confidence > effect.baseline_confidence:
+        raise AssertionError(f"{case.filename}: final_confidence was raised above baseline_confidence")
 
 
 def _assert_risk_field_expectation(case: TechnicalGoldenCase, effect: TechnicalAgentEffect) -> None:
