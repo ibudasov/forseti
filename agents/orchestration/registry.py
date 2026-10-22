@@ -12,6 +12,7 @@ from google.adk.agents import BaseAgent, LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
 
 from agents.config import HARD_RULES_TEXT, AgentWorkflowConfig
+from agents.orchestration.typed_view_agent import TypedTechnicalViewAgent
 from agents.tools.data_collector import build_structured_data_collector_tool
 from agents.tools.retrieval import build_retriever_tool
 from agents.tools.risk_engine import build_risk_manager_tool
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
     from app.rag.embedding import EmbeddingClient
+    from app.schemas.technicals import TechnicalAssessmentResult
 
 ROOT_AGENT_NAME = "trade_analyst_supervisor"
 
@@ -62,7 +64,7 @@ class AgentRegistry:
     """All constructed agents and tools for a single agentic workflow run."""
 
     tools: Dict[str, FunctionTool] = field(default_factory=dict)
-    specialists: Dict[str, LlmAgent] = field(default_factory=dict)
+    specialists: Dict[str, BaseAgent] = field(default_factory=dict)
     root_agent: Optional[BaseAgent] = None
 
 
@@ -116,12 +118,22 @@ def build_deterministic_tools(
 def build_specialist_agents(
     config: AgentWorkflowConfig,
     tools: Dict[str, FunctionTool],
-) -> Dict[str, LlmAgent]:
-    """Build the LLM specialist agents (Fundamental Analyst, Technical
-    Analyst, Decision Synthesizer, Critic/Guardrail).
+    *,
+    technical_assessment: Optional["TechnicalAssessmentResult"] = None,
+) -> Dict[str, BaseAgent]:
+    """Build the specialist agents (Fundamental Analyst, Technical Analyst,
+    Decision Synthesizer, Critic/Guardrail).
 
     Constructing an `LlmAgent` only validates configuration; it does not
     call the model until the agent is actually run.
+
+    `technical_assessment` is the validated TA-4 result. When it is not
+    `None` (i.e. `TECHNICAL_AGENT_MODE != off`), the Technical Analyst slot
+    is filled by the deterministic `TypedTechnicalViewAgent` instead of the
+    narrative `LlmAgent`, so there is only one technical interpretation per
+    run. Passing `None` (the default, and the only option when the mode is
+    `off`) keeps the original narrative `LlmAgent` for backward
+    compatibility.
     """
     generation_config = {"temperature": config.temperature}
 
@@ -145,24 +157,41 @@ def build_specialist_agents(
         output_key=FUNDAMENTAL_VIEW_OUTPUT_KEY,
     )
 
-    technical_analyst = LlmAgent(
-        name=TECHNICAL_ANALYST_NAME,
-        model=config.model_name,
-        description="Interprets trend, RSI, support/resistance, and momentum from deterministic indicators.",
-        instruction=(
-            f"{HARD_RULES_TEXT}\n\n"
-            f"The prior fundamental view is available in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}. "
-            "Use it only as context for agreement or tension; do not let it override the deterministic "
-            "technical indicators.\n"
-            "You are the Technical Analyst. Given the deterministic technical "
-            "indicators, describe trend, momentum, and support/resistance. Do not "
-            "compute new indicator values; only interpret the ones provided.\n"
-            f"{NO_TOOLS_TEXT}"
-        ),
-        disallow_transfer_to_parent=True,
-        disallow_transfer_to_peers=True,
-        generate_content_config=generation_config,
-        output_key=TECHNICAL_VIEW_OUTPUT_KEY,
+    technical_analyst: BaseAgent
+    if technical_assessment is not None:
+        technical_analyst = TypedTechnicalViewAgent(
+            name=TECHNICAL_ANALYST_NAME,
+            description="Renders the validated technical assessment as the single source of technical interpretation.",
+            assessment=technical_assessment,
+            output_key=TECHNICAL_VIEW_OUTPUT_KEY,
+        )
+    else:
+        technical_analyst = LlmAgent(
+            name=TECHNICAL_ANALYST_NAME,
+            model=config.model_name,
+            description="Interprets trend, RSI, support/resistance, and momentum from deterministic indicators.",
+            instruction=(
+                f"{HARD_RULES_TEXT}\n\n"
+                f"The prior fundamental view is available in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}. "
+                "Use it only as context for agreement or tension; do not let it override the deterministic "
+                "technical indicators.\n"
+                "You are the Technical Analyst. Given the deterministic technical "
+                "indicators, describe trend, momentum, and support/resistance. Do not "
+                "compute new indicator values; only interpret the ones provided.\n"
+                f"{NO_TOOLS_TEXT}"
+            ),
+            disallow_transfer_to_parent=True,
+            disallow_transfer_to_peers=True,
+            generate_content_config=generation_config,
+            output_key=TECHNICAL_VIEW_OUTPUT_KEY,
+        )
+
+    technical_view_guidance = (
+        f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)} as a validated "
+        "JSON assessment produced by the deterministic technical analysis service; cite its metric_ids "
+        "and do not reinterpret the raw indicators.\n"
+        if technical_assessment is not None
+        else f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)}.\n"
     )
 
     decision_synthesizer = LlmAgent(
@@ -172,7 +201,7 @@ def build_specialist_agents(
         instruction=(
             f"{HARD_RULES_TEXT}\n\n"
             f"The fundamental view is stored in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}.\n"
-            f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)}.\n"
+            f"{technical_view_guidance}"
             "You are the Decision Synthesizer. Combine the rules engine decision, "
             "the risk manager's trade levels, and the analyst views into a single "
             "human-readable memo. Reuse the risk manager's numbers verbatim; never "
@@ -194,7 +223,7 @@ def build_specialist_agents(
         instruction=(
             f"{HARD_RULES_TEXT}\n\n"
             f"The fundamental view is stored in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}.\n"
-            f"The technical view is stored in {_state_key_reference(TECHNICAL_VIEW_OUTPUT_KEY)}.\n"
+            f"{technical_view_guidance}"
             f"The draft recommendation is stored in {_state_key_reference(DRAFT_RECOMMENDATION_OUTPUT_KEY)}.\n"
             "You are the Critic/Guardrail. Review the draft recommendation for "
             "contradictions between the fundamental and technical views, claims "
@@ -217,7 +246,7 @@ def build_specialist_agents(
     }
 
 
-def build_root_agent(specialists: Dict[str, LlmAgent]) -> SequentialAgent:
+def build_root_agent(specialists: Dict[str, BaseAgent]) -> SequentialAgent:
     """Build the Trade Analyst Supervisor root agent as fixed control flow."""
     return SequentialAgent(
         name=ROOT_AGENT_NAME,
@@ -232,6 +261,7 @@ def build_agent_registry(
     embedding_client: Optional["EmbeddingClient"] = None,
     risk_config: Optional[RiskConfig] = None,
     today: Optional[date] = None,
+    technical_assessment: Optional["TechnicalAssessmentResult"] = None,
 ) -> AgentRegistry:
     """Build the full agent registry for a single agentic workflow run.
 
@@ -240,6 +270,6 @@ def build_agent_registry(
     tools = build_deterministic_tools(
         engine=engine, embedding_client=embedding_client, risk_config=risk_config, today=today
     )
-    specialists = build_specialist_agents(config, tools)
+    specialists = build_specialist_agents(config, tools, technical_assessment=technical_assessment)
     root_agent = build_root_agent(specialists)
     return AgentRegistry(tools=tools, specialists=specialists, root_agent=root_agent)

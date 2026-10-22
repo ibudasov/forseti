@@ -136,7 +136,9 @@ def _workflow(monkeypatch, *, events=(), raise_error: Exception | None = None, w
     monkeypatch.setattr(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None, today=None: AgentRegistry(tools=tools, specialists={}, root_agent=None),
+        lambda config, engine=None, today=None, **_kwargs: AgentRegistry(
+            tools=tools, specialists={}, root_agent=None
+        ),
     )
     monkeypatch.setattr(
         workflow_module,

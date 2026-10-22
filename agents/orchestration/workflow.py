@@ -269,6 +269,21 @@ def _merged_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str
     return merged
 
 
+def _typed_technical_trace_output(text: str) -> dict[str, Any]:
+    """Build the trace `output` payload for the typed-view technical step.
+
+    The typed-view agent emits the rendered assessment as its event text
+    (see `agents.orchestration.typed_view_agent`); this re-parses it so the
+    trace records `source: "typed_assessment"` alongside the rendered
+    fields, rather than a raw `text` blob.
+    """
+    try:
+        rendered = json.loads(text) if text else {}
+    except (TypeError, ValueError):
+        rendered = {"text": text}
+    return {"source": "typed_assessment", **rendered}
+
+
 def _objection_counts_by_severity(objections: Iterable[CritiqueObjection]) -> dict[str, int]:
     return dict(Counter(objection.severity for objection in objections))
 
@@ -415,7 +430,9 @@ class AgenticAnalysisWorkflow:
             response=response,
             trace_recorder=trace_recorder,
         )
-        registry = self._build_registry(trace_recorder, warnings, today=analysis_date)
+        registry = self._build_registry(
+            trace_recorder, warnings, today=analysis_date, technical_assessment=technical_assessment
+        )
 
         self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
         user_message = f"Analyze ticker {resolved_ticker}"
@@ -537,6 +554,7 @@ class AgenticAnalysisWorkflow:
         warnings: list[str],
         *,
         today: date | None,
+        technical_assessment: TechnicalAssessmentResult | None = None,
     ) -> AgentRegistry:
         registry_kwargs = {
             "config": self.config,
@@ -545,6 +563,8 @@ class AgenticAnalysisWorkflow:
         }
         if self.embedding_client is not None:
             registry_kwargs["embedding_client"] = self.embedding_client
+        if technical_assessment is not None:
+            registry_kwargs["technical_assessment"] = technical_assessment
         registry = build_agent_registry(**registry_kwargs)
         if _runner_ignores_registry(self.runner_factory):
             return registry
@@ -648,6 +668,18 @@ class AgenticAnalysisWorkflow:
                         critic_result.step,
                     )
                     pending_synthesis = None
+                    continue
+
+                if author == TECHNICAL_ANALYST_NAME and technical_assessment is not None:
+                    self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+                    pending_synthesis = None
+                    trace_recorder.record_completed(
+                        author,
+                        tool_calls=tool_calls,
+                        output=_typed_technical_trace_output(text),
+                        latency_ms=latency_ms,
+                        token_usage=usage,
+                    )
                     continue
 
                 self._flush_pending_synthesis(trace_recorder, pending_synthesis)
@@ -838,9 +870,9 @@ class AgenticAnalysisWorkflow:
         token_usage: dict[str, int],
         pending_synthesis: _PendingTraceStep | None,
     ) -> _CriticStepResult:
-        # `technical_assessment` is threaded through for TA-5, which will pass
-        # it into `build_analyst_views` alongside the fundamental assessment.
-        del trace_recorder, technical_assessment
+        # `technical_assessment` threads TA-4's validated result into the
+        # Critic, so there is a single technical interpretation per run.
+        del trace_recorder
         mode = _critic_mode()
         if mode == "off":
             return _CriticStepResult(
@@ -862,7 +894,9 @@ class AgenticAnalysisWorkflow:
                 memo=self._synthesizer_memo(pending_synthesis),
                 source="decision_synthesizer",
             ),
-            analyst_views=build_analyst_views(fundamental=fundamental_assessment),
+            analyst_views=build_analyst_views(
+                fundamental=fundamental_assessment, technical=technical_assessment
+            ),
             deterministic_warnings=response.warnings,
             deterministic_diagnosis=response.diagnosis,
             as_of=request.as_of_date,
