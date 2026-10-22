@@ -7,8 +7,6 @@
 
 **Revert first.** If `main` goes red, open a revert PR for the offending merge immediately. Do not fix forward. A revert is always correct and always reviewable; a speculative fix authored while nobody can run the code is not.
 
-**One issue per PR, no scope creep.** A PR may only touch files listed in its issue's "Files touched" section. Anything beyond that requires a comment in the PR explaining why, and an edit to the issue. Unrelated refactors, dependency bumps, and drive-by renames are rejected on sight.
-
 **Evidence is mandatory.** The PR body must contain: the exact commands run and their pass/fail (already required above), the rendered scorecard table, and the result of every numbered manual-validation step from the issue — executed by the author, with observed output, not restated as intentions.
 
 **Work-in-progress limit.** At most two open agent PRs at a time, and never two PRs touching the same module. Merge or close before starting a third.
