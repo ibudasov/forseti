@@ -32,6 +32,13 @@ from app.schemas.fundamentals import (
     FundamentalAssessmentValidation,
     FundamentalContextCoverage,
 )
+from app.schemas.technicals import (
+    TechnicalAnalysisRequest,
+    TechnicalAssessmentResponse,
+    TechnicalAssessmentResult,
+    TechnicalAssessmentValidation,
+    TechnicalContextCoverage,
+)
 from app.settings import Settings
 
 
@@ -901,6 +908,115 @@ def test_fundamental_enforced_mode_promotes_trade_with_deterministic_risk(monkey
     assert response.fundamental_agent_effect.final_decision == "trade"
 
 
+def test_technical_mode_off_skips_context_builder(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_technical_agent_mode", lambda: "off")
+    monkeypatch.setattr(
+        workflow_module,
+        "build_technical_analysis_request",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not build context")),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "TechnicalAnalyst",
+        lambda: (_ for _ in ()).throw(AssertionError("should not call analyst")),
+    )
+
+    response = _workflow(monkeypatch, events=()).analyze("NVDA")
+
+    assert response.technical_agent_effect is None
+    step_names = [step.agent_name for step in response.trace.steps]
+    assert "technical_context_builder" not in step_names
+    technical_step = [step for step in response.trace.steps if step.agent_name == "technical_analyst"][0]
+    assert technical_step.status == "skipped"
+
+
+def test_technical_shadow_mode_records_counterfactual_without_changing_baseline(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_technical_agent_mode", lambda: "shadow")
+    workflow = _workflow(monkeypatch, events=())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _trade_response(checklist_score=8).model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_technical_analysis_request", lambda *a, **k: _technical_request())
+    monkeypatch.setattr(
+        workflow_module,
+        "TechnicalAnalyst",
+        lambda: _AnalystStub(_technical_assessment(accepted=True, adjustment=-1)),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "trade"
+    assert response.entry_range is not None
+    assert response.technical_agent_effect is not None
+    assert response.technical_agent_effect.mode == "shadow"
+    assert response.technical_agent_effect.counterfactual_decision == "watchlist"
+    assert response.technical_agent_effect.final_decision == "trade"
+    assert response.trace.technical_agent_effect is not None
+    technical_step_names = [step.agent_name for step in response.trace.steps]
+    assert "technical_context_builder" in technical_step_names
+    assert "technical_analyst" in technical_step_names
+
+
+def test_technical_enforced_mode_downgrades_trade_and_clears_risk_fields(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_technical_agent_mode", lambda: "enforced")
+    workflow = _workflow(monkeypatch, events=())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _trade_response(checklist_score=8).model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_technical_analysis_request", lambda *a, **k: _technical_request())
+    monkeypatch.setattr(
+        workflow_module,
+        "TechnicalAnalyst",
+        lambda: _AnalystStub(_technical_assessment(accepted=True, adjustment=-1)),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert response.entry_range is None
+    assert response.stop_loss is None
+    assert response.take_profit is None
+    assert response.risk_reward is None
+    assert response.position_size_eur is None
+    assert response.time_stop_at is None
+    assert response.technical_agent_effect is not None
+    assert response.technical_agent_effect.final_decision == "watchlist"
+    assert response.technical_agent_effect.final_confidence <= response.technical_agent_effect.baseline_confidence
+
+
+def test_technical_failing_model_port_leaves_deterministic_response_unchanged(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_technical_agent_mode", lambda: "enforced")
+    workflow = _workflow(monkeypatch, events=())
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _trade_response(checklist_score=8).model_copy(deep=True),
+    )
+    monkeypatch.setattr(workflow_module, "build_technical_analysis_request", lambda *a, **k: _technical_request())
+    monkeypatch.setattr(
+        workflow_module,
+        "TechnicalAnalyst",
+        lambda: _AnalystStub(
+            _technical_assessment(accepted=False, adjustment=0, reason_codes=["provider_error:timeout"])
+        ),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.decision == "trade"
+    assert response.entry_range is not None
+    assert response.technical_agent_effect is not None
+    assert response.technical_agent_effect.accepted is False
+    assert response.technical_agent_effect.final_decision == "trade"
+    degraded_step = [step for step in response.trace.steps if step.agent_name == "technical_analyst"][0]
+    assert degraded_step.status == "degraded"
+    assert degraded_step.output["reason"] == "assessment_invalid"
+
+
 class _AnalystStub:
     def __init__(self, result):
         self._result = result
@@ -1135,4 +1251,121 @@ def _critique_request(draft: DraftRecommendation) -> CritiqueRequest:
             "force_no_trade",
             "request_revision",
         ],
+    )
+
+
+def _trade_response(*, checklist_score: int) -> AnalyzeResponse:
+    return AnalyzeResponse(
+        ticker="NVDA",
+        decision="trade",
+        confidence=0.72,
+        reasons=["deterministic"],
+        warnings=[],
+        engine_version="v1.rules.0",
+        trace_id="deterministic-trace",
+        entry_range=(100.0, 101.0),
+        stop_loss=95.0,
+        take_profit=(110.0, 115.0),
+        risk_reward=2.0,
+        position_size_eur=500.0,
+        diagnosis=DecisionDiagnosis(
+            stage="checklist",
+            rule_id="checklist_passed",
+            detail=f"score {checklist_score}/11",
+            checklist_score=checklist_score,
+            debug_reason=f"checklist/checklist_passed: score {checklist_score}/11",
+        ),
+    )
+
+
+def _technical_request() -> TechnicalAnalysisRequest:
+    from decimal import Decimal
+
+    from app.domain.technicals import DeterministicTechnicalAnalysis, TechnicalMetricRef, TechnicalRuleResult
+
+    return TechnicalAnalysisRequest(
+        run_id="run-1",
+        context_hash="ctx-1",
+        ticker="NVDA",
+        sector="ai",
+        snapshot_at=datetime(2026, 9, 8, 23, 59, 59, tzinfo=timezone.utc),
+        as_of_date=date(2026, 9, 8),
+        deterministic_result=DeterministicTechnicalAnalysis(
+            ticker="NVDA",
+            as_of_date=date(2026, 9, 8),
+            score=2,
+            maximum_score=5,
+            rule_results=[
+                TechnicalRuleResult(
+                    rule_id="rsi_healthy",
+                    status="passed",
+                    points_awarded=1,
+                    points_available=1,
+                    metric_ids=["rsi_14:2026-09-08"],
+                    explanation="rsi_14 55.00 within healthy range",
+                ),
+                TechnicalRuleResult(
+                    rule_id="volume_trend",
+                    status="passed",
+                    points_awarded=1,
+                    points_available=1,
+                    metric_ids=["volume_trend:2026-09-08"],
+                    explanation="volume_trend 1.20 >= 1.0 min",
+                ),
+            ],
+            warnings=[],
+            metrics=[
+                TechnicalMetricRef(
+                    metric_id="rsi_14:2026-09-08",
+                    metric_name="rsi_14",
+                    value=Decimal("55.00"),
+                    unit="rsi_points",
+                    as_of_date=date(2026, 9, 8),
+                ),
+                TechnicalMetricRef(
+                    metric_id="volume_trend:2026-09-08",
+                    metric_name="volume_trend",
+                    value=Decimal("1.20"),
+                    unit="ratio",
+                    as_of_date=date(2026, 9, 8),
+                ),
+            ],
+        ),
+        facts=[],
+        series=[],
+        coverage=TechnicalContextCoverage(
+            bar_count=200,
+            required_facts_missing=[],
+            latest_bar_date=date(2026, 9, 8),
+            bars_stale=False,
+            series_truncated=False,
+        ),
+    )
+
+
+def _technical_assessment(
+    *, accepted: bool, adjustment: int, reason_codes: list[str] | None = None
+) -> TechnicalAssessmentResult:
+    response = TechnicalAssessmentResponse(
+        run_id="run-1",
+        context_hash="ctx-1",
+        status="completed",
+        overall_signal="negative" if adjustment < 0 else "neutral",
+        trend_state="range",
+        momentum_state="weakening" if adjustment < 0 else "stable",
+        proposed_score_adjustment=adjustment,
+        findings=[],
+        contradictions=[],
+        risk_flags=[],
+        missing_information=[],
+        summary="Technical assessment summary.",
+    )
+    return TechnicalAssessmentResult(
+        response=response,
+        validation=TechnicalAssessmentValidation(accepted=accepted, reason_codes=reason_codes or []),
+        raw_output="{}",
+        latency_ms=5.0,
+        token_usage={"total_token_count": 3},
+        model_name="fake-technical",
+        prompt_version="technical-analyst.v1",
     )

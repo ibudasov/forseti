@@ -96,7 +96,7 @@ def test_positive_adjustment_is_defensively_rejected():
         missing_information=[],
         summary="Bypassed validation to exercise the defensive clamp.",
     )
-    assessment = TechnicalAssessmentResult(
+    assessment = TechnicalAssessmentResult.model_construct(
         response=bypassed_response,
         validation=TechnicalAssessmentValidation(accepted=True, reason_codes=[]),
         raw_output="",
