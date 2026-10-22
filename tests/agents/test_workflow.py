@@ -562,7 +562,10 @@ def test_critic_trace_output_summarizes_objections_and_decision_change(monkeypat
                 "category": "unsupported_claim",
                 "severity": "high",
                 "source": "model",
-                "reason": "unsupported_claim: Unsupported claim. (metrics=revenue_growth:2026-06-30; chunks=10; warnings=warn:stale_data)",
+                "reason": (
+                    "unsupported_claim: Unsupported claim. "
+                    "(metrics=revenue_growth:2026-06-30; chunks=10; warnings=warn:stale_data)"
+                ),
             },
             {
                 "objection_code": "model:2",

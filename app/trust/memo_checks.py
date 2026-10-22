@@ -342,7 +342,8 @@ def _risk_reward_patterns() -> tuple[re.Pattern[str], ...]:
             re.IGNORECASE,
         ),
         re.compile(
-            rf"\b(?:r/?r|risk\s*/?\s*reward|risk[- ]reward)\b[^.\n]{{0,{_WINDOW}}}?(?P<left>{_RATIO_NUMBER})\s*:\s*(?P<right>{_RATIO_NUMBER})",
+            rf"\b(?:r/?r|risk\s*/?\s*reward|risk[- ]reward)\b"
+            rf"[^.\n]{{0,{_WINDOW}}}?(?P<left>{_RATIO_NUMBER})\s*:\s*(?P<right>{_RATIO_NUMBER})",
             re.IGNORECASE,
         ),
     )

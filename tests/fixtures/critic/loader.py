@@ -763,6 +763,52 @@ def _assert_validation(case: CriticGoldenCase, validation: CritiqueValidation) -
         raise AssertionError(f"{case.filename}: validation mismatch\n" + "\n".join(mismatches))
 
 
+def _assert_live_objection_counts(
+    filename: str,
+    expectations: dict,
+    deterministic_objections: list[CritiqueObjection],
+    model_objections: list[CritiqueObjection],
+) -> None:
+    expected_total_objections = _optional_int(
+        expectations.get("minimum_total_objection_count"),
+        filename,
+        "expected.live.minimum_total_objection_count",
+    )
+    if expected_total_objections is not None:
+        actual_total = len(deterministic_objections) + len(model_objections)
+        if actual_total < expected_total_objections:
+            raise AssertionError(
+                f"{filename}: expected at least {expected_total_objections} objections, got {actual_total}"
+            )
+
+    expected_model_objections = _optional_int(
+        expectations.get("minimum_model_objection_count"),
+        filename,
+        "expected.live.minimum_model_objection_count",
+    )
+    if expected_model_objections is not None:
+        actual_model = len(model_objections)
+        if actual_model < expected_model_objections:
+            raise AssertionError(
+                f"{filename}: expected at least {expected_model_objections} model objections, got {actual_model}"
+            )
+
+    maximum_high_severity = _optional_int(
+        expectations.get("maximum_high_severity_model_objection_count"),
+        filename,
+        "expected.live.maximum_high_severity_model_objection_count",
+    )
+    if maximum_high_severity is not None:
+        high_severity_model_count = len(
+            [objection for objection in model_objections if objection.severity == "high"]
+        )
+        if high_severity_model_count > maximum_high_severity:
+            raise AssertionError(
+                f"{filename}: expected at most {maximum_high_severity} high-severity model objections, "
+                f"got {high_severity_model_count}"
+            )
+
+
 def _assert_live_expectations(
     case: CriticGoldenCase,
     critique_result: CritiqueResult,
@@ -773,6 +819,10 @@ def _assert_live_expectations(
     if expectations is None:
         return
 
+    model_objections = [
+        objection for objection in critique_result.response.objections if objection.source == "model"
+    ]
+
     _assert_category_subset(
         case.filename,
         "expected.live.required_deterministic_categories",
@@ -782,56 +832,11 @@ def _assert_live_expectations(
     _assert_category_subset(
         case.filename,
         "expected.live.required_model_categories",
-        actual_categories={
-            objection.category
-            for objection in critique_result.response.objections
-            if objection.source == "model"
-        },
+        actual_categories={objection.category for objection in model_objections},
         required_categories=_string_list(expectations.get("required_model_categories"), case.filename),
     )
 
-    expected_total_objections = _optional_int(
-        expectations.get("minimum_total_objection_count"),
-        case.filename,
-        "expected.live.minimum_total_objection_count",
-    )
-    if expected_total_objections is not None:
-        actual_total = len(deterministic_objections) + len(critique_result.response.objections)
-        if actual_total < expected_total_objections:
-            raise AssertionError(
-                f"{case.filename}: expected at least {expected_total_objections} objections, got {actual_total}"
-            )
-
-    expected_model_objections = _optional_int(
-        expectations.get("minimum_model_objection_count"),
-        case.filename,
-        "expected.live.minimum_model_objection_count",
-    )
-    if expected_model_objections is not None:
-        actual_model = len([objection for objection in critique_result.response.objections if objection.source == "model"])
-        if actual_model < expected_model_objections:
-            raise AssertionError(
-                f"{case.filename}: expected at least {expected_model_objections} model objections, got {actual_model}"
-            )
-
-    maximum_high_severity = _optional_int(
-        expectations.get("maximum_high_severity_model_objection_count"),
-        case.filename,
-        "expected.live.maximum_high_severity_model_objection_count",
-    )
-    if maximum_high_severity is not None:
-        high_severity_model_count = len(
-            [
-                objection
-                for objection in critique_result.response.objections
-                if objection.source == "model" and objection.severity == "high"
-            ]
-        )
-        if high_severity_model_count > maximum_high_severity:
-            raise AssertionError(
-                f"{case.filename}: expected at most {maximum_high_severity} high-severity model objections, "
-                f"got {high_severity_model_count}"
-            )
+    _assert_live_objection_counts(case.filename, expectations, deterministic_objections, model_objections)
 
     required_reason_codes = _string_list(expectations.get("required_reason_codes"), case.filename)
     missing_reason_codes = [code for code in required_reason_codes if code not in effect.reason_codes]
