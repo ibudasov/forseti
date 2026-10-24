@@ -264,10 +264,15 @@ def test_runner_exception_persists_failed_partial_trace(monkeypatch, db_engine):
 
     workflow = _workflow(monkeypatch, raise_error=RuntimeError("vertex unavailable"), engine=db_engine)
     with pytest.raises(GoogleWorkflowError, match="vertex unavailable"):
-        workflow.analyze("NVDA")
+        workflow.analyze(
+            "NVDA",
+            request=AnalyzeRequest(ticker="NVDA", as_of_date=date(2024, 1, 2)),
+        )
 
     trace = load_trace(run_id, engine=db_engine)
     assert trace is not None
+    assert trace.as_of_date == date(2024, 1, 2)
+    assert trace.as_of_date_source == "request"
     failed_steps = [step for step in trace.steps if step.status == "failed"]
     assert len(failed_steps) == 1
     assert failed_steps[0].output["reason"] == "adk_runner_exception"

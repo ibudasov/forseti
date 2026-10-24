@@ -97,12 +97,11 @@ ingest`** (persisted shadow runs with real `as_of_date`/ticker data, plus
 ingested daily price bars covering at least 20 trading days after each
 `as_of_date`).
 
-Known limitation to carry forward once real data exists: `AgentRun` has no
-`as_of_date` column, only `created_at`. `scripts/technical_backtest.py`
-approximates `as_of_date` as `run.created_at.date()`, which is accurate for
-a frozen trust-matrix batch invoked close to the as-of date but would drift
-for organically-scheduled runs. See the module docstring in
-`scripts/technical_backtest.py` for the exact caveat.
+The backtest uses the persisted `AgentRun.as_of_date` as its forward-return
+anchor. Legacy rows are backfilled from `created_at.date()` and marked with
+`as_of_date_source=created_at_backfill`; report output includes the number of
+such rows used. If a row has no as-of date, the consumer warns and falls back
+to `created_at.date()`.
 
 ## Promotion-criteria status
 

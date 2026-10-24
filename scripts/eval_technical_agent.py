@@ -21,6 +21,7 @@ from sqlmodel import select
 
 from app.db.models import AgentRun, AgentRunStep
 from app.db.session import get_engine, get_session
+from app.services.agent_run_dates import render_agent_run_date_summary, summarize_agent_run_dates
 from app.settings import get_settings
 from tests.fixtures.technical.loader import (
     DEFAULT_FIXTURE_DIR,
@@ -95,13 +96,22 @@ def _run_shadow_report(args: argparse.Namespace) -> int:
     runs = _load_shadow_runs(limit=args.limit)
     steps = _load_shadow_steps([run.run_id for run in runs])
     report = build_shadow_report(runs, steps)
+    shadow_runs = [
+        run
+        for run in runs
+        if run.technical_agent_effect is not None
+        and run.technical_agent_effect.get("mode") == "shadow"
+    ]
+    date_summary = summarize_agent_run_dates(shadow_runs)
     if args.sample > 0 and args.out is not None:
         sample = build_shadow_sample(runs, limit=args.sample)
         _write_shadow_sample(args.out, sample)
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        report_data = report.to_dict()
+        report_data.update(date_summary)
+        print(json.dumps(report_data, indent=2))
         return 0
-    print(render_shadow_markdown(report), end="")
+    print(render_shadow_markdown(report) + render_agent_run_date_summary(date_summary), end="")
     return 0
 
 

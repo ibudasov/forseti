@@ -61,6 +61,7 @@ from app.services.technical_context import build_technical_analysis_request
 from app.services.technical_policy import apply_technical_policy
 from app.services.time_stop import calculate_time_stop_at
 from app.services.analyzer import analyze_request
+from app.services.agent_run_dates import resolve_agent_run_as_of_date
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -468,6 +469,7 @@ class AgenticAnalysisWorkflow:
             partial_trace = self._build_trace(
                 run_id=run_id,
                 ticker=resolved_ticker,
+                as_of_date=analysis_date,
                 trace_recorder=trace_recorder,
                 response=response,
                 token_usage=exc.result.token_usage,
@@ -500,6 +502,7 @@ class AgenticAnalysisWorkflow:
         trace = self._build_trace(
             run_id=run_id,
             ticker=resolved_ticker,
+            as_of_date=analysis_date,
             trace_recorder=trace_recorder,
             response=response,
             token_usage=adk_result.token_usage,
@@ -1406,6 +1409,7 @@ class AgenticAnalysisWorkflow:
         *,
         run_id: str,
         ticker: str,
+        as_of_date: date | None,
         trace_recorder: TraceRecorder,
         response: AnalyzeResponse,
         token_usage: dict[str, int],
@@ -1417,6 +1421,8 @@ class AgenticAnalysisWorkflow:
         return AnalysisTrace(
             run_id=run_id,
             ticker=ticker,
+            as_of_date=as_of_date,
+            as_of_date_source="request" if as_of_date is not None else None,
             steps=trace_recorder.steps(),
             final_decision=response.decision,
             total_latency_ms=total_latency_ms,
@@ -1459,6 +1465,10 @@ class AgenticAnalysisWorkflow:
             run_id=trace.run_id,
             ticker=trace.ticker,
             created_at=datetime.now(timezone.utc),
+            as_of_date=trace.as_of_date,
+            as_of_date_source=trace.as_of_date_source or (
+                "request" if trace.as_of_date is not None else None
+            ),
             final_decision=trace.final_decision,
             total_latency_ms=trace.total_latency_ms,
             token_usage=trace.token_usage,
@@ -1498,6 +1508,8 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
     return AnalysisTrace(
         run_id=run.run_id,
         ticker=run.ticker,
+        as_of_date=resolve_agent_run_as_of_date(run),
+        as_of_date_source=run.as_of_date_source,
         steps=steps,
         final_decision=final_decision,
         total_latency_ms=run.total_latency_ms,

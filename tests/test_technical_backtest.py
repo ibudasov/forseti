@@ -7,15 +7,20 @@ contract.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
+from sqlmodel import Session
 
+from app.db.models import AgentRun, PriceBar, SectorTag, Security
 from scripts.technical_backtest import (
     Bar,
     ShadowRunRecord,
     build_backtest_report,
     forward_return,
+    load_bars_by_ticker,
+    load_shadow_records,
     render_markdown,
 )
 
@@ -177,3 +182,60 @@ def test_render_markdown_reports_sample_sizes_without_significance_claims():
     assert "technical_neutral" in markdown
     assert "n/a" in markdown  # neutral cohort has no samples
     assert "no p-value or significance claim is made" in markdown
+
+
+def test_backtest_uses_persisted_as_of_date_instead_of_run_creation_date(db_engine):
+    as_of_date = date(2024, 1, 2)
+    bars = _daily_bars(as_of_date, [100.0] * 20 + [90.0])
+    with Session(db_engine) as session:
+        security = Security(
+            ticker="NVDA",
+            name="NVIDIA",
+            exchange="NASDAQ",
+            sector_tag=SectorTag.ai,
+        )
+        session.add(security)
+        session.flush()
+        session.add_all(
+            [
+                PriceBar(
+                    security_id=security.id,
+                    bar_date=bar.bar_date,
+                    open=Decimal(str(bar.close)),
+                    high=Decimal(str(bar.close)),
+                    low=Decimal(str(bar.close)),
+                    close=Decimal(str(bar.close)),
+                    volume=1,
+                )
+                for bar in bars
+            ]
+        )
+        session.add(
+            AgentRun(
+                run_id="historical-shadow-run",
+                ticker="NVDA",
+                created_at=datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc),
+                as_of_date=as_of_date,
+                as_of_date_source="request",
+                token_usage={},
+                warnings=[],
+                technical_agent_effect={
+                    "mode": "shadow",
+                    "baseline_decision": "trade",
+                    "counterfactual_decision": "watchlist",
+                },
+            )
+        )
+        session.commit()
+
+    records = load_shadow_records(db_engine)
+    report = build_backtest_report(
+        records,
+        load_bars_by_ticker(db_engine, ["NVDA"]),
+        horizon_trading_days=20,
+    )
+
+    assert records[0].as_of_date == as_of_date
+    assert report.downgrade.mean_forward_return == pytest.approx(-0.10)
+    assert report.excluded_insufficient_bars_count == 0
+    assert report.backfilled_rows_used == 0

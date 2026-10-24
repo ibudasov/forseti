@@ -23,7 +23,10 @@ Entities:
 - `agent_runs`
   - One row per agentic workflow run, including persisted `fundamental_agent_effect`,
     `technical_agent_effect`, and `critic_effect` guardrail outcomes as nullable `JSONB` columns.
-    See [`docs/agent-trace.md`](agent-trace.md) for the trace fields and SQL examples.
+    `as_of_date` is the analysis date supplied by the request; its `as_of_date_source` is
+    `request` or `created_at_backfill` for migrated legacy rows. Both columns are nullable
+    when no analysis date was supplied. The `(ticker, as_of_date)` index supports date-scoped
+    run lookups. See [`docs/agent-trace.md`](agent-trace.md) for the trace fields and SQL examples.
 
 ## Key design constraints
 
