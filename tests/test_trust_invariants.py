@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse, DecisionDiagnosis, TraceStep
 from app.schemas.critique import CriticEffect, CriticVersionStamp
 from app.schemas.technicals import TechnicalAgentEffect, TechnicalAgentVersionStamp, TechnicalAssessmentResponse
@@ -10,6 +12,7 @@ from app.trust.invariants import (
     check_critic_shadow_persistence,
     check_data_gate_warning_propagation,
     check_downgrade_only_behavior,
+    check_fundamental_agent_authority,
     check_risk_field_equality,
     check_specialist_sequence,
     check_technical_agent_effect_rank,
@@ -19,6 +22,39 @@ from app.trust.invariants import (
     evaluate_agentic_invariants,
 )
 from tests.fixtures.technical.factory import build_request
+
+
+@pytest.mark.parametrize(
+    "changes,expected_code",
+    [
+        ({}, None),
+        ({"counterfactual_decision": "trade"}, "fundamental_agent_effect_rank_upgrade"),
+        ({"final_decision": "trade"}, "fundamental_agent_effect_rank_upgrade"),
+        ({"applied_adjustment": 1}, "fundamental_positive_adjustment"),
+    ],
+)
+def test_fundamental_authority_is_checked_even_if_later_agents_downgrade(changes, expected_code):
+    from app.services.fundamental_evaluation import load_fundamental_evaluation_suite
+    from app.services.fundamental_policy import apply_fundamental_policy
+
+    case = load_fundamental_evaluation_suite().cases[2]
+    effect = apply_fundamental_policy(
+        mode="shadow",
+        deterministic_response=case.deterministic_response,
+        request=case.request,
+        assessment_result=case.recorded_result,
+    )
+    response = _response(decision="no_trade")
+    response.fundamental_agent_effect = effect.model_copy(update=changes)
+
+    violations = check_fundamental_agent_authority(response)
+
+    assert [violation.code for violation in violations] == ([] if expected_code is None else [expected_code])
+    aggregated = evaluate_agentic_invariants(
+        deterministic_response=_response(), agentic_response=response, trace=_trace()
+    )
+    if expected_code is not None:
+        assert expected_code in {violation.code for violation in aggregated}
 
 
 def _response(

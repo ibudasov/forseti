@@ -140,7 +140,7 @@ class FundamentalAnalysisRequest(BaseModel):
     evidence_chunks: list[EvidenceChunkInput] = Field(default_factory=list)
     coverage: FundamentalContextCoverage
     allowed_adjustment_min: int = -2
-    allowed_adjustment_max: int = 2
+    allowed_adjustment_max: Literal[0] = 0
 
     @model_validator(mode="after")
     def _validate_request(self) -> "FundamentalAnalysisRequest":

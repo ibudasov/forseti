@@ -11,7 +11,7 @@ from app.schemas.fundamentals import (
 )
 from app.services.analyzer import SCORE_TRADE_MIN, SCORE_WATCHLIST_MIN
 
-POLICY_VERSION = "1.0"
+POLICY_VERSION = "2.0"
 HARD_BLOCKER_WARNINGS = {
     "security_inactive",
     "no_price_data",
@@ -47,8 +47,9 @@ def apply_fundamental_policy(
         reason_codes.extend(["duplicate_evidence_detected", "assessment_invalid"])
     elif raw_adjustment == 0:
         reason_codes.append("assessment_neutral")
-    elif hard_blocker and raw_adjustment > 0:
-        reason_codes.append("hard_blocker_prevents_promotion")
+    elif raw_adjustment > 0:
+        accepted = False
+        reason_codes.append("promotion_not_allowed")
     else:
         applied_adjustment = raw_adjustment
         reason_codes.append("adjustment_applied")
@@ -124,9 +125,9 @@ def _counterfactual_decision(
     adjusted_total_score: int,
     hard_blocker: bool,
 ) -> Literal["trade", "watchlist", "no_trade"]:
-    if hard_blocker:
+    if hard_blocker or baseline_decision == "no_trade":
         return baseline_decision
-    if adjusted_total_score >= SCORE_TRADE_MIN:
+    if adjusted_total_score >= SCORE_TRADE_MIN and baseline_decision == "trade":
         return "trade"
     if adjusted_total_score >= SCORE_WATCHLIST_MIN:
         return "watchlist"

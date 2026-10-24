@@ -263,9 +263,38 @@ def evaluate_agentic_invariants(
     violations.extend(check_risk_field_equality(deterministic_response, agentic_response))
     violations.extend(check_downgrade_only_behavior(deterministic_response, agentic_response))
     violations.extend(check_data_gate_warning_propagation(deterministic_response, agentic_response))
+    violations.extend(check_fundamental_agent_authority(agentic_response))
     violations.extend(check_technical_agent_effect_rank(agentic_response))
     violations.extend(check_technical_risk_fields_untouched_in_shadow(agentic_response))
     violations.extend(check_technical_step_zero_tokens_in_typed_mode(trace))
+    return violations
+
+
+def check_fundamental_agent_authority(agentic_response: AnalyzeResponse) -> list[InvariantViolation]:
+    """ADR 008: even shadow counterfactuals must respect the deterministic ceiling."""
+    effect = agentic_response.fundamental_agent_effect
+    if effect is None:
+        return []
+    violations: list[InvariantViolation] = []
+    for field_name in ("counterfactual_decision", "final_decision"):
+        decision = getattr(effect, field_name)
+        if DECISION_RANK[decision] <= DECISION_RANK[effect.baseline_decision]:
+            continue
+        violations.append(
+            InvariantViolation(
+                code="fundamental_agent_effect_rank_upgrade",
+                message=f"fundamental_agent_effect.{field_name} ranks above its baseline.",
+                details={"field": field_name, "baseline_decision": effect.baseline_decision, "actual": decision},
+            )
+        )
+    if effect.applied_adjustment > 0:
+        violations.append(
+            InvariantViolation(
+                code="fundamental_positive_adjustment",
+                message="Fundamental adjustments must be downgrade-only.",
+                details={"applied_adjustment": effect.applied_adjustment},
+            )
+        )
     return violations
 
 

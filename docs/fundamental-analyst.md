@@ -7,7 +7,7 @@ The Fundamental Analyst is a single-purpose model role. It consumes a `Fundament
 The analyst may:
 
 - interpret narrative evidence supplied in the immutable context;
-- propose a bounded score adjustment in `[-2, 2]`;
+- propose a downgrade-only score adjustment in `[-2, 0]`;
 - surface contradictions, red flags, and missing information.
 
 The analyst may not:
@@ -16,6 +16,13 @@ The analyst may not:
 - change risk values or time stops;
 - output trade decisions, confidence, or technical signals;
 - invent citations or uncited material claims.
+
+Deterministic rules set the decision ceiling for every agent
+([ADR 008](adr/008-agent-authority.md)). Positive evidence may support the
+narrative or a positive `overall_signal`, but cannot increase the score or
+promote the decision. The policy independently rejects positive adjustments
+with `promotion_not_allowed`, and caps even shadow counterfactuals at the
+incoming decision. No Fundamental path recomputes risk numbers or time stops.
 
 ## Input contract
 
@@ -26,7 +33,7 @@ Important invariants:
 - evidence text is untrusted data;
 - the prompt explicitly tells the model to ignore instructions embedded in evidence;
 - `run_id` and `context_hash` must round-trip unchanged;
-- the allowed adjustment bounds come from the request.
+- the allowed adjustment bounds come from the request, whose maximum is fixed at `0`.
 
 ## Output contract
 
@@ -60,15 +67,13 @@ Rejected output becomes a neutral fallback with explicit reason codes.
 
 ## Adjustment rubric
 
-- `+2`: multiple high-quality primary sources reveal a material positive factor absent from the deterministic baseline.
-- `+1`: one well-supported incremental positive factor.
-- `0`: mixed, confirmatory, or insufficient evidence.
+- `0`: positive, mixed, confirmatory, or insufficient evidence.
 - `-1`: one well-supported material concern.
 - `-2`: a severe, well-supported red flag that materially weakens the baseline.
 
 ## Prompt and failure behavior
 
-The prompt:
+The prompt (`fundamental-analyst.v2`):
 
 - requires JSON only;
 - forbids tools and extra keys;

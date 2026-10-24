@@ -79,7 +79,10 @@ default `PIPELINE_MODE=linear` runs the deterministic rules and risk pipeline.
 structured-data and retrieval steps, fundamental and technical specialists, a
 decision synthesizer, and a critic/guardrail. The deterministic rules and risk
 engine remain authoritative in both modes; an agent can only downgrade a
-decision or confidence and cannot change trade numbers.
+decision or confidence and cannot change trade numbers. This includes the
+Fundamental Analyst: positive evidence may support its narrative, but its score
+adjustment is limited to `[-2, 0]`. See [ADR 008](docs/adr/008-agent-authority.md)
+for the authority matrix.
 
 Agentic runs persist an ordered execution trace. The API documentation describes
 how to request and retrieve that trace. Configure the mode and model through

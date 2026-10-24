@@ -75,24 +75,13 @@ issue.
   until then `veto_states` is populated only when the caller supplies it, and is
   empty from `evaluate_checklist`.
 
-## Open question for the owner
+## Resolved owner question: Fundamental authority
 
-`apply_fundamental_policy`, applied through
-`_apply_policy_effect_to_response` in `agents/orchestration/workflow.py`, can
-currently **promote** a decision in enforced mode (for example
-`no_trade -> watchlist`) when positive fundamental evidence is accepted. The
-code comment there says this is "existing, unchanged semantics", but it
-conflicts with the README's statement that "an agent can only downgrade a
-decision or confidence and cannot change trade numbers." This ADR does not
-change that Fundamental Analyst behaviour — it is explicitly out of scope for
-TA-1 — but it is recorded here because the Technical Analyst authority
-decision above assumes downgrade-only is the intended invariant for every
-specialist. The owner should confirm whether:
-
-1. the Fundamental Analyst's promotion path is a deliberate, documented
-   exception that the README should describe explicitly, or
-2. the README is correct and `_apply_policy_effect_to_response` has a latent
-   bug that should be fixed in a dedicated follow-up issue.
+At acceptance, the Fundamental policy could promote decisions in enforced
+mode, contrary to the README's downgrade-only guarantee. The owner selected
+Option A in LE-2: [ADR 008](008-agent-authority.md) makes Fundamental
+downgrade-only too, fixes its maximum adjustment at `0`, and removes the
+promotion/risk-recompute path. There is no exception to the shared ceiling.
 
 ## Rejected alternatives
 
