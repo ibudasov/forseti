@@ -62,6 +62,15 @@ an earlier downgrade.
 changing the response; `enforced` applies only bounded downgrades. Failures
 and rejected model outputs preserve the incoming baseline.
 
+### Typed Fundamental view addendum
+
+In `shadow` and `enforced` modes, the validated assessment already produced
+for policy is the single Fundamental interpretation for the run. The ADK
+`fundamental_analyst` slot serializes that assessment, including its citations,
+to `fundamental_view` without making another model call. `off` retains the
+legacy narrative specialist. The typed-view trace event must report zero
+tokens; the upstream assessment trace retains usage for the single model call.
+
 ## Validation
 
 The trust invariant remains `rank(agentic) <= rank(linear)`, with
