@@ -324,42 +324,19 @@ def test_finalizer_ordering_applies_fundamental_then_synthesizer_then_critic(mon
     monkeypatch.setattr(
         workflow_module,
         "analyze_request",
-        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+        lambda request, engine=None: _watchlist_response().model_copy(update={"decision": "trade"}, deep=True),
     )
     monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
     monkeypatch.setattr(
         workflow_module,
         "FundamentalAnalyst",
-        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "get_latest_bars",
-        lambda *a, **k: [SimpleNamespace(high=110, low=90, close=100)] * 100,
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "calculate_risk_levels",
-        lambda bars, risk_config: SimpleNamespace(
-            entry_low=98,
-            entry_high=102,
-            stop_loss=90,
-            take_profit_1=110,
-            take_profit_2=120,
-            risk_reward=2,
-            position_size_eur=500,
-        ),
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "calculate_time_stop_at",
-        lambda recommendation_date: date(2026, 12, 31),
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=-1)),
     )
 
     response = workflow.analyze("NVDA")
 
     assert response.fundamental_agent_effect is not None
-    assert response.fundamental_agent_effect.final_decision == "trade"
+    assert response.fundamental_agent_effect.final_decision == "watchlist"
     assert response.decision == "no_trade"
     assert response.critic_effect is not None
     assert response.critic_effect.final_decision == "no_trade"
@@ -845,16 +822,18 @@ def test_fundamental_mode_off_skips_context_builder(monkeypatch):
 def test_fundamental_shadow_mode_records_counterfactual_without_changing_baseline(monkeypatch):
     monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "shadow")
     workflow = _workflow(monkeypatch, events=())
+    baseline = _watchlist_response()
+    baseline.diagnosis.checklist_score = 6
     monkeypatch.setattr(
         workflow_module,
         "analyze_request",
-        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+        lambda request, engine=None: baseline.model_copy(deep=True),
     )
     monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
     monkeypatch.setattr(
         workflow_module,
         "FundamentalAnalyst",
-        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=-2)),
     )
 
     response = workflow.analyze("NVDA")
@@ -862,12 +841,13 @@ def test_fundamental_shadow_mode_records_counterfactual_without_changing_baselin
     assert response.decision == "watchlist"
     assert response.fundamental_agent_effect is not None
     assert response.fundamental_agent_effect.mode == "shadow"
-    assert response.fundamental_agent_effect.counterfactual_decision == "trade"
+    assert response.fundamental_agent_effect.counterfactual_decision == "no_trade"
     assert response.fundamental_agent_effect.final_decision == "watchlist"
     assert response.trace.fundamental_agent_effect is not None
 
 
-def test_fundamental_enforced_mode_promotes_trade_with_deterministic_risk(monkeypatch):
+@pytest.mark.parametrize("adjustment", [1, 2])
+def test_fundamental_enforced_mode_rejects_promotion_without_creating_risk(monkeypatch, adjustment):
     monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "enforced")
     workflow = _workflow(monkeypatch, events=())
     monkeypatch.setattr(
@@ -879,40 +859,21 @@ def test_fundamental_enforced_mode_promotes_trade_with_deterministic_risk(monkey
     monkeypatch.setattr(
         workflow_module,
         "FundamentalAnalyst",
-        lambda: _AnalystStub(_assessment(accepted=True, adjustment=1)),
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "get_latest_bars",
-        lambda *a, **k: [SimpleNamespace(high=110, low=90, close=100)] * 100,
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "calculate_risk_levels",
-        lambda bars, risk_config: SimpleNamespace(
-            entry_low=98,
-            entry_high=102,
-            stop_loss=90,
-            take_profit_1=110,
-            take_profit_2=120,
-            risk_reward=2,
-            position_size_eur=500,
-        ),
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "calculate_time_stop_at",
-        lambda recommendation_date: date(2026, 12, 31),
+        lambda: _AnalystStub(_assessment(accepted=True, adjustment=adjustment)),
     )
 
     response = workflow.analyze("NVDA")
 
-    assert response.decision == "trade"
-    assert response.entry_range == (98.0, 102.0)
-    assert response.stop_loss == 90.0
-    assert response.position_size_eur == 500.0
+    assert response.decision == "watchlist"
+    assert response.entry_range is None
+    assert response.stop_loss is None
+    assert response.take_profit is None
+    assert response.risk_reward is None
+    assert response.position_size_eur is None
+    assert response.time_stop_at is None
     assert response.fundamental_agent_effect is not None
-    assert response.fundamental_agent_effect.final_decision == "trade"
+    assert response.fundamental_agent_effect.final_decision == "watchlist"
+    assert "promotion_not_allowed" in response.fundamental_agent_effect.reason_codes
 
 
 def test_technical_mode_off_skips_context_builder(monkeypatch):

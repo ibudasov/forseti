@@ -5,11 +5,11 @@
     {
       "case_id": "clear-strong-fundamentals",
       "category": "clear strong fundamentals",
-      "notes": "Trade candidate with strong cited narrative support.",
+      "notes": "Trade candidate with strong cited narrative support; positive evidence does not raise the score.",
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:NVDA:10",
-        "context_hash": "7db6a6ec334ea6fe0e0733863ed4f1da9a8dd0c4eae14a938714c875a7b19404",
+        "context_hash": "93891ba91a7e629b5200e898193157abc1533068f8dcd556230c7f88203036c0",
         "ticker": "NVDA",
         "company_name": "NVIDIA",
         "sector": "ai",
@@ -141,7 +141,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "NVDA",
@@ -183,11 +183,11 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:NVDA:10",
-          "context_hash": "7db6a6ec334ea6fe0e0733863ed4f1da9a8dd0c4eae14a938714c875a7b19404",
+          "context_hash": "93891ba91a7e629b5200e898193157abc1533068f8dcd556230c7f88203036c0",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "positive",
-          "proposed_score_adjustment": 1,
+          "proposed_score_adjustment": 0,
           "findings": [
             {
               "finding_id": "nvda-growth",
@@ -207,7 +207,7 @@
           "material_red_flags": [],
           "evidence_coverage": 1.0,
           "missing_information": [],
-          "summary": "Evidence supports a modest positive adjustment."
+          "summary": "Evidence supports the deterministic baseline without a score increase."
         },
         "validation": {
           "accepted": true,
@@ -221,13 +221,13 @@
           "total_token_count": 300
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
         "acceptable_adjustment": {
-          "minimum": 1,
-          "maximum": 1
+          "minimum": 0,
+          "maximum": 0
         },
         "acceptable_signals": [
           "positive"
@@ -248,7 +248,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:SNOW:11",
-        "context_hash": "c6eb310fac1103b89bbfafaf7e619251c0cd19dbea78fd487dbae61ab6ff380a",
+        "context_hash": "b7156b8fe2b6f6df6f4eb7d34bd56eb3a9efaf93812889d2eab80be31b76dda3",
         "ticker": "SNOW",
         "company_name": "Snow Systems",
         "sector": "ai",
@@ -380,7 +380,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "SNOW",
@@ -422,7 +422,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:SNOW:11",
-          "context_hash": "c6eb310fac1103b89bbfafaf7e619251c0cd19dbea78fd487dbae61ab6ff380a",
+          "context_hash": "b7156b8fe2b6f6df6f4eb7d34bd56eb3a9efaf93812889d2eab80be31b76dda3",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "negative",
@@ -460,7 +460,7 @@
           "total_token_count": 285
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
@@ -483,11 +483,11 @@
     {
       "case_id": "borderline-positive-narrative",
       "category": "borderline deterministic score with positive narrative",
-      "notes": "Positive adjustment is justified by backlog visibility not captured by thresholds.",
+      "notes": "Positive backlog visibility may support the narrative but cannot promote the watchlist baseline.",
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:PLTR:12",
-        "context_hash": "b8bb90eb23cc1bae7947520d41bcb421914f4a5cd3b74f4d0b8352044a8d53e4",
+        "context_hash": "643b11b6f6eb0444a04935744923a113a167147d662a08adc47242dbed76a310",
         "ticker": "PLTR",
         "company_name": "Palantir",
         "sector": "ai",
@@ -619,7 +619,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "PLTR",
@@ -655,11 +655,11 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:PLTR:12",
-          "context_hash": "b8bb90eb23cc1bae7947520d41bcb421914f4a5cd3b74f4d0b8352044a8d53e4",
+          "context_hash": "643b11b6f6eb0444a04935744923a113a167147d662a08adc47242dbed76a310",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "positive",
-          "proposed_score_adjustment": 1,
+          "proposed_score_adjustment": 0,
           "findings": [
             {
               "finding_id": "pltr-backlog",
@@ -679,7 +679,7 @@
           "material_red_flags": [],
           "evidence_coverage": 1.0,
           "missing_information": [],
-          "summary": "Backlog visibility justifies a modest upgrade."
+          "summary": "Backlog visibility supports the narrative without upgrading the decision."
         },
         "validation": {
           "accepted": true,
@@ -693,18 +693,18 @@
           "total_token_count": 315
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
         "acceptable_adjustment": {
-          "minimum": 1,
-          "maximum": 1
+          "minimum": 0,
+          "maximum": 0
         },
         "acceptable_signals": [
           "positive"
         ],
-        "expected_counterfactual_decision": "trade",
+        "expected_counterfactual_decision": "watchlist",
         "appropriate_abstention": false,
         "required_claim_keywords": [
           "backlog"
@@ -722,7 +722,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:CRWD:13",
-        "context_hash": "8dac6ef6445fb109a821650ed9f868e63c0d1f20a1f6cc72938e7e21b862764a",
+        "context_hash": "4b89948cf6ac5c04b41ec74b503bbbce5346d4474a06f98c9ec5bf68c6637da4",
         "ticker": "CRWD",
         "company_name": "Crowd Shield",
         "sector": "ai",
@@ -854,7 +854,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "CRWD",
@@ -896,7 +896,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:CRWD:13",
-          "context_hash": "8dac6ef6445fb109a821650ed9f868e63c0d1f20a1f6cc72938e7e21b862764a",
+          "context_hash": "4b89948cf6ac5c04b41ec74b503bbbce5346d4474a06f98c9ec5bf68c6637da4",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "negative",
@@ -934,7 +934,7 @@
           "total_token_count": 296
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
@@ -957,11 +957,11 @@
     {
       "case_id": "one-off-eps-distortion",
       "category": "weak EPS distorted by one-off effect",
-      "notes": "Positive adjustment should rescue a no-trade candidate to watchlist only.",
+      "notes": "A one-off accounting effect cannot rescue a no-trade candidate.",
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:AMD:14",
-        "context_hash": "600da20597cecf46c3db3b7ab4ea8b0eebf5b3b468daa9be1ce22772d0ab1366",
+        "context_hash": "dd7023457313d3e72babb6597ab4b0c5153f5df79be503c3bb522e1a5cc787cc",
         "ticker": "AMD",
         "company_name": "AMD",
         "sector": "ai",
@@ -1093,7 +1093,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "AMD",
@@ -1129,11 +1129,11 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:AMD:14",
-          "context_hash": "600da20597cecf46c3db3b7ab4ea8b0eebf5b3b468daa9be1ce22772d0ab1366",
+          "context_hash": "dd7023457313d3e72babb6597ab4b0c5153f5df79be503c3bb522e1a5cc787cc",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "positive",
-          "proposed_score_adjustment": 1,
+          "proposed_score_adjustment": 0,
           "findings": [
             {
               "finding_id": "amd-oneoff",
@@ -1153,7 +1153,7 @@
           "material_red_flags": [],
           "evidence_coverage": 1.0,
           "missing_information": [],
-          "summary": "A one-off accounting effect supports a modest positive adjustment."
+          "summary": "A one-off accounting effect supports the narrative without a score increase."
         },
         "validation": {
           "accepted": true,
@@ -1167,18 +1167,18 @@
           "total_token_count": 288
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
         "acceptable_adjustment": {
-          "minimum": 1,
-          "maximum": 1
+          "minimum": 0,
+          "maximum": 0
         },
         "acceptable_signals": [
           "positive"
         ],
-        "expected_counterfactual_decision": "watchlist",
+        "expected_counterfactual_decision": "no_trade",
         "appropriate_abstention": false,
         "required_claim_keywords": [
           "one-off"
@@ -1196,7 +1196,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:MSFT:15",
-        "context_hash": "904ec1c05012edd7c3e04d037dee467bd765a851f3de241f0a9ff1f088af303a",
+        "context_hash": "13d8671b942c8846d6977689126f02f14ca7a8c5d491719d0159a3ffe6c6ab5c",
         "ticker": "MSFT",
         "company_name": "Microsoft",
         "sector": "ai",
@@ -1328,7 +1328,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "MSFT",
@@ -1364,7 +1364,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:MSFT:15",
-          "context_hash": "904ec1c05012edd7c3e04d037dee467bd765a851f3de241f0a9ff1f088af303a",
+          "context_hash": "13d8671b942c8846d6977689126f02f14ca7a8c5d491719d0159a3ffe6c6ab5c",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "neutral",
@@ -1416,7 +1416,7 @@
           "total_token_count": 276
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
@@ -1445,7 +1445,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:IONQ:16",
-        "context_hash": "7be80c4867c1ac009bae5df383ed546c452a4b4d487b3f2fdf8fd1cffbed69e9",
+        "context_hash": "b6b1eb3ea87e7e62619d9a410033899f7d54b9229e67c00ece2266af2a4f0040",
         "ticker": "IONQ",
         "company_name": "IonQ",
         "sector": "ai",
@@ -1580,7 +1580,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "IONQ",
@@ -1616,7 +1616,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:IONQ:16",
-          "context_hash": "7be80c4867c1ac009bae5df383ed546c452a4b4d487b3f2fdf8fd1cffbed69e9",
+          "context_hash": "b6b1eb3ea87e7e62619d9a410033899f7d54b9229e67c00ece2266af2a4f0040",
           "agent_name": "fundamental_analyst",
           "status": "insufficient_data",
           "overall_signal": "neutral",
@@ -1645,7 +1645,7 @@
           "total_token_count": 0
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "insufficient_data",
@@ -1672,7 +1672,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:TSLA:17",
-        "context_hash": "f5cf86cc30de84728335d1b7473779f30d85a4edb91f98dc41c682545ba5a31b",
+        "context_hash": "44529203e8edd9a6a3e2979f2cc8a77240ace7558bf55f3c651aa29c8603105d",
         "ticker": "TSLA",
         "company_name": "Tesla",
         "sector": "ai",
@@ -1804,7 +1804,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "TSLA",
@@ -1840,7 +1840,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:TSLA:17",
-          "context_hash": "f5cf86cc30de84728335d1b7473779f30d85a4edb91f98dc41c682545ba5a31b",
+          "context_hash": "44529203e8edd9a6a3e2979f2cc8a77240ace7558bf55f3c651aa29c8603105d",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "neutral",
@@ -1878,7 +1878,7 @@
           "total_token_count": 287
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
@@ -1904,11 +1904,11 @@
     {
       "case_id": "hard-veto-no-promotion",
       "category": "hard-veto ticker where positive fundamentals cannot promote",
-      "notes": "Hard blockers must prevent promotions even for strong fundamentals.",
+      "notes": "Hard blockers remain authoritative even for strong fundamentals.",
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:SMCI:18",
-        "context_hash": "0de35b7d56d8c639e6d43b2209d172b8ba4a435d01e3b545ccb8c2dea3de4d1d",
+        "context_hash": "72bbb2b7273012a0b6a830a55373152c239d39c5a14e6968a845e5142dddcded",
         "ticker": "SMCI",
         "company_name": "Super Micro Core",
         "sector": "ai",
@@ -2040,7 +2040,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "SMCI",
@@ -2078,11 +2078,11 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:SMCI:18",
-          "context_hash": "0de35b7d56d8c639e6d43b2209d172b8ba4a435d01e3b545ccb8c2dea3de4d1d",
+          "context_hash": "72bbb2b7273012a0b6a830a55373152c239d39c5a14e6968a845e5142dddcded",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "strong_positive",
-          "proposed_score_adjustment": 2,
+          "proposed_score_adjustment": 0,
           "findings": [
             {
               "finding_id": "smci-positive",
@@ -2116,13 +2116,13 @@
           "total_token_count": 283
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
         "acceptable_adjustment": {
-          "minimum": 2,
-          "maximum": 2
+          "minimum": 0,
+          "maximum": 0
         },
         "acceptable_signals": [
           "strong_positive"
@@ -2143,7 +2143,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:UPST:19",
-        "context_hash": "72eab303a11c469b5df23b0fd18f5950220453f306bfa07c0642c48e5fbeb4be",
+        "context_hash": "ae8ec764fac93889ce9ae8e29a21dad6885cb016711b098694d718e5ecaf8e8d",
         "ticker": "UPST",
         "company_name": "Upstart",
         "sector": "ai",
@@ -2277,7 +2277,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "UPST",
@@ -2315,7 +2315,7 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:UPST:19",
-          "context_hash": "72eab303a11c469b5df23b0fd18f5950220453f306bfa07c0642c48e5fbeb4be",
+          "context_hash": "ae8ec764fac93889ce9ae8e29a21dad6885cb016711b098694d718e5ecaf8e8d",
           "agent_name": "fundamental_analyst",
           "status": "failed",
           "overall_signal": "neutral",
@@ -2343,7 +2343,7 @@
           "total_token_count": 180
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "failed",
@@ -2370,7 +2370,7 @@
       "request": {
         "schema_version": "1.0",
         "run_id": "eval:META:20",
-        "context_hash": "91998ce689ae24b2e99650c6dcddeaffce99b07f8daa9e73e41f1529d15ac023",
+        "context_hash": "f3064f7532f73b96d6066305102fc71b9155e40d54029839e1f25599628649f9",
         "ticker": "META",
         "company_name": "Meta",
         "sector": "ai",
@@ -2502,7 +2502,7 @@
           ]
         },
         "allowed_adjustment_min": -2,
-        "allowed_adjustment_max": 2
+        "allowed_adjustment_max": 0
       },
       "deterministic_response": {
         "ticker": "META",
@@ -2538,11 +2538,11 @@
         "response": {
           "schema_version": "1.0",
           "run_id": "eval:META:20",
-          "context_hash": "91998ce689ae24b2e99650c6dcddeaffce99b07f8daa9e73e41f1529d15ac023",
+          "context_hash": "f3064f7532f73b96d6066305102fc71b9155e40d54029839e1f25599628649f9",
           "agent_name": "fundamental_analyst",
           "status": "completed",
           "overall_signal": "positive",
-          "proposed_score_adjustment": 1,
+          "proposed_score_adjustment": 0,
           "findings": [
             {
               "finding_id": "meta-a",
@@ -2589,13 +2589,13 @@
           "total_token_count": 286
         },
         "model_name": "frozen-fixture",
-        "prompt_version": "fundamental-analyst.v1"
+        "prompt_version": "fundamental-analyst.v2"
       },
       "label": {
         "expected_status": "completed",
         "acceptable_adjustment": {
-          "minimum": 1,
-          "maximum": 1
+          "minimum": 0,
+          "maximum": 0
         },
         "acceptable_signals": [
           "positive"

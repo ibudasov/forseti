@@ -47,14 +47,13 @@ def test_recorded_suite_reports_expected_metrics_and_passes_gates():
     assert report.metrics.adjustment_distribution == {
         "-2": 0,
         "-1": 2,
-        "0": 4,
-        "1": 4,
-        "2": 1,
+        "0": 9,
+        "1": 0,
+        "2": 0,
     }
     assert report.metrics.outcome_counts == {
         "downgrade": 2,
-        "promotion": 2,
-        "unchanged": 7,
+        "unchanged": 9,
     }
     assert report.metrics.status_counts == {
         "completed": 9,
@@ -62,12 +61,10 @@ def test_recorded_suite_reports_expected_metrics_and_passes_gates():
         "insufficient_data": 1,
     }
     assert report.metrics.counterfactual_confusion_matrix == {
-        "no_trade->no_trade": 2,
-        "no_trade->watchlist": 1,
+        "no_trade->no_trade": 3,
         "trade->trade": 1,
         "trade->watchlist": 2,
-        "watchlist->trade": 1,
-        "watchlist->watchlist": 4,
+        "watchlist->watchlist": 5,
     }
     assert len(report.review_samples) == 5
 

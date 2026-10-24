@@ -14,7 +14,7 @@ Forseti builds one immutable `FundamentalAnalysisRequest` per ticker/as-of snaps
 - `metric_series`: annual and quarterly observation history with stable metric IDs and provenance
 - `evidence_chunks`: curated text evidence with stable chunk IDs and source metadata
 - `coverage`: explicit presence, missingness, truncation, and recency metadata
-- `allowed_adjustment_min`, `allowed_adjustment_max`: initial bounded analyst adjustment range `[-2, 2]`
+- `allowed_adjustment_min`, `allowed_adjustment_max`: downgrade-only analyst adjustment range `[-2, 0]`; the maximum is fixed at `0` by [ADR 008](adr/008-agent-authority.md)
 
 ## Stable IDs
 

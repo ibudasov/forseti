@@ -9,7 +9,6 @@ import os
 import time
 from dataclasses import dataclass, field as dataclass_field
 from datetime import date, datetime, timezone
-from decimal import Decimal
 from typing import Any, Callable, Iterable, Literal, Optional, Protocol, cast
 from uuid import uuid4
 
@@ -38,7 +37,7 @@ from agents.orchestration.registry import (
 from agents.orchestration.trace_recorder import TraceRecorder
 from agents.tools.ticker_resolver import resolve_ticker
 from app.db.models import AgentRun, AgentRunStep
-from app.db.repository import get_agent_run, get_agent_run_steps, get_latest_bars, save_agent_run
+from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
 from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
@@ -55,11 +54,9 @@ from app.services.critique_context import (
 from app.services.fundamental_analyst import FundamentalAnalyst
 from app.services.fundamental_context import build_fundamental_analysis_request
 from app.services.fundamental_policy import apply_fundamental_policy
-from app.services.risk import RiskConfig, RiskDowngrade, calculate_risk_levels
 from app.services.technical_analyst import TechnicalAnalyst
 from app.services.technical_context import build_technical_analysis_request
 from app.services.technical_policy import apply_technical_policy
-from app.services.time_stop import calculate_time_stop_at
 from app.services.analyzer import analyze_request
 from app.services.agent_run_dates import resolve_agent_run_as_of_date
 from app.settings import get_settings
@@ -323,8 +320,8 @@ def _update_critic_trace_output(step: _PendingTraceStep, effect: Any) -> None:
 def _apply_technical_effect_to_response(effect: TechnicalAgentEffect, response: AnalyzeResponse) -> None:
     """Mutate ``response`` for an enforced technical downgrade.
 
-    Technical adjustments are downgrade-only, so unlike the fundamental
-    policy this never recomputes risk levels: it either leaves the response
+    Technical adjustments are downgrade-only, so this never recomputes
+    risk levels: it either leaves the response
     untouched or clears the trade fields exactly as the analyzer does for
     non-trade decisions (see ``app.services.analyzer._evaluate_trade``).
     """
@@ -1287,7 +1284,7 @@ class AgenticAnalysisWorkflow:
             request=context,
             assessment_result=assessment_result,
         )
-        updated_effect = self._apply_policy_effect_to_response(effect, response, request)
+        updated_effect = self._apply_policy_effect_to_response(effect, response)
         response.fundamental_agent_effect = updated_effect
         return assessment_result
 
@@ -1295,46 +1292,14 @@ class AgenticAnalysisWorkflow:
         self,
         effect,
         response: AnalyzeResponse,
-        request: AnalyzeRequest,
     ):
-        if effect.final_decision == response.decision:
-            return effect
-        if effect.final_decision != "trade":
-            # The fundamental policy may legitimately raise the decision (e.g.
-            # no_trade -> watchlist) when positive evidence is accepted in
-            # enforced mode; this is existing, unchanged semantics, so it is
-            # a direct assignment rather than a downgrade-only transition.
-            response.decision = effect.final_decision
-            return effect
-
-        bars = get_latest_bars(
-            request.ticker,
-            250,
-            engine=self.engine,
-            as_of_date=request.as_of_date,
+        self._apply_downgrade_only_transition(
+            response=response,
+            proposed_decision=effect.final_decision,
+            proposed_confidence=response.confidence,
         )
-        settings = get_settings()
-        risk_config = RiskConfig(
-            capital_eur=Decimal(str(settings.ACCOUNT_CAPITAL_EUR)),
-            risk_per_trade_pct=Decimal(str(settings.RISK_PER_TRADE_PCT)),
-        )
-        risk_result = calculate_risk_levels(bars, risk_config)
-        if risk_result is None or isinstance(risk_result, RiskDowngrade):
-            effect.final_decision = "watchlist"
-            effect.decision_changed = effect.final_decision != effect.baseline_decision
-            effect.reason_codes.append("risk_gate_rejected_promotion")
-            return effect
-
-        response.decision = "trade"
-        response.entry_range = (float(risk_result.entry_low), float(risk_result.entry_high))
-        response.stop_loss = float(risk_result.stop_loss)
-        response.take_profit = (
-            float(risk_result.take_profit_1),
-            float(risk_result.take_profit_2),
-        )
-        response.risk_reward = float(risk_result.risk_reward)
-        response.position_size_eur = float(risk_result.position_size_eur)
-        response.time_stop_at = calculate_time_stop_at(request.as_of_date or date.today())
+        effect.final_decision = response.decision
+        effect.decision_changed = effect.final_decision != effect.baseline_decision
         return effect
 
     def _apply_technical_policy_if_enabled(

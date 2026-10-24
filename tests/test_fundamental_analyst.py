@@ -6,6 +6,8 @@ import types
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.domain.fundamentals import DeterministicFundamentalAnalysis, FundamentalMetricRef, FundamentalRuleResult
 from app.schemas.fundamentals import (
     EvidenceChunkInput,
@@ -90,7 +92,7 @@ def test_valid_assessment_is_accepted():
     assert isinstance(result.response, FundamentalAssessmentResponse)
     assert result.validation.accepted is True
     assert result.response.status == "completed"
-    assert result.response.proposed_score_adjustment == 1
+    assert result.response.proposed_score_adjustment == 0
     assert result.response.findings[0].chunk_ids == [10]
 
 
@@ -131,6 +133,20 @@ def test_out_of_range_adjustment_is_rejected():
 
     assert result.validation.accepted is False
     assert result.validation.reason_codes == ["adjustment_out_of_bounds"]
+
+
+@pytest.mark.parametrize("adjustment", [1, 2])
+def test_positive_evidence_cannot_request_a_positive_adjustment(adjustment):
+    request = _request()
+    payload = json.loads(_response_json(request))
+    payload["proposed_score_adjustment"] = adjustment
+    analyst = FundamentalAnalyst(model_port=_FakeModel([json.dumps(payload)]), max_retries=0)
+
+    result = analyst.assess(request)
+
+    assert result.validation.accepted is False
+    assert result.validation.reason_codes == ["adjustment_out_of_bounds"]
+    assert result.response.proposed_score_adjustment == 0
 
 
 def test_duplicate_finding_ids_are_rejected():
@@ -180,7 +196,7 @@ def test_malformed_json_retries_once_then_succeeds():
     result = analyst.assess(request)
 
     assert result.validation.accepted is True
-    assert result.response.proposed_score_adjustment == 1
+    assert result.response.proposed_score_adjustment == 0
 
 
 def test_retryable_model_failure_falls_back_to_neutral():
@@ -206,6 +222,9 @@ def test_prompt_includes_injection_guardrails_and_request_payload():
     assert '"agent_name": "fundamental_analyst"' in prompt
     assert request.context_hash in prompt
     assert "ignore previous instructions" in prompt.lower()
+    assert "you may only downgrade, never promote" in prompt
+    assert "within [-2, 0]" in prompt
+    assert "adjustment 1 or 2" not in prompt
 
 
 def test_empty_evidence_short_circuits_to_insufficient_data():
@@ -320,7 +339,7 @@ def _response_json(request: FundamentalAnalysisRequest) -> str:
             "agent_name": "fundamental_analyst",
             "status": "completed",
             "overall_signal": "positive",
-            "proposed_score_adjustment": 1,
+            "proposed_score_adjustment": 0,
             "findings": [
                 {
                     "finding_id": "growth-1",
@@ -336,6 +355,6 @@ def _response_json(request: FundamentalAnalysisRequest) -> str:
             "material_red_flags": [],
             "evidence_coverage": 0.75,
             "missing_information": [],
-            "summary": "Primary evidence supports a modest positive adjustment.",
+            "summary": "Primary evidence supports the baseline without a score increase.",
         }
     )

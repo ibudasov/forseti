@@ -4,6 +4,10 @@
 
 Accepted.
 
+[ADR 008](008-agent-authority.md) applies the same downgrade-only ceiling to
+every agent, including the Fundamental Analyst, and defines the shared authority
+matrix. This ADR's Critic-specific limits remain unchanged.
+
 ## Context
 
 The roadmap introduced four specialist prompts: Fundamental Analyst, Technical

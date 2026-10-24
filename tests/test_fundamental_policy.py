@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from app.domain.fundamentals import DeterministicFundamentalAnalysis, FundamentalMetricRef, FundamentalRuleResult
 from app.schemas.analyze import AnalyzeResponse, DecisionDiagnosis
 from app.schemas.fundamentals import (
@@ -18,10 +21,10 @@ from app.schemas.fundamentals import (
 from app.services.fundamental_policy import apply_fundamental_policy
 
 
-def test_shadow_mode_records_trade_counterfactual_without_changing_response():
-    response = _response(decision="watchlist", checklist_score=7, warnings=[])
+def test_shadow_mode_records_downgrade_without_changing_response():
+    response = _response(decision="trade", checklist_score=8, warnings=[])
     request = _request()
-    assessment = _assessment(request, adjustment=1, accepted=True)
+    assessment = _assessment(request, adjustment=-1, accepted=True)
 
     effect = apply_fundamental_policy(
         mode="shadow",
@@ -30,8 +33,8 @@ def test_shadow_mode_records_trade_counterfactual_without_changing_response():
         assessment_result=assessment,
     )
 
-    assert effect.counterfactual_decision == "trade"
-    assert effect.final_decision == "watchlist"
+    assert effect.counterfactual_decision == "watchlist"
+    assert effect.final_decision == "trade"
     assert effect.decision_changed is False
     assert effect.reason_codes == ["adjustment_applied", "shadow_mode"]
 
@@ -53,21 +56,54 @@ def test_enforced_mode_applies_negative_adjustment_across_threshold():
     assert effect.decision_changed is True
 
 
-def test_hard_blocker_prevents_positive_promotion():
-    response = _response(decision="watchlist", checklist_score=7, warnings=["stale_price_data"])
+@pytest.mark.parametrize("mode", ["off", "shadow", "enforced"])
+@pytest.mark.parametrize("adjustment", [1, 2])
+@pytest.mark.parametrize("warnings", [[], ["stale_price_data"]])
+def test_positive_adjustments_are_rejected(mode, adjustment, warnings):
+    response = _response(decision="watchlist", checklist_score=7, warnings=warnings)
     request = _request()
-    assessment = _assessment(request, adjustment=2, accepted=True)
+    assessment = _assessment(request, adjustment=adjustment, accepted=True)
 
     effect = apply_fundamental_policy(
-        mode="enforced",
+        mode=mode,
         deterministic_response=response,
         request=request,
         assessment_result=assessment,
     )
 
+    assert effect.accepted is False
+    assert effect.raw_adjustment == adjustment
     assert effect.applied_adjustment == 0
+    assert effect.adjusted_total_score == 7
+    assert effect.counterfactual_decision == "watchlist"
     assert effect.final_decision == "watchlist"
-    assert "hard_blocker_prevents_promotion" in effect.reason_codes
+    assert "promotion_not_allowed" in effect.reason_codes
+
+
+@pytest.mark.parametrize("decision", ["no_trade", "watchlist"])
+@pytest.mark.parametrize("adjustment", [0, -1, -2])
+def test_counterfactual_never_exceeds_baseline_even_with_high_score(decision, adjustment):
+    response = _response(decision=decision, checklist_score=11, warnings=[])
+    request = _request()
+
+    effect = apply_fundamental_policy(
+        mode="enforced",
+        deterministic_response=response,
+        request=request,
+        assessment_result=_assessment(request, adjustment=adjustment, accepted=True),
+    )
+
+    assert effect.counterfactual_decision == decision
+    assert effect.final_decision == decision
+
+
+@pytest.mark.parametrize("maximum", [1, 2])
+def test_request_cannot_enable_positive_adjustments(maximum):
+    payload = _request().model_dump()
+    payload["allowed_adjustment_max"] = maximum
+
+    with pytest.raises(ValidationError):
+        FundamentalAnalysisRequest.model_validate(payload)
 
 
 def test_invalid_assessment_is_neutral():
