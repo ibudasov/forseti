@@ -132,7 +132,7 @@ def calculate_risk_levels(
     )
 
 
-def _calculate_atr(bars: List[PriceBar]) -> Decimal:
+def calculate_atr(bars: List[PriceBar]) -> Decimal:
     """
     Calculate Average True Range using simple mean over ATR_PERIOD.
     """
@@ -150,6 +150,10 @@ def _calculate_atr(bars: List[PriceBar]) -> Decimal:
         true_ranges.append(tr)
 
     return sum(true_ranges) / len(true_ranges)
+
+
+# Backward-compatible alias; keep the historical private name importable too.
+_calculate_atr = calculate_atr
 
 
 def _quantize(value: Decimal) -> Decimal:

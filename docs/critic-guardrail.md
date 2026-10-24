@@ -4,9 +4,31 @@ The Critic is the last agentic step. It may downgrade confidence, downgrade the
 final decision, or request one bounded rewrite of the memo, but it may never
 invent risk numbers or upgrade the deterministic baseline.
 
+## Composition order
+
+The agentic pipeline applies guardrails in a fixed sequence, each one working
+from the decision the previous stage produced:
+
+`deterministic -> fundamental -> technical -> critic`
+
+- The deterministic checklist score and decision are the starting baseline.
+- The fundamental policy (`app/services/fundamental_policy.py`) may raise or
+  lower the decision; see `docs/technical-analyst.md` and
+  `app/services/fundamental_policy.py` for its authority limits.
+- The technical policy (`app/services/technical_policy.py`) is strictly
+  downgrade-only: its proposed adjustments are always `<= 0`, and its
+  counterfactual decision can never rank above whatever decision the
+  fundamental stage left behind, even in `enforced` mode. When it does
+  downgrade a trade, it clears the trade-only fields the same way the
+  analyzer does for non-trade decisions and recomputes confidence with the
+  analyzer's formula, taking `min(current, recomputed)` — it never recomputes
+  risk.
+- The Critic runs last and sees whatever response the fundamental and
+  technical stages produced.
+
 ## What the Critic checks
 
-The deterministic layer in `app/services/critic_rules.py` emits six objection
+The deterministic layer in `app/services/critic_rules.py` emits eight objection
 families before the model verdict is considered:
 
 | Rule | Trigger | Category | Default effect |
@@ -15,8 +37,36 @@ families before the model verdict is considered:
 | `decision_upgrade` | Draft outranks the deterministic baseline | `internal_inconsistency` | Restore baseline decision and confidence |
 | `stale_or_incomplete_data` | Hard-blocker warning such as `stale_price_data` | `stale_or_incomplete_data` | Cap at `watchlist` |
 | `analyst_contradiction` | Fundamental analyst is negative on a trade, or analysts point in opposite directions | `analyst_contradiction` | Cap at `watchlist` and apply the contradiction penalty |
+| `analyst_signal_conflict` | One completed analyst view (fundamental or technical) signals `strong_positive`/`positive` and another signals `strong_negative` on a `trade` draft | `analyst_contradiction` | Confidence penalty only (medium severity) |
+| `technical_risk_flag_on_trade` | The technical view has a high-materiality `risk_flags` finding and the draft is `trade` | `analyst_contradiction` | Confidence penalty only (medium severity) |
 | `missing_trade_field` | Trade draft has a missing risk field | `internal_inconsistency` | Force `no_trade` |
 | `unsupported_claim` | Medium/high material finding has no metric or chunk citation | `unsupported_claim` | Confidence penalty only |
+
+`analyst_signal_conflict` and `technical_risk_flag_on_trade` are both
+medium-severity, downgrade-only rules: they add to the generic confidence
+penalty (see "Precedence" below) but never cap the decision by themselves.
+Note that `analyst_signal_conflict` can co-fire with the pre-existing
+`analyst_contradiction` rule above whenever the same pair of views also
+qualifies as "opposite polarity" — this is expected, not a bug.
+
+## How the technical view reaches the Critic
+
+Since TA-5, `CritiqueRequest.analyst_views` is built from
+`app/services/critique_context.py::build_analyst_views(fundamental=...,
+technical=...)`. Both the fundamental and technical findings are normalised
+into one shared `AnalystFinding` shape (`app/schemas/critique.py`), tagged with
+`source_agent` (`"fundamental_analyst"` or `"technical_analyst"`) and `origin`
+(`"finding"`, `"contradiction"`, or `"risk_flag"`). The technical view merges
+`findings + contradictions + risk_flags`; technical findings never have
+`chunk_ids` (only `metric_ids`). `CritiqueRequest.schema_version` was bumped
+from `"1.0"` to `"1.1"` for this change — `CritiqueResponse.schema_version`
+is unaffected and stays `"1.0"`.
+
+When `TECHNICAL_AGENT_MODE` is `off`, `technical` is `None` and the technical
+view is the absent placeholder (`status="absent"`), exactly as before. See
+[`docs/technical-analyst.md`](technical-analyst.md) for how the typed view
+also reaches the Decision Synthesizer and the ADK trace.
+
 
 ## Precedence
 

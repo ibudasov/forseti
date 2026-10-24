@@ -32,11 +32,35 @@ For `failed` and `skipped`, `TraceStep.output.reason` is always present.
 - `adk_event_count` — number of observed ADK events
 - `observed_agents` — ADK event authors in first-seen order
 - `fundamental_agent_effect` — persisted summary of the fundamental analyst guardrail outcome
+- `technical_agent_effect` — persisted summary of the technical analyst guardrail outcome; always
+  downgrade-only relative to the post-fundamental decision it was computed against (see
+  [`docs/critic-guardrail.md`](critic-guardrail.md) for the full composition order)
 - `critic_effect` — persisted summary of the critic guardrail outcome, including objections, decisions, and revisions
 
 ## Output truncation
 
 Any string nested in `TraceStep.output` is truncated to 20,000 chars and suffixed with `…[truncated]`.
+
+## `technical_analyst` step
+
+When `TECHNICAL_AGENT_MODE` is `off`, the `technical_analyst` step is a
+narrative ADK `LlmAgent` turn like any other specialist: `output` is the raw
+`{"text": ...}` fallback and `token_usage` reflects the model call.
+
+When `TECHNICAL_AGENT_MODE` is `shadow` or `enforced`, the step is produced by
+the deterministic `TypedTechnicalViewAgent`
+(`agents/orchestration/typed_view_agent.py`) instead of a second model call:
+
+- `output.source == "typed_assessment"`, and the remaining `output` fields
+  (`status`, `overall_signal`, `trend_state`, `momentum_state`,
+  `proposed_score_adjustment`, `findings`, `summary`) mirror the validated
+  `TechnicalAssessmentResult` from TA-4.
+- `token_usage` is always `{}` — no model call is made.
+- `SPECIALIST_ORDER` and `observed_agents` are unchanged; the agent still
+  emits exactly one event authored `technical_analyst`.
+
+See [`docs/technical-analyst.md`](technical-analyst.md) for how this typed
+view also reaches the Decision Synthesizer and the Critic.
 
 ## `critic_guardrail` step
 

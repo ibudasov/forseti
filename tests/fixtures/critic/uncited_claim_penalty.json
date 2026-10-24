@@ -3,7 +3,7 @@
   "mode": "enforced",
   "notes": "An uncited material finding produces only the medium-severity confidence penalty.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",
@@ -44,7 +44,8 @@
             "claim": "Claim unsupported-finding",
             "metric_ids": [],
             "chunk_ids": [],
-            "__construct__": true
+            "__construct__": true,
+            "source_agent": "fundamental_analyst"
           }
         ],
         "summary": "Analyst summary."

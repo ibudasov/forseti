@@ -16,6 +16,7 @@ from agents.orchestration.workflow import AgenticAnalysisWorkflow
 from app.db.models import AgentRun, AgentRunStep
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse
 from app.schemas.critique import (
+    AnalystFinding,
     AnalystView,
     CriticEffect,
     CritiqueObjection,
@@ -25,7 +26,7 @@ from app.schemas.critique import (
     CritiqueValidation,
     DraftRecommendation,
 )
-from app.schemas.fundamentals import CitedFinding, EvidenceChunkInput
+from app.schemas.fundamentals import EvidenceChunkInput
 from app.services.critic import Critic, ModelOutput, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
@@ -1068,7 +1069,7 @@ def _analyst_view_with_flag(payload: Any, filename: str, index: int) -> tuple[An
     label = f"request.analyst_views[{index}]"
     mapping = _mapping(payload, filename, label)
     construct, data = _strip_construct(mapping)
-    findings: list[CitedFinding] = []
+    findings: list[AnalystFinding] = []
     finding_constructed = False
     for finding_index, finding_payload in enumerate(data.get("findings", [])):
         finding, was_constructed = _finding_with_flag(finding_payload, filename, label, finding_index)
@@ -1085,13 +1086,13 @@ def _finding_with_flag(
     filename: str,
     parent_label: str,
     index: int,
-) -> tuple[CitedFinding, bool]:
+) -> tuple[AnalystFinding, bool]:
     label = f"{parent_label}.findings[{index}]"
     mapping = _mapping(payload, filename, label)
     construct, data = _strip_construct(mapping)
     if construct:
-        return CitedFinding.model_construct(**data), True
-    return CitedFinding.model_validate(data), False
+        return AnalystFinding.model_construct(**data), True
+    return AnalystFinding.model_validate(data), False
 
 
 def _critique_objection(payload: Any, filename: str) -> CritiqueObjection:

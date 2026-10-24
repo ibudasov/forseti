@@ -1,0 +1,97 @@
+{
+  "case_type": "live_model",
+  "description": "Live mode: a clean confirmatory uptrend must receive adjustment 0 from the real Gemini model.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-live-uptrend",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 4,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "close_vs_sma50",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["close_vs_sma50:2026-09-08"],
+          "explanation": "close is above the 50-day SMA"
+        },
+        {
+          "rule_id": "close_vs_sma200",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["close_vs_sma200:2026-09-08"],
+          "explanation": "close is above the 200-day SMA"
+        },
+        {
+          "rule_id": "rsi_healthy",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["rsi_healthy:2026-09-08"],
+          "explanation": "RSI-14 is within the healthy 40-65 band"
+        },
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "close_vs_sma50:2026-09-08",
+          "metric_name": "close_vs_sma50",
+          "value": "1.05",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        },
+        {
+          "metric_id": "close_vs_sma200:2026-09-08",
+          "metric_name": "close_vs_sma200",
+          "value": "1.12",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        },
+        {
+          "metric_id": "rsi_healthy:2026-09-08",
+          "metric_name": "rsi_healthy",
+          "value": "55.00",
+          "unit": "rsi_points",
+          "as_of_date": "2026-09-08"
+        },
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [],
+    "series": [],
+    "coverage": {
+      "bar_count": 200,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-09-08",
+      "bars_stale": false,
+      "series_truncated": false
+    }
+  },
+  "expected": {
+    "validation_accepted": true,
+    "expected_adjustment": 0,
+    "adjustment_bounds": [-2, 0]
+  }
+}

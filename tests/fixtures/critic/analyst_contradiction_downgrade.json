@@ -3,7 +3,7 @@
   "mode": "enforced",
   "notes": "Negative fundamental analyst view caps a trade at watchlist and applies the contradiction penalty.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",
@@ -47,7 +47,8 @@
             ],
             "chunk_ids": [
               10
-            ]
+            ],
+            "source_agent": "fundamental_analyst"
           }
         ],
         "summary": "Analyst summary."

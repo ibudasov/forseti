@@ -3,7 +3,7 @@
   "mode": "shadow",
   "notes": "Shadow mode computes the effect but leaves the response identical to off mode when the model half is invalid.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",

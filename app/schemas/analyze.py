@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
 from app.schemas.fundamentals import FundamentalAgentEffect
+from app.schemas.technicals import TechnicalAgentEffect
 
 if TYPE_CHECKING:
     from app.schemas.critique import CriticEffect
@@ -66,6 +67,7 @@ class AnalysisTrace(BaseModel):
     adk_event_count: int = 0
     observed_agents: List[str] = Field(default_factory=list)
     fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
+    technical_agent_effect: Optional[TechnicalAgentEffect] = None
     critic_effect: Optional["CriticEffect"] = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -101,6 +103,7 @@ class AnalyzeResponse(BaseModel):
     trace: Optional[AnalysisTrace] = None
     diagnosis: Optional[DecisionDiagnosis] = None
     fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
+    technical_agent_effect: Optional[TechnicalAgentEffect] = None
     critic_effect: Optional["CriticEffect"] = Field(
         default=None,
         exclude_if=lambda value: value is None,

@@ -15,6 +15,7 @@ from app.schemas.fundamentals import (
     FundamentalAssessmentResult,
     FundamentalAssessmentValidation,
 )
+from app.services.llm_schema import gemini_token_usage, inline_response_schema
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class GeminiFundamentalModel:
             )
         except Exception as exc:
             raise RetryableModelError(str(exc)) from exc
-        return ModelOutput(text=response.text, token_usage=_token_usage(response))
+        return ModelOutput(text=response.text, token_usage=gemini_token_usage(response))
 
 
 class FundamentalAnalyst:
@@ -214,29 +215,7 @@ def build_fundamental_analyst_prompt(request: FundamentalAnalysisRequest) -> str
 
 
 def _fundamental_response_schema() -> dict[str, Any]:
-    schema = FundamentalAssessmentResponse.model_json_schema()
-    definitions = schema.get("$defs", {})
-
-    def inline(value: Any) -> Any:
-        if isinstance(value, dict):
-            reference = value.get("$ref")
-            if reference is not None:
-                definition_name = reference.rsplit("/", maxsplit=1)[-1]
-                return inline(definitions[definition_name])
-            normalized = {}
-            for key, item in value.items():
-                if key in {"$defs", "additionalProperties"}:
-                    continue
-                if key == "const":
-                    normalized["enum"] = [inline(item)]
-                    continue
-                normalized[key] = inline(item)
-            return normalized
-        if isinstance(value, list):
-            return [inline(item) for item in value]
-        return value
-
-    return inline(schema)
+    return inline_response_schema(FundamentalAssessmentResponse)
 
 
 def validate_fundamental_assessment(
@@ -362,14 +341,3 @@ def _format_parse_error(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
         return "schema_validation_failed"
     return str(exc)
-
-
-def _token_usage(response: Any) -> dict[str, int]:
-    usage = getattr(response, "usage_metadata", None)
-    if usage is None:
-        return {}
-    return {
-        "prompt_token_count": int(getattr(usage, "prompt_token_count", 0) or 0),
-        "candidates_token_count": int(getattr(usage, "candidates_token_count", 0) or 0),
-        "total_token_count": int(getattr(usage, "total_token_count", 0) or 0),
-    }

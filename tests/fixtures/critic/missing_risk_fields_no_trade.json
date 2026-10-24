@@ -3,7 +3,7 @@
   "mode": "enforced",
   "notes": "A trade draft missing a money field is forced to no_trade.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "run-1",
     "context_hash": "ctx-1",
     "ticker": "NVDA",

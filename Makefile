@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context critique-context assess-fundamentals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -25,8 +25,10 @@ help:
 	@echo "  make rag-coverage     # Show RAG coverage (use ticker=NVDA [live=1])"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
 	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make technical-context # Build one immutable technical-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make critique-context # Build one immutable critique context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make assess-fundamentals # Run one fundamental analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make assess-technicals # Run one technical analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make review-draft      # Run one critic draft review (use ticker=NVDA [as_of=2026-09-08] [live=1])"
 	@echo "  make eval-fundamental-agent # Run the frozen offline fundamental-agent evaluation suite"
 	@echo "  make eval-fundamental-agent-live CONFIRM_COST=yes # Run live model evaluation over the frozen suite"
@@ -34,6 +36,11 @@ help:
 	@echo "  make eval-critic      # Run the frozen offline critic evaluation suite"
 	@echo "  make eval-critic-live CONFIRM_COST=yes # Run the manual live critic evaluation gate"
 	@echo "  make critic-shadow-report [SAMPLE=20 OUT=reports/trust/critic-shadow-objections.csv] # Aggregate persisted critic shadow-mode runs"
+	@echo "  make eval-technical-agent # Run the frozen offline technical-agent evaluation suite"
+	@echo "  make eval-technical-agent-live CONFIRM_COST=yes # Run the manual live technical-agent evaluation gate"
+	@echo "  make technical-shadow-report [SAMPLE=20 OUT=reports/trust/technical-shadow-sample.csv] # Aggregate persisted technical shadow-mode runs"
+	@echo "  make technical-backtest [HORIZON_DAYS=20] # Offline usefulness backtest: replays persisted technical shadow effects against stored bars"
+	@echo "  make technical-shadow-batch CONFIRM_COST=yes [REPEAT=1 FUNDAMENTAL_AGENT_MODE=off CRITIC_MODE=off] # Run the trust ticker matrix with TECHNICAL_AGENT_MODE=shadow"
 	@echo "  make critic-shadow-batch CONFIRM_COST=yes [REPEAT=1] # Run the trust ticker matrix with CRITIC_MODE=shadow"
 	@echo "  make trust-e2e CONFIRM_COST=yes # Run the manual live agentic-vs-linear trust matrix"
 	@echo "  make trust-consistency CONFIRM_COST=yes [REPEAT=5] # Run repeated live trust matrix consistency checks"
@@ -69,6 +76,7 @@ test: check-compose
 		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
@@ -122,6 +130,16 @@ fundamental-context: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.build_fundamental_context --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --json
 
+technical-context: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make technical-context ticker=NVDA [as_of=2026-09-08]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.build_technical_context --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --json
+
 critique-context: check-compose
 	@if [ -z "$(ticker)" ]; then \
 		echo "Error: ticker is required. Run 'make critique-context ticker=NVDA [as_of=2026-09-08]'"; \
@@ -142,6 +160,16 @@ assess-fundamentals: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.assess_fundamentals --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --shadow --json
 
+assess-technicals: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make assess-technicals ticker=NVDA [as_of=2026-09-08]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.assess_technicals --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) --json
+
 review-draft: check-compose
 	@if [ -z "$(ticker)" ]; then \
 		echo "Error: ticker is required. Run 'make review-draft ticker=NVDA [as_of=2026-09-08] [live=1]'"; \
@@ -156,6 +184,7 @@ eval-fundamental-agent: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_fundamental_agent --json
@@ -164,6 +193,7 @@ eval-fundamental-agent-live: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_fundamental_agent --live --confirm-cost "$(CONFIRM_COST)" --json
@@ -180,6 +210,7 @@ eval-critic: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --json
@@ -189,6 +220,7 @@ eval-critic-live: check-compose
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --live --confirm-cost "$(CONFIRM_COST)" --json
@@ -200,6 +232,57 @@ critic-shadow-report: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.eval_critic --shadow-report --json $(if $(SAMPLE),--sample "$(SAMPLE)",) $(if $(OUT),--out "$(OUT)",)
+
+eval-technical-agent: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_technical_agent --json
+
+eval-technical-agent-live: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_technical_agent --live --confirm-cost "$(CONFIRM_COST)" --json
+
+technical-shadow-report: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.eval_technical_agent --shadow-report --json $(if $(SAMPLE),--sample "$(SAMPLE)",) $(if $(OUT),--out "$(OUT)",)
+
+technical-backtest: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.technical_backtest --report-dir reports/trust $(if $(HORIZON_DAYS),--horizon-days "$(HORIZON_DAYS)",) --json
+
+technical-shadow-batch: check-compose
+	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
+		echo "Error: technical-shadow-batch requires CONFIRM_COST=yes because it makes live network/model calls."; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-e TECHNICAL_AGENT_MODE=shadow \
+		-e FUNDAMENTAL_AGENT_MODE=$(if $(FUNDAMENTAL_AGENT_MODE),$(FUNDAMENTAL_AGENT_MODE),off) \
+		-e CRITIC_MODE=$(if $(CRITIC_MODE),$(CRITIC_MODE),off) \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust --repeat "$(if $(REPEAT),$(REPEAT),1)"
 
 critic-shadow-batch: check-compose
 	@if [ "$(CONFIRM_COST)" != "yes" ]; then \

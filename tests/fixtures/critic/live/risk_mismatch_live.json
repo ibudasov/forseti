@@ -3,7 +3,7 @@
   "mode": "shadow",
   "notes": "Manual live deterministic-risk-mismatch probe. Deterministic objections must restore the lower baseline decision even if the live model accepts the draft.",
   "request": {
-    "schema_version": "1.0",
+    "schema_version": "1.1",
     "run_id": "live-mismatch-1",
     "context_hash": "live-mismatch-ctx-1",
     "ticker": "RKLB",
@@ -12,13 +12,21 @@
     "draft": {
       "decision": "trade",
       "confidence": 0.72,
-      "reasons": ["baseline"],
+      "reasons": [
+        "baseline"
+      ],
       "warnings": [],
       "memo": "Draft memo",
       "source": "decision_synthesizer",
-      "entry_range": [100.0, 101.0],
+      "entry_range": [
+        100.0,
+        101.0
+      ],
       "stop_loss": 94.0,
-      "take_profit": [108.0, 110.0],
+      "take_profit": [
+        108.0,
+        110.0
+      ],
       "risk_reward": 2.0,
       "position_size_eur": 1000.0
     },
@@ -49,13 +57,21 @@
   "baseline": {
     "decision": "watchlist",
     "confidence": 0.61,
-    "reasons": ["baseline"],
+    "reasons": [
+      "baseline"
+    ],
     "warnings": [],
     "memo": "Draft memo",
     "source": "deterministic",
-    "entry_range": [100.0, 101.0],
+    "entry_range": [
+      100.0,
+      101.0
+    ],
     "stop_loss": 95.0,
-    "take_profit": [108.0, 110.0],
+    "take_profit": [
+      108.0,
+      110.0
+    ],
     "risk_reward": 2.0,
     "position_size_eur": 1000.0
   },
@@ -63,13 +79,21 @@
     "ticker": "RKLB",
     "decision": "trade",
     "confidence": 0.72,
-    "reasons": ["draft"],
+    "reasons": [
+      "draft"
+    ],
     "warnings": [],
     "engine_version": "v1.rules.0",
     "trace_id": "trace-live-mismatch-1",
-    "entry_range": [100.0, 101.0],
+    "entry_range": [
+      100.0,
+      101.0
+    ],
     "stop_loss": 94.0,
-    "take_profit": [108.0, 110.0],
+    "take_profit": [
+      108.0,
+      110.0
+    ],
     "risk_reward": 2.0,
     "position_size_eur": 1000.0
   },
@@ -79,8 +103,13 @@
   },
   "expected": {
     "effect": {
-      "reason_codes": ["guardrail_rejected: risk_number_mismatch"],
-      "deterministic_objection_ids": ["det:risk_number_mismatch:1", "det:decision_upgrade:1"],
+      "reason_codes": [
+        "guardrail_rejected: risk_number_mismatch"
+      ],
+      "deterministic_objection_ids": [
+        "det:risk_number_mismatch:1",
+        "det:decision_upgrade:1"
+      ],
       "final_decision": "watchlist",
       "final_confidence": 0.61,
       "decision_changed": false
@@ -90,10 +119,15 @@
       "reason_codes": []
     },
     "live": {
-      "required_deterministic_categories": ["risk_number_mismatch", "internal_inconsistency"],
+      "required_deterministic_categories": [
+        "risk_number_mismatch",
+        "internal_inconsistency"
+      ],
       "minimum_total_objection_count": 2,
       "require_decision_downgrade_from_response": true,
-      "required_reason_codes": ["guardrail_rejected: risk_number_mismatch"]
+      "required_reason_codes": [
+        "guardrail_rejected: risk_number_mismatch"
+      ]
     }
   }
 }

@@ -1,0 +1,62 @@
+{
+  "case_type": "assessment",
+  "description": "Earnings in 3 days adds event risk the deterministic checklist does not see.",
+  "mode": "enforced",
+  "request": {
+    "run_id": "run-technical-eval",
+    "ticker": "NVDA",
+    "sector": "ai",
+    "snapshot_at": "2026-09-08T23:59:59Z",
+    "as_of_date": "2026-09-08",
+    "deterministic_result": {
+      "ticker": "NVDA",
+      "as_of_date": "2026-09-08",
+      "score": 1,
+      "maximum_score": 5,
+      "rule_results": [
+        {
+          "rule_id": "volume_trend",
+          "status": "passed",
+          "points_awarded": 1,
+          "points_available": 1,
+          "metric_ids": ["volume_trend:2026-09-08"],
+          "explanation": "volume_trend 1.20 >= 1.0 minimum"
+        }
+      ],
+      "warnings": [],
+      "metrics": [
+        {
+          "metric_id": "volume_trend:2026-09-08",
+          "metric_name": "volume_trend",
+          "value": "1.20",
+          "unit": "ratio",
+          "as_of_date": "2026-09-08"
+        }
+      ]
+    },
+    "facts": [
+      {
+        "metric_id": "days_to_earnings:2026-09-08",
+        "name": "days_to_earnings",
+        "value": "3",
+        "unit": "days",
+        "derivation": "next scheduled earnings report date minus as_of_date"
+      }
+    ],
+    "series": [],
+    "coverage": {
+      "bar_count": 200,
+      "required_facts_missing": [],
+      "latest_bar_date": "2026-09-08",
+      "bars_stale": false,
+      "series_truncated": false
+    }
+  },
+  "model_output": "{\"schema_version\": \"1.0\", \"run_id\": \"__RUN_ID__\", \"context_hash\": \"__CONTEXT_HASH__\", \"agent_name\": \"technical_analyst\", \"status\": \"completed\", \"overall_signal\": \"negative\", \"trend_state\": \"range\", \"momentum_state\": \"stable\", \"proposed_score_adjustment\": -1, \"findings\": [], \"contradictions\": [], \"risk_flags\": [{\"finding_id\": \"risk-1\", \"category\": \"event_risk\", \"direction\": \"negative\", \"materiality\": \"medium\", \"claim\": \"Earnings are due in 3 days, adding event risk before any position can mature.\", \"metric_ids\": [\"days_to_earnings:2026-09-08\"]}], \"missing_information\": [], \"summary\": \"Upcoming earnings introduce event risk.\"}",
+  "expected": {
+    "accepted": true,
+    "status": "completed",
+    "proposed_score_adjustment": -1,
+    "model_call_count": 1
+  }
+}
