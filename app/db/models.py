@@ -283,12 +283,17 @@ class Recommendation(SQLModel, table=True):
 
 class AgentRun(SQLModel, table=True):
     __tablename__ = "agent_runs"
+    __table_args__ = (sa.Index("ix_agent_runs_ticker_as_of_date", "ticker", "as_of_date"),)
 
     run_id: str = Field(sa_column=Column(sa.String(length=36), primary_key=True))
     ticker: str = Field(sa_column=Column(sa.String(length=16), nullable=False, index=True))
     created_at: datetime = Field(
         default_factory=_utc_now,
         sa_column=Column(sa.DateTime(timezone=True), nullable=False, default=_utc_now),
+    )
+    as_of_date: Optional[date] = Field(default=None, sa_column=Column(sa.Date(), nullable=True))
+    as_of_date_source: Optional[str] = Field(
+        default=None, sa_column=Column(sa.String(length=32), nullable=True)
     )
     final_decision: Optional[Decision] = Field(
         default=None, sa_column=Column(sa.String(length=16), nullable=True)

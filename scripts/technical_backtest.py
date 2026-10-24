@@ -33,6 +33,7 @@ from sqlmodel import select
 
 from app.db.models import AgentRun, PriceBar, Security
 from app.db.session import get_engine, get_session
+from app.services.agent_run_dates import resolve_agent_run_as_of_date
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPORT_DIR = REPO_ROOT / "reports" / "trust"
@@ -61,6 +62,7 @@ class ShadowRunRecord:
     as_of_date: date
     baseline_decision: str
     counterfactual_decision: str
+    as_of_date_source: Optional[str] = None
 
     @property
     def is_downgrade(self) -> bool:
@@ -89,6 +91,7 @@ class BacktestReport:
     downgrade: CohortSummary
     neutral: CohortSummary
     excluded_insufficient_bars_count: int
+    backfilled_rows_used: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +99,7 @@ class BacktestReport:
             "downgrade": self.downgrade.to_dict(),
             "neutral": self.neutral.to_dict(),
             "excluded_insufficient_bars_count": self.excluded_insufficient_bars_count,
+            "backfilled_rows_used": self.backfilled_rows_used,
         }
 
 
@@ -152,6 +156,9 @@ def build_backtest_report(
         downgrade=_cohort_summary("technical_would_downgrade", downgrade_returns),
         neutral=_cohort_summary("technical_neutral", neutral_returns),
         excluded_insufficient_bars_count=excluded_count,
+        backfilled_rows_used=sum(
+            record.as_of_date_source == "created_at_backfill" for record in records
+        ),
     )
 
 
@@ -185,6 +192,7 @@ def render_markdown(report: BacktestReport) -> str:
         [
             "",
             f"excluded_insufficient_bars_count: {report.excluded_insufficient_bars_count}",
+            f"backfilled_rows_used: {report.backfilled_rows_used}",
             "",
             "This report is descriptive only: sample sizes are reported alongside the means/medians, and "
             "no p-value or significance claim is made. Do not use these numbers to tune the Technical "
@@ -204,12 +212,8 @@ def _format_optional_float(value: Optional[float]) -> str:
 def load_shadow_records(engine: Any, *, limit: int = 500) -> list[ShadowRunRecord]:
     """Load persisted shadow-mode technical effects from `agent_runs`.
 
-    `AgentRun` does not persist the analysis `as_of_date` used for a run, so
-    this approximates it with `created_at.date()`. That is accurate for the
-    frozen trust-matrix batches (`make technical-shadow-batch`), which run
-    with a single fixed `as_of_date` close to the invocation time, but would
-    drift for organically-scheduled runs. This gap is called out explicitly
-    in `docs/trust/technical-shadow.md` rather than silently trusted.
+    Runs without an `as_of_date` fall back to `created_at.date()` with a
+    warning. Backfilled rows are counted in the resulting report.
     """
     statement = (
         select(AgentRun)
@@ -229,9 +233,10 @@ def load_shadow_records(engine: Any, *, limit: int = 500) -> list[ShadowRunRecor
             ShadowRunRecord(
                 run_id=run.run_id,
                 ticker=run.ticker,
-                as_of_date=run.created_at.date(),
+                as_of_date=resolve_agent_run_as_of_date(run),
                 baseline_decision=str(effect["baseline_decision"]),
                 counterfactual_decision=str(effect["counterfactual_decision"]),
+                as_of_date_source=run.as_of_date_source,
             )
         )
     return records

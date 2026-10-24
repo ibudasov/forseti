@@ -101,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         "credential_probe": _credential_probe(),
         "selection_basis": matrix_payload.get("selection_basis", {}),
         "runs": [],
+        "backfilled_rows_used": 0,
         "summary": {},
     }
 
@@ -198,7 +199,12 @@ def main(argv: list[str] | None = None) -> int:
                     exit_code = 1
             report["runs"].append(run_report)
 
+    report["backfilled_rows_used"] = sum(
+        (run.get("trace") or {}).get("as_of_date_source") == "created_at_backfill"
+        for run in report["runs"]
+    )
     report["summary"] = _build_summary(report["runs"], repeat_count=args.repeat)
+    report["summary"]["backfilled_rows_used"] = report["backfilled_rows_used"]
     report_prefix = "trust-consistency" if args.repeat > 1 else "trust-e2e"
     report_path = report_dir / f"{report_prefix}-{critic_mode}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -247,6 +253,8 @@ def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
     estimated_cost_usd = estimate_usage_cost_usd(get_settings().GEMINI_MODEL, trace.token_usage)
     return {
         "run_id": trace.run_id,
+        "as_of_date": trace.as_of_date.isoformat() if trace.as_of_date is not None else None,
+        "as_of_date_source": trace.as_of_date_source,
         "final_decision": trace.final_decision,
         "total_latency_ms": trace.total_latency_ms,
         "token_usage": dict(trace.token_usage),
@@ -463,6 +471,11 @@ def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
             )
         )
     print(f"report\t{report_path}")
+    backfilled_rows_used = sum(
+        (run.get("trace") or {}).get("as_of_date_source") == "created_at_backfill"
+        for run in runs
+    )
+    print(f"backfilled_rows_used\t{backfilled_rows_used}")
 
 
 def _percentile(values: list[float], percentile: float) -> float:

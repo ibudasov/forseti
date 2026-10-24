@@ -58,6 +58,8 @@ class TraceStep(BaseModel):
 class AnalysisTrace(BaseModel):
     run_id: str
     ticker: str
+    as_of_date: Optional[date] = None
+    as_of_date_source: Optional[Literal["request", "created_at_backfill"]] = None
     steps: List[TraceStep] = Field(default_factory=list)
     final_decision: Optional[str] = None
     total_latency_ms: float = 0.0

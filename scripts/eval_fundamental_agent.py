@@ -20,6 +20,7 @@ from app.services.fundamental_evaluation import (
     render_evaluation_markdown,
     render_shadow_markdown,
 )
+from app.services.agent_run_dates import render_agent_run_date_summary, summarize_agent_run_dates
 from app.settings import get_settings
 
 
@@ -50,11 +51,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.shadow_report:
-        report = build_shadow_report(_load_shadow_runs(limit=args.limit))
+        runs = _load_shadow_runs(limit=args.limit)
+        shadow_runs = [
+            run
+            for run in runs
+            if run.fundamental_agent_effect is not None
+            and run.fundamental_agent_effect.get("mode") == "shadow"
+        ]
+        report = build_shadow_report(runs)
+        date_summary = summarize_agent_run_dates(shadow_runs)
         if args.json:
-            print(json.dumps(report.model_dump(mode="json"), indent=2))
+            report_data = report.model_dump(mode="json")
+            report_data.update(date_summary)
+            print(json.dumps(report_data, indent=2))
             return 0
-        print(render_shadow_markdown(report), end="")
+        print(render_shadow_markdown(report) + render_agent_run_date_summary(date_summary), end="")
         return 0
 
     suite = load_fundamental_evaluation_suite(args.fixture)
