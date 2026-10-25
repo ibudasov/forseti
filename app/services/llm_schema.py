@@ -9,9 +9,12 @@ the inlining rules never drift between them.
 
 from __future__ import annotations
 
-from typing import Any, Type
+import json
+from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 def inline_response_schema(model: Type[BaseModel]) -> dict[str, Any]:
@@ -30,6 +33,37 @@ def gemini_token_usage(response: Any) -> dict[str, int]:
         "candidates_token_count": int(getattr(usage, "candidates_token_count", 0) or 0),
         "total_token_count": int(getattr(usage, "total_token_count", 0) or 0),
     }
+
+
+def strict_parse_json(
+    raw_output: str,
+    model: Type[ModelT],
+    *,
+    forbidden_fields: frozenset[str] = frozenset(),
+    forbidden_field_error_code: str = "forbidden_response_field",
+) -> ModelT:
+    payload = json.loads(raw_output)
+    ensure_no_forbidden_fields(payload, forbidden_fields, forbidden_field_error_code)
+    return model.model_validate(payload)
+
+
+def ensure_no_forbidden_fields(
+    payload: Any,
+    forbidden_fields: frozenset[str],
+    error_code: str = "forbidden_response_field",
+) -> None:
+    if isinstance(payload, dict):
+        forbidden = forbidden_fields & set(payload)
+        if forbidden:
+            if error_code == "forbidden_response_field":
+                raise ValueError(f"{error_code}:{sorted(forbidden)[0]}")
+            raise ValueError(error_code)
+        for value in payload.values():
+            ensure_no_forbidden_fields(value, forbidden_fields, error_code)
+        return
+    if isinstance(payload, list):
+        for value in payload:
+            ensure_no_forbidden_fields(value, forbidden_fields, error_code)
 
 
 def _inline(value: Any, definitions: dict[str, Any]) -> Any:
