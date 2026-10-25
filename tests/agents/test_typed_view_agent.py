@@ -10,10 +10,18 @@ from app.schemas.technicals import (
     TechnicalAssessmentValidation,
     TechnicalFinding,
 )
+from app.schemas.fundamentals import (
+    CitedFinding,
+    FundamentalAssessmentResponse,
+    FundamentalAssessmentResult,
+    FundamentalAssessmentValidation,
+)
 from agents.orchestration.adk_events import event_author, event_text, event_token_usage
 from agents.orchestration.typed_view_agent import (
+    TypedAnalystViewAgent,
     NEUTRAL_TECHNICAL_VIEW,
     TypedTechnicalViewAgent,
+    render_fundamental_view,
     render_technical_view,
 )
 
@@ -54,6 +62,38 @@ def _assessment(
         token_usage={"total_token_count": 5},
         model_name="fake-technical",
         prompt_version="technical-analyst.v1",
+    )
+
+
+def _fundamental_assessment() -> FundamentalAssessmentResult:
+    response = FundamentalAssessmentResponse(
+        run_id="run-1",
+        context_hash="ctx-1",
+        status="completed",
+        overall_signal="positive",
+        proposed_score_adjustment=0,
+        findings=[
+            CitedFinding(
+                finding_id="fundamental-1",
+                category="growth_quality",
+                direction="positive",
+                materiality="high",
+                claim="Revenue growth is supported by cited evidence.",
+                metric_ids=["revenue_growth:2026-06-30"],
+                chunk_ids=[10],
+            )
+        ],
+        contradictions=[],
+        material_red_flags=[],
+        evidence_coverage=0.75,
+        missing_information=["cash-flow outlook"],
+        summary="Fundamental summary.",
+    )
+    return FundamentalAssessmentResult(
+        response=response,
+        validation=FundamentalAssessmentValidation(accepted=True, reason_codes=[]),
+        model_name="fake-fundamental",
+        prompt_version="fundamental-analyst.v2",
     )
 
 
@@ -154,3 +194,23 @@ def test_agent_writes_neutral_view_when_assessment_is_absent():
     _, session = _run_agent(agent)
 
     assert session.state["technical_view"] == NEUTRAL_TECHNICAL_VIEW
+
+
+def test_fundamental_typed_agent_emits_one_zero_token_event_and_writes_cited_view():
+    assessment = _fundamental_assessment()
+    agent = TypedAnalystViewAgent(
+        name="fundamental_analyst",
+        state_key="fundamental_view",
+        assessment=assessment,
+    )
+
+    events, session = _run_agent(agent)
+
+    expected = render_fundamental_view(assessment)
+    assert len(events) == 1
+    assert event_author(events[0]) == "fundamental_analyst"
+    assert event_token_usage(events[0]) == {}
+    assert session.state["fundamental_view"] == expected
+    assert json.loads(event_text(events[0])) == expected
+    assert expected["findings"][0]["metric_ids"] == ["revenue_growth:2026-06-30"]
+    assert expected["findings"][0]["chunk_ids"] == [10]

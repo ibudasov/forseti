@@ -876,6 +876,61 @@ def test_fundamental_enforced_mode_rejects_promotion_without_creating_risk(monke
     assert "promotion_not_allowed" in response.fundamental_agent_effect.reason_codes
 
 
+def test_fundamental_enforced_mode_assesses_once_and_uses_typed_registry_view(monkeypatch):
+    monkeypatch.setattr(workflow_module, "_fundamental_agent_mode", lambda: "enforced")
+    assessment = _assessment(accepted=True, adjustment=0).model_copy(
+        update={"token_usage": {"total_token_count": 7}}
+    )
+    model_port_calls = []
+    registry_assessments = []
+
+    class _CountingAnalyst:
+        def assess(self, request):
+            model_port_calls.append(request)
+            return assessment
+
+    workflow = _workflow(
+        monkeypatch,
+        events=[
+            _event(
+                "fundamental_analyst",
+                text=json.dumps(
+                    {
+                        "status": "completed",
+                        "overall_signal": "positive",
+                        "proposed_score_adjustment": 0,
+                        "evidence_coverage": 0.5,
+                        "findings": [],
+                        "missing_information": [],
+                        "summary": "Assessment summary.",
+                    }
+                ),
+            )
+        ],
+    )
+    monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
+    monkeypatch.setattr(workflow_module, "FundamentalAnalyst", lambda: _CountingAnalyst())
+
+    def capture_registry(config, engine=None, today=None, **kwargs):
+        registry_assessments.append(kwargs.get("fundamental_assessment"))
+        return AgentRegistry(tools={}, specialists={}, root_agent=None)
+
+    monkeypatch.setattr(workflow_module, "build_agent_registry", capture_registry)
+
+    response = workflow.analyze("NVDA")
+
+    assert len(model_port_calls) == 1
+    assert registry_assessments == [assessment]
+    typed_step = next(
+        step
+        for step in response.trace.steps
+        if step.agent_name == "fundamental_analyst"
+        and step.output
+        and step.output.get("source") == "typed_assessment"
+    )
+    assert typed_step.token_usage == {}
+
+
 def test_technical_mode_off_skips_context_builder(monkeypatch):
     monkeypatch.setattr(workflow_module, "_technical_agent_mode", lambda: "off")
     monkeypatch.setattr(

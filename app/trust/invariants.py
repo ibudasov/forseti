@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
 
-from agents.orchestration.registry import CRITIC_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
+from agents.orchestration.registry import (
+    CRITIC_NAME,
+    FUNDAMENTAL_ANALYST_NAME,
+    SPECIALIST_ORDER,
+    TECHNICAL_ANALYST_NAME,
+)
 from app.schemas.analyze import AnalysisTrace, AnalyzeResponse
 from app.services.decision_diagnosis import MISSING_DATA_WARNINGS
 
@@ -266,6 +271,7 @@ def evaluate_agentic_invariants(
     violations.extend(check_fundamental_agent_authority(agentic_response))
     violations.extend(check_technical_agent_effect_rank(agentic_response))
     violations.extend(check_technical_risk_fields_untouched_in_shadow(agentic_response))
+    violations.extend(check_fundamental_step_zero_tokens_in_typed_mode(trace))
     violations.extend(check_technical_step_zero_tokens_in_typed_mode(trace))
     return violations
 
@@ -439,6 +445,26 @@ def check_technical_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> list
                 InvariantViolation(
                     code="technical_typed_view_step_nonzero_tokens",
                     message="Typed-view technical_analyst trace step must report zero tokens.",
+                    details={"sequence": step.sequence, "token_usage": nonzero_token_usage},
+                )
+            )
+    return violations
+
+
+def check_fundamental_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> list[InvariantViolation]:
+    """Require the typed Fundamental Analyst view event to have zero token usage."""
+    violations: list[InvariantViolation] = []
+    for step in trace.steps:
+        if step.agent_name != FUNDAMENTAL_ANALYST_NAME or not isinstance(step.output, dict):
+            continue
+        if step.output.get("source") != "typed_assessment":
+            continue
+        nonzero_token_usage = {key: value for key, value in step.token_usage.items() if value}
+        if nonzero_token_usage:
+            violations.append(
+                InvariantViolation(
+                    code="fundamental_typed_view_step_nonzero_tokens",
+                    message="Typed-view fundamental_analyst trace step must report zero tokens.",
                     details={"sequence": step.sequence, "token_usage": nonzero_token_usage},
                 )
             )

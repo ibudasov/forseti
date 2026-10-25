@@ -13,6 +13,7 @@ from app.trust.invariants import (
     check_data_gate_warning_propagation,
     check_downgrade_only_behavior,
     check_fundamental_agent_authority,
+    check_fundamental_step_zero_tokens_in_typed_mode,
     check_risk_field_equality,
     check_specialist_sequence,
     check_technical_agent_effect_rank,
@@ -510,4 +511,25 @@ def test_technical_step_zero_tokens_in_typed_mode_rejects_nonzero_tokens():
     violations = check_technical_step_zero_tokens_in_typed_mode(trace)
 
     assert [violation.code for violation in violations] == ["technical_typed_view_step_nonzero_tokens"]
+    assert violations[0].details["token_usage"] == {"total_token_count": 42}
+
+
+def test_fundamental_step_zero_tokens_in_typed_mode_rejects_nonzero_tokens():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(
+                    sequence=1,
+                    agent_name="fundamental_analyst",
+                    status="completed",
+                    output={"source": "typed_assessment", "status": "completed"},
+                    token_usage={"total_token_count": 42},
+                )
+            ]
+        }
+    )
+
+    violations = check_fundamental_step_zero_tokens_in_typed_mode(trace)
+
+    assert [violation.code for violation in violations] == ["fundamental_typed_view_step_nonzero_tokens"]
     assert violations[0].details["token_usage"] == {"total_token_count": 42}

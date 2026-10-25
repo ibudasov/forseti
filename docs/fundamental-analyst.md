@@ -24,6 +24,15 @@ promote the decision. The policy independently rejects positive adjustments
 with `promotion_not_allowed`, and caps even shadow counterfactuals at the
 incoming decision. No Fundamental path recomputes risk numbers or time stops.
 
+## Agentic typed view
+
+In `shadow` and `enforced` modes, the workflow runs this analyst once before
+ADK and passes its validated result into the Fundamental Analyst specialist
+slot. That slot serializes the typed fields and their metric/chunk citations to
+`fundamental_view` without making a second model call. The Synthesizer and
+Critic consume this same validated view. In `off` mode the legacy narrative
+`LlmAgent` remains unchanged.
+
 ## Input contract
 
 The input is the immutable `FundamentalAnalysisRequest` documented in `docs/fundamental-analysis-context.md`.

@@ -41,6 +41,22 @@ For `failed` and `skipped`, `TraceStep.output.reason` is always present.
 
 Any string nested in `TraceStep.output` is truncated to 20,000 chars and suffixed with `…[truncated]`.
 
+## `fundamental_analyst` step
+
+When `FUNDAMENTAL_AGENT_MODE` is `off`, the `fundamental_analyst` ADK slot is
+the legacy narrative `LlmAgent`.
+
+When the mode is `shadow` or `enforced`, the workflow calls the Fundamental
+Analyst once before ADK to produce the validated assessment used by policy.
+The ADK slot is then a deterministic typed view (`TypedAnalystViewAgent`),
+not another model call:
+
+- `output.source == "typed_assessment"` and the remaining fields mirror the
+  validated result, including cited `metric_ids` and `chunk_ids`.
+- The typed-view event has `token_usage == {}`. The earlier assessment trace
+  records the one Fundamental model call and its usage.
+- The Synthesizer and Critic read this validated view from `fundamental_view`.
+
 ## `technical_analyst` step
 
 When `TECHNICAL_AGENT_MODE` is `off`, the `technical_analyst` step is a
@@ -48,7 +64,7 @@ narrative ADK `LlmAgent` turn like any other specialist: `output` is the raw
 `{"text": ...}` fallback and `token_usage` reflects the model call.
 
 When `TECHNICAL_AGENT_MODE` is `shadow` or `enforced`, the step is produced by
-the deterministic `TypedTechnicalViewAgent`
+the deterministic `TypedAnalystViewAgent`
 (`agents/orchestration/typed_view_agent.py`) instead of a second model call:
 
 - `output.source == "typed_assessment"`, and the remaining `output` fields

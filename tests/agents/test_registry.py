@@ -146,12 +146,60 @@ def _technical_assessment():
     )
 
 
+def _fundamental_assessment():
+    from app.schemas.fundamentals import (
+        FundamentalAssessmentResponse,
+        FundamentalAssessmentResult,
+        FundamentalAssessmentValidation,
+    )
+
+    response = FundamentalAssessmentResponse(
+        run_id="run-1",
+        context_hash="ctx-1",
+        status="completed",
+        overall_signal="positive",
+        proposed_score_adjustment=0,
+        findings=[],
+        contradictions=[],
+        material_red_flags=[],
+        evidence_coverage=1.0,
+        missing_information=[],
+        summary="Fundamental summary.",
+    )
+    return FundamentalAssessmentResult(
+        response=response,
+        validation=FundamentalAssessmentValidation(accepted=True, reason_codes=[]),
+        model_name="fake-fundamental",
+        prompt_version="fundamental-analyst.v2",
+    )
+
+
 def test_registry_builds_narrative_llm_agent_for_technical_analyst_by_default():
     from google.adk.agents import LlmAgent
 
     registry = build_agent_registry(_config())
 
     assert type(registry.specialists[TECHNICAL_ANALYST_NAME]) is LlmAgent
+
+
+def test_registry_builds_narrative_llm_agent_for_fundamental_analyst_by_default():
+    from google.adk.agents import LlmAgent
+
+    registry = build_agent_registry(_config())
+
+    assert type(registry.specialists[FUNDAMENTAL_ANALYST_NAME]) is LlmAgent
+
+
+def test_registry_builds_typed_fundamental_view_when_assessment_is_provided():
+    from agents.orchestration.typed_view_agent import TypedAnalystViewAgent
+
+    assessment = _fundamental_assessment()
+    registry = build_agent_registry(_config(), fundamental_assessment=assessment)
+
+    fundamental_analyst = registry.specialists[FUNDAMENTAL_ANALYST_NAME]
+    assert isinstance(fundamental_analyst, TypedAnalystViewAgent)
+    assert fundamental_analyst.assessment is assessment
+    assert fundamental_analyst.state_key == FUNDAMENTAL_VIEW_OUTPUT_KEY
 
 
 def test_registry_builds_typed_view_agent_when_technical_assessment_is_provided():
@@ -180,3 +228,12 @@ def test_decision_synthesizer_and_critic_instructions_mention_validated_json_in_
         instruction = registry.specialists[name].instruction.lower()
         assert "validated" in instruction
         assert "metric_ids" in instruction
+
+
+def test_fundamental_typed_mode_guides_synthesizer_and_critic_to_citations():
+    registry = build_agent_registry(_config(), fundamental_assessment=_fundamental_assessment())
+
+    for name in (DECISION_SYNTHESIZER_NAME, CRITIC_NAME):
+        instruction = registry.specialists[name].instruction.lower()
+        assert "validated json assessment" in instruction
+        assert "chunk_ids" in instruction
