@@ -99,6 +99,10 @@ class Settings(BaseSettings):
         default="off",
         validation_alias="CRITIC_MODE",
     )
+    SYNTHESIZER_CONTRACT: str = Field(
+        default="legacy",
+        validation_alias="SYNTHESIZER_CONTRACT",
+    )
     ALLOW_PIPELINE_OVERRIDE: bool = Field(
         default=False,
         validation_alias="ALLOW_PIPELINE_OVERRIDE",

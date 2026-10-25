@@ -40,6 +40,7 @@ class DraftRecommendation(BaseModel):
     risk_reward: Optional[float] = None
     position_size_eur: Optional[float] = None
     memo: str = ""
+    memo_claims: list[str] = Field(default_factory=list)
     source: Literal["deterministic", "decision_synthesizer"]
 
     @model_validator(mode="after")

@@ -36,6 +36,9 @@ For `failed` and `skipped`, `TraceStep.output.reason` is always present.
   downgrade-only relative to the post-fundamental decision it was computed against (see
   [`docs/critic-guardrail.md`](critic-guardrail.md) for the full composition order)
 - `critic_effect` — persisted summary of the critic guardrail outcome, including objections, decisions, and revisions
+- `synthesizer_effect` — typed Decision Synthesizer outcome (contract, prompt version, fallback used, proposed vs
+  final decision, validation failures, memo hash); omitted in legacy mode. In typed mode the
+  `decision_synthesizer` step has `output.source = "typed_synthesis"` and zero tokens
 
 ## Output truncation
 

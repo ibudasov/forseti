@@ -1,0 +1,92 @@
+{
+  "source": "synthetic: typed fundamental, technical and decision_synthesizer steps (SYNTHESIZER_CONTRACT=typed)",
+  "run_id": "fixture-clear-trade-typed-synthesizer",
+  "ticker": "TRDUP",
+  "steps": [
+    {
+      "sequence": 1,
+      "agent_name": "fundamental_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {},
+      "output": {
+        "source": "typed_assessment",
+        "status": "completed",
+        "overall_signal": "positive",
+        "proposed_score_adjustment": 0,
+        "evidence_coverage": 0.75,
+        "findings": [
+          {
+            "finding_id": "growth-quality",
+            "category": "growth_quality",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "Revenue growth is supported by cited evidence.",
+            "metric_ids": [
+              "revenue_growth:2026-06-30"
+            ],
+            "chunk_ids": [
+              10
+            ]
+          }
+        ],
+        "missing_information": [],
+        "summary": "Fundamental evidence supports the baseline."
+      }
+    },
+    {
+      "sequence": 2,
+      "agent_name": "technical_analyst",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {},
+      "output": {
+        "source": "typed_assessment",
+        "status": "completed",
+        "overall_signal": "positive",
+        "trend_state": "uptrend",
+        "momentum_state": "strengthening",
+        "proposed_score_adjustment": 0,
+        "findings": [
+          {
+            "finding_id": "trend-50dma",
+            "category": "trend",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "Price above the 50-day moving average.",
+            "metric_ids": [
+              "trend_50dma:2026-09-08"
+            ]
+          }
+        ],
+        "summary": "Uptrend confirmed with strengthening momentum."
+      }
+    },
+    {
+      "sequence": 3,
+      "agent_name": "decision_synthesizer",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {},
+      "output": {
+        "source": "typed_synthesis",
+        "text": "Thesis: Cited evidence supports the baseline trade.\n\nRisk block: deterministic risk numbers."
+      }
+    },
+    {
+      "sequence": 4,
+      "agent_name": "critic_guardrail",
+      "status": "completed",
+      "tool_calls": [],
+      "latency_ms": 0.0,
+      "token_usage": {
+        "prompt_token_count": 8,
+        "candidates_token_count": 7,
+        "total_token_count": 15
+      }
+    }
+  ]
+}

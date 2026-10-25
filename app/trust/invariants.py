@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from agents.orchestration.registry import (
     CRITIC_NAME,
+    DECISION_SYNTHESIZER_NAME,
     FUNDAMENTAL_ANALYST_NAME,
     SPECIALIST_ORDER,
     TECHNICAL_ANALYST_NAME,
@@ -273,6 +274,10 @@ def evaluate_agentic_invariants(
     violations.extend(check_technical_risk_fields_untouched_in_shadow(agentic_response))
     violations.extend(check_fundamental_step_zero_tokens_in_typed_mode(trace))
     violations.extend(check_technical_step_zero_tokens_in_typed_mode(trace))
+    violations.extend(check_synthesizer_step_zero_tokens_in_typed_mode(trace))
+    violations.extend(
+        check_synthesizer_never_changes_risk_numbers(deterministic_response, agentic_response, trace)
+    )
     return violations
 
 
@@ -469,6 +474,77 @@ def check_fundamental_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> li
                 )
             )
     return violations
+
+
+def check_synthesizer_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> list[InvariantViolation]:
+    """LE-5 invariant `synthesizer_step_zero_tokens_in_typed_mode`.
+
+    In typed mode the Decision Synthesizer runs outside ADK, so its ADK step
+    only renders the validated memo and must never make a model call. The
+    service's own token usage is accounted in the run total instead.
+    """
+    violations: list[InvariantViolation] = []
+    for step in trace.steps:
+        if step.agent_name != DECISION_SYNTHESIZER_NAME or not isinstance(step.output, dict):
+            continue
+        if step.output.get("source") != "typed_synthesis":
+            continue
+        nonzero_token_usage = {key: value for key, value in step.token_usage.items() if value}
+        if nonzero_token_usage:
+            violations.append(
+                InvariantViolation(
+                    code="synthesizer_typed_step_nonzero_tokens",
+                    message="Typed-mode decision_synthesizer trace step must report zero tokens.",
+                    details={"sequence": step.sequence, "token_usage": nonzero_token_usage},
+                )
+            )
+    return violations
+
+
+def check_synthesizer_never_changes_risk_numbers(
+    deterministic_response: AnalyzeResponse,
+    agentic_response: AnalyzeResponse,
+    trace: AnalysisTrace,
+) -> list[InvariantViolation]:
+    """LE-5 invariant `synthesizer_never_changes_risk_numbers`.
+
+    Applies to runs with a typed synthesizer effect: the response risk fields
+    must equal the deterministic ones and the rendered memo risk block must
+    carry the deterministic numbers verbatim.
+    """
+    if trace.synthesizer_effect is None:
+        return []
+    violations = [
+        InvariantViolation(
+            code="synthesizer_changed_risk_number",
+            message=f"Typed synthesizer run changed risk field '{violation.details['field_name']}'.",
+            details=violation.details,
+        )
+        for violation in check_risk_field_equality(deterministic_response, agentic_response)
+    ]
+    memo = agentic_response.memo
+    if memo is None:
+        return violations
+    for field_name in RISK_FIELDS:
+        for number in _risk_numbers(getattr(deterministic_response, field_name)):
+            if f"{number:g}" in memo.risk_block:
+                continue
+            violations.append(
+                InvariantViolation(
+                    code="memo_risk_block_mismatch",
+                    message=f"Memo risk block does not carry deterministic '{field_name}'.",
+                    details={"field_name": field_name, "expected": number},
+                )
+            )
+    return violations
+
+
+def _risk_numbers(value: Any) -> tuple[float, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, tuple):
+        return value
+    return (value,)
 
 
 CRITIC_OFF_ALLOWED_SKIPS = {CRITIC_NAME: {"critic_mode_off"}}

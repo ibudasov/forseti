@@ -47,6 +47,8 @@ class SynthesizerEvaluation:
     money_field_count: int
     promotion_count: int
     unsupported_numeric_claims_rejected: int
+    fallback_memo_count: int
+    rejected_without_fallback_count: int
     cases: tuple[dict[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +65,8 @@ class SynthesizerEvaluation:
             "money_field_count": self.money_field_count,
             "promotion_count": self.promotion_count,
             "unsupported_numeric_claims_rejected": self.unsupported_numeric_claims_rejected,
+            "fallback_memo_count": self.fallback_memo_count,
+            "rejected_without_fallback_count": self.rejected_without_fallback_count,
             "cases": list(self.cases),
         }
 
@@ -139,6 +143,7 @@ def evaluate_synthesizer_cases(cases: list[SynthesizerCase], *, live: bool = Fal
     money_field_count = 0
     promotion_count = 0
     unsupported_numeric_count = 0
+    rejected_without_fallback_count = 0
 
     for case in cases:
         model_port = None if live else RecordedModel(case.response, case.request)
@@ -146,6 +151,7 @@ def evaluate_synthesizer_cases(cases: list[SynthesizerCase], *, live: bool = Fal
         response = DecisionMemoResponse.model_validate(result.response.model_dump(mode="json"))
         valid_schema_count += 1
         fallback_count += int(result.used_fallback)
+        rejected_without_fallback_count += int(not result.validation.accepted and not result.used_fallback)
         refs = _citation_ids(response)
         citation_count += len(refs)
         valid_citation_count += sum(
@@ -194,6 +200,7 @@ def evaluate_synthesizer_cases(cases: list[SynthesizerCase], *, live: bool = Fal
         and citation_precision >= 0.95
         and money_field_count == 0
         and promotion_count == 0
+        and rejected_without_fallback_count == 0
         and all(case["passed"] for case in case_results)
     )
     return SynthesizerEvaluation(
@@ -207,6 +214,8 @@ def evaluate_synthesizer_cases(cases: list[SynthesizerCase], *, live: bool = Fal
         money_field_count=money_field_count,
         promotion_count=promotion_count,
         unsupported_numeric_claims_rejected=unsupported_numeric_count,
+        fallback_memo_count=fallback_count,
+        rejected_without_fallback_count=rejected_without_fallback_count,
         cases=tuple(case_results),
     )
 

@@ -25,6 +25,7 @@ def build_draft_from_response(
     response: AnalyzeResponse,
     *,
     memo: str = "",
+    memo_claims: Sequence[str] = (),
     source: Literal["deterministic", "decision_synthesizer"] = "deterministic",
 ) -> DraftRecommendation:
     return DraftRecommendation(
@@ -38,6 +39,7 @@ def build_draft_from_response(
         risk_reward=response.risk_reward,
         position_size_eur=response.position_size_eur,
         memo=memo,
+        memo_claims=list(memo_claims),
         source=source,
     )
 

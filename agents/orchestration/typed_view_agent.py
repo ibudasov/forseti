@@ -54,6 +54,22 @@ class TypedAnalystViewAgent(BaseAgent):
         )
 
 
+class TypedDecisionMemoAgent(BaseAgent):
+    """Writes the already-validated synthesizer memo to session state without a model call."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    state_key: str
+    rendered_memo: str
+
+    async def _run_async_impl(self, ctx: "InvocationContext") -> AsyncGenerator[Event, None]:
+        yield Event(
+            author=self.name,
+            content=types.Content(role="model", parts=[types.Part(text=self.rendered_memo)]),
+            actions=EventActions(state_delta={self.state_key: self.rendered_memo}),
+        )
+
+
 class TypedTechnicalViewAgent(TypedAnalystViewAgent):
     """Compatibility wrapper for the original typed technical-view agent."""
 

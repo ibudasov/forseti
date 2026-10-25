@@ -42,10 +42,13 @@ from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
 from app.schemas.fundamentals import FundamentalAssessmentResult
+from app.schemas.memo import DecisionMemo, SynthesizerEffect
+from app.schemas.synthesis import DecisionMemoResult, DecisionSynthesisRequest
 from app.schemas.technicals import TechnicalAgentEffect, TechnicalAnalysisRequest, TechnicalAssessmentResult
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
+from app.services.decision_synthesizer import DecisionSynthesizer, build_decision_memo, memo_hash
 from app.services.critique_context import (
     build_analyst_views,
     build_critique_request,
@@ -54,6 +57,7 @@ from app.services.critique_context import (
 from app.services.fundamental_analyst import FundamentalAnalyst
 from app.services.fundamental_context import build_fundamental_analysis_request
 from app.services.fundamental_policy import apply_fundamental_policy
+from app.services.synthesis_context import build_synthesis_request
 from app.services.technical_analyst import TechnicalAnalyst
 from app.services.technical_context import build_technical_analysis_request
 from app.services.technical_policy import apply_technical_policy
@@ -116,6 +120,42 @@ class _PendingTraceStep:
     retries: int = 0
     reason: str | None = None
     detail: str | None = None
+
+
+@dataclass
+class _TypedSynthesisRun:
+    """Typed Decision Synthesizer outcome for one workflow run, including its bounded revision."""
+
+    request: DecisionSynthesisRequest
+    results: list[DecisionMemoResult]
+
+    @property
+    def result(self) -> DecisionMemoResult:
+        return self.results[-1]
+
+    def record_revision(self, request: DecisionSynthesisRequest, result: DecisionMemoResult) -> None:
+        self.request = request
+        self.results.append(result)
+
+    def memo(self) -> DecisionMemo:
+        return build_decision_memo(self.result.response, self.request)
+
+    def memo_claims(self) -> list[str]:
+        response = self.result.response
+        items = [*response.key_reasons, *response.key_risks, *response.what_would_change]
+        return [response.thesis, *(item.claim for item in items)]
+
+    def effect(self, final_decision: Literal["trade", "watchlist", "no_trade"]) -> SynthesizerEffect:
+        validation_failures = [code for result in self.results for code in result.validation.reason_codes]
+        return SynthesizerEffect(
+            contract="typed",
+            prompt_version=self.result.prompt_version,
+            fallback_used=any(result.used_fallback for result in self.results),
+            proposed_decision=self.results[0].response.proposed_decision,
+            final_decision=final_decision,
+            validation_failures=list(dict.fromkeys(validation_failures)),
+            memo_hash=memo_hash(self.memo()),
+        )
 
 
 @dataclass(frozen=True)
@@ -256,6 +296,13 @@ def _token_usage(response: Any) -> dict[str, int]:
 RunnerFactory = Callable[[AgentRegistry, str], Iterable[Any]]
 
 
+def _synthesis_token_usage(typed_synthesis: "_TypedSynthesisRun | None") -> dict[str, int]:
+    token_usage: dict[str, int] = {}
+    if typed_synthesis is not None:
+        _merge_token_usage(token_usage, typed_synthesis.result.token_usage)
+    return token_usage
+
+
 def _merge_token_usage(total: dict[str, int], event_usage: dict[str, int]) -> None:
     for field_name, value in event_usage.items():
         total[field_name] = total.get(field_name, 0) + value
@@ -282,6 +329,12 @@ def _typed_analyst_trace_output(text: str) -> dict[str, Any]:
 
 def _objection_counts_by_severity(objections: Iterable[CritiqueObjection]) -> dict[str, int]:
     return dict(Counter(objection.severity for objection in objections))
+
+
+def _critic_findings(critique_result: CritiqueResult) -> list[str]:
+    response = critique_result.response
+    findings = [response.revision_instructions, *(objection.claim for objection in response.objections)]
+    return [finding for finding in findings if finding.strip()]
 
 
 def _serialize_critic_objections(objections: Iterable[CritiqueObjection]) -> list[dict[str, str]]:
@@ -362,6 +415,13 @@ def _critic_mode() -> Literal["off", "shadow", "enforced"]:
     return cast(Literal["off", "shadow", "enforced"], mode)
 
 
+def _synthesizer_contract() -> Literal["legacy", "typed"]:
+    contract = get_settings().SYNTHESIZER_CONTRACT.strip().lower()
+    if contract not in {"legacy", "typed"}:
+        raise ValueError("SYNTHESIZER_CONTRACT must be one of ('legacy', 'typed').")
+    return cast(Literal["legacy", "typed"], contract)
+
+
 def _deterministic_fields(response: AnalyzeResponse) -> dict[str, Any]:
     return {
         "decision": response.decision,
@@ -394,12 +454,14 @@ class AgenticAnalysisWorkflow:
         runner_factory: Optional[RunnerFactory] = None,
         llm_io_recorder=None,
         embedding_client: Optional[EmbeddingClient] = None,
+        decision_synthesizer: Optional[DecisionSynthesizer] = None,
     ) -> None:
         self.config = config
         self.engine = engine
         self.runner_factory = runner_factory or self._default_runner_factory
         self.llm_io_recorder = llm_io_recorder
         self.embedding_client = embedding_client
+        self.decision_synthesizer = decision_synthesizer
         # Trust-tooling hook (TA-7): exposes the raw in-process TA-3
         # assessment response/request from the most recent `analyze()` call
         # so offline trust scripts (`scripts/trust_e2e.py`) can re-run the
@@ -436,12 +498,20 @@ class AgenticAnalysisWorkflow:
             response=response,
             trace_recorder=trace_recorder,
         )
+        typed_synthesis = self._synthesize_typed_memo_if_enabled(
+            run_id=run_id,
+            request=request,
+            response=response,
+            fundamental_assessment=fundamental_assessment,
+            technical_assessment=technical_assessment,
+        )
         registry = self._build_registry(
             trace_recorder,
             warnings,
             today=analysis_date,
             fundamental_assessment=fundamental_assessment,
             technical_assessment=technical_assessment,
+            synthesized_memo=typed_synthesis.result.rendered_memo if typed_synthesis is not None else None,
         )
 
         self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
@@ -459,6 +529,7 @@ class AgenticAnalysisWorkflow:
                 baseline=build_draft_from_response(response, source="deterministic"),
                 fundamental_assessment=fundamental_assessment,
                 technical_assessment=technical_assessment,
+                typed_synthesis=typed_synthesis,
                 recorder=recorder,
             )
         except _AdkExecutionError as exc:
@@ -476,6 +547,7 @@ class AgenticAnalysisWorkflow:
                 total_latency_ms=(time.monotonic() - started_at) * 1000,
                 adk_event_count=exc.result.event_count,
                 observed_agents=exc.result.observed_agents,
+                typed_synthesis=typed_synthesis,
             )
             self._persist_trace(partial_trace)
             recorder.record_summary(
@@ -509,6 +581,7 @@ class AgenticAnalysisWorkflow:
             total_latency_ms=total_latency_ms,
             adk_event_count=adk_result.event_count,
             observed_agents=adk_result.observed_agents,
+            typed_synthesis=typed_synthesis,
         )
         response.trace_id = run_id
         response.trace = trace
@@ -568,6 +641,7 @@ class AgenticAnalysisWorkflow:
         today: date | None,
         fundamental_assessment: FundamentalAssessmentResult | None = None,
         technical_assessment: TechnicalAssessmentResult | None = None,
+        synthesized_memo: str | None = None,
     ) -> AgentRegistry:
         registry_kwargs = {
             "config": self.config,
@@ -580,6 +654,8 @@ class AgenticAnalysisWorkflow:
             registry_kwargs["fundamental_assessment"] = fundamental_assessment
         if technical_assessment is not None:
             registry_kwargs["technical_assessment"] = technical_assessment
+        if synthesized_memo is not None:
+            registry_kwargs["synthesized_memo"] = synthesized_memo
         registry = build_agent_registry(**registry_kwargs)
         if _runner_ignores_registry(self.runner_factory):
             return registry
@@ -600,9 +676,10 @@ class AgenticAnalysisWorkflow:
         baseline: DraftRecommendation,
         fundamental_assessment: FundamentalAssessmentResult | None,
         technical_assessment: TechnicalAssessmentResult | None,
+        typed_synthesis: _TypedSynthesisRun | None = None,
         recorder=None,
     ) -> _AdkRunResult:
-        token_usage: dict[str, int] = {}
+        token_usage = _synthesis_token_usage(typed_synthesis)
         warnings: list[str] = []
         observed_agents: list[str] = []
         event_count = 0
@@ -645,9 +722,10 @@ class AgenticAnalysisWorkflow:
                     continue
 
                 if author == DECISION_SYNTHESIZER_NAME:
-                    pending_synthesis = self._build_decision_synthesizer_step(
+                    pending_synthesis = self._build_synthesis_step(
                         response=response,
                         warnings=warnings,
+                        typed_synthesis=typed_synthesis,
                         text=text,
                         tool_calls=tool_calls,
                         latency_ms=latency_ms,
@@ -670,6 +748,7 @@ class AgenticAnalysisWorkflow:
                         latency_ms=latency_ms,
                         token_usage=usage,
                         pending_synthesis=pending_synthesis,
+                        typed_synthesis=typed_synthesis,
                     )
                     _merge_token_usage(token_usage, critic_result.additional_token_usage)
                     self._flush_pending_synthesis(
@@ -732,6 +811,106 @@ class AgenticAnalysisWorkflow:
                 observed_agents=observed_agents,
             )
             raise _AdkExecutionError(f"ADK execution failed: {exc}", result) from exc
+
+    def _synthesize_typed_memo_if_enabled(
+        self,
+        *,
+        run_id: str,
+        request: AnalyzeRequest,
+        response: AnalyzeResponse,
+        fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
+    ) -> _TypedSynthesisRun | None:
+        if _synthesizer_contract() != "typed":
+            return None
+
+        snapshot_at = datetime.now(timezone.utc)
+        synthesis_request = build_synthesis_request(
+            run_id=run_id,
+            response=response,
+            analyst_views=build_analyst_views(
+                fundamental=fundamental_assessment, technical=technical_assessment
+            ),
+            as_of_date=request.as_of_date or snapshot_at.date(),
+            snapshot_at=snapshot_at,
+        )
+        result = self._typed_synthesizer().synthesize(synthesis_request)
+        return _TypedSynthesisRun(request=synthesis_request, results=[result])
+
+    def _typed_synthesizer(self) -> DecisionSynthesizer:
+        if self.decision_synthesizer is None:
+            self.decision_synthesizer = DecisionSynthesizer()
+        return self.decision_synthesizer
+
+    def _build_synthesis_step(
+        self,
+        *,
+        response: AnalyzeResponse,
+        warnings: list[str],
+        typed_synthesis: _TypedSynthesisRun | None,
+        text: str,
+        tool_calls: list[str],
+        latency_ms: float,
+        token_usage: dict[str, int],
+    ) -> _PendingTraceStep:
+        if typed_synthesis is None:
+            return self._build_decision_synthesizer_step(
+                response=response,
+                warnings=warnings,
+                text=text,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                token_usage=token_usage,
+            )
+        return self._build_typed_synthesizer_step(
+            response=response,
+            typed_synthesis=typed_synthesis,
+            tool_calls=tool_calls,
+            latency_ms=latency_ms,
+            token_usage=token_usage,
+        )
+
+    def _build_typed_synthesizer_step(
+        self,
+        *,
+        response: AnalyzeResponse,
+        typed_synthesis: _TypedSynthesisRun,
+        tool_calls: list[str],
+        latency_ms: float,
+        token_usage: dict[str, int],
+    ) -> _PendingTraceStep:
+        result = typed_synthesis.result
+        was_downgraded = self._apply_downgrade_only_transition(
+            response=response,
+            proposed_decision=result.response.proposed_decision,
+            proposed_confidence=result.response.confidence,
+        )
+        response.memo = typed_synthesis.memo()
+        output: dict[str, Any] = {
+            "source": "typed_synthesis",
+            "text": result.rendered_memo,
+            "guardrail": "downgraded" if was_downgraded else "unchanged",
+            "prompt_version": result.prompt_version,
+            "used_fallback": result.used_fallback,
+        }
+        step_latency_ms = latency_ms + result.latency_ms
+        if not result.used_fallback:
+            return _PendingTraceStep(
+                status="completed",
+                tool_calls=tool_calls,
+                output=output,
+                latency_ms=step_latency_ms,
+                token_usage=token_usage,
+            )
+        return _PendingTraceStep(
+            status="degraded",
+            reason="synthesis_fallback",
+            detail=",".join(result.validation.reason_codes),
+            tool_calls=tool_calls,
+            output=output,
+            latency_ms=step_latency_ms,
+            token_usage=token_usage,
+        )
 
     def _build_decision_synthesizer_step(
         self,
@@ -887,6 +1066,7 @@ class AgenticAnalysisWorkflow:
         latency_ms: float,
         token_usage: dict[str, int],
         pending_synthesis: _PendingTraceStep | None,
+        typed_synthesis: _TypedSynthesisRun | None = None,
     ) -> _CriticStepResult:
         # `technical_assessment` threads TA-4's validated result into the
         # Critic, so there is a single technical interpretation per run.
@@ -910,6 +1090,7 @@ class AgenticAnalysisWorkflow:
             draft=build_draft_from_response(
                 response,
                 memo=self._synthesizer_memo(pending_synthesis),
+                memo_claims=typed_synthesis.memo_claims() if typed_synthesis is not None else (),
                 source="decision_synthesizer",
             ),
             analyst_views=build_analyst_views(
@@ -968,6 +1149,7 @@ class AgenticAnalysisWorkflow:
                 critic_step=critic_step,
                 additional_token_usage=additional_token_usage,
                 warnings=warnings,
+                typed_synthesis=typed_synthesis,
             )
             effect.revisions_performed = synthesis_retries
             effect.final_decision = response.decision
@@ -1040,6 +1222,7 @@ class AgenticAnalysisWorkflow:
         critic_step: _PendingTraceStep,
         additional_token_usage: dict[str, int],
         warnings: list[str],
+        typed_synthesis: _TypedSynthesisRun | None = None,
     ) -> int:
         if MAX_CRITIC_REVISIONS != 1:
             raise ValueError("MAX_CRITIC_REVISIONS must remain 1 for the bounded critic loop.")
@@ -1050,6 +1233,8 @@ class AgenticAnalysisWorkflow:
             response=response,
             baseline=baseline,
             revision_instructions=critique_result.response.revision_instructions,
+            critic_findings=_critic_findings(critique_result),
+            typed_synthesis=typed_synthesis,
         )
         _merge_token_usage(additional_token_usage, revision_result.token_usage)
         if revision_result.synthesis is None:
@@ -1086,6 +1271,8 @@ class AgenticAnalysisWorkflow:
             proposed_decision=revision_result.synthesis.decision,
             proposed_confidence=revision_result.synthesis.confidence,
         )
+        if typed_synthesis is not None:
+            response.memo = typed_synthesis.memo()
         if pending_synthesis is not None:
             pending_synthesis.output = {
                 **(pending_synthesis.output or {}),
@@ -1093,10 +1280,11 @@ class AgenticAnalysisWorkflow:
                 "revision_text": revision_result.raw_output,
             }
             pending_synthesis.latency_ms += revision_result.latency_ms
-            pending_synthesis.token_usage = _merged_token_usage(
-                pending_synthesis.token_usage,
-                revision_result.token_usage,
-            )
+            if typed_synthesis is None:
+                pending_synthesis.token_usage = _merged_token_usage(
+                    pending_synthesis.token_usage,
+                    revision_result.token_usage,
+                )
         return 1
 
     def _review_critique(self, critique_request) -> CritiqueResult:
@@ -1110,8 +1298,16 @@ class AgenticAnalysisWorkflow:
         response: AnalyzeResponse,
         baseline: DraftRecommendation,
         revision_instructions: str,
+        critic_findings: list[str] | None = None,
+        typed_synthesis: _TypedSynthesisRun | None = None,
     ) -> _DecisionRevisionResult:
         del ticker
+        if typed_synthesis is not None:
+            return self._request_typed_synthesis_revision(
+                response=response,
+                typed_synthesis=typed_synthesis,
+                critic_findings=critic_findings or [revision_instructions],
+            )
         prompt = self._build_revision_prompt(
             request=request,
             response=response,
@@ -1152,6 +1348,36 @@ class AgenticAnalysisWorkflow:
             synthesis=synthesis,
             raw_output=model_output.text,
             token_usage=model_output.token_usage,
+            latency_ms=(time.monotonic() - started_at) * 1000,
+        )
+
+    def _request_typed_synthesis_revision(
+        self,
+        *,
+        response: AnalyzeResponse,
+        typed_synthesis: _TypedSynthesisRun,
+        critic_findings: list[str],
+    ) -> _DecisionRevisionResult:
+        previous_request = typed_synthesis.request
+        revision_request = build_synthesis_request(
+            run_id=previous_request.run_id,
+            response=response,
+            analyst_views=previous_request.analyst_views,
+            as_of_date=previous_request.as_of_date,
+            snapshot_at=previous_request.snapshot_at,
+            critic_findings=critic_findings,
+        )
+        started_at = time.monotonic()
+        result = self._typed_synthesizer().synthesize(revision_request)
+        typed_synthesis.record_revision(revision_request, result)
+        return _DecisionRevisionResult(
+            synthesis=DecisionSynthesis(
+                decision=result.response.proposed_decision,
+                confidence=result.response.confidence,
+                reasons=[item.claim for item in result.response.key_reasons],
+            ),
+            raw_output=result.rendered_memo,
+            token_usage=result.token_usage,
             latency_ms=(time.monotonic() - started_at) * 1000,
         )
 
@@ -1390,6 +1616,7 @@ class AgenticAnalysisWorkflow:
         total_latency_ms: float,
         adk_event_count: int,
         observed_agents: list[str],
+        typed_synthesis: _TypedSynthesisRun | None = None,
     ) -> AnalysisTrace:
         return AnalysisTrace(
             run_id=run_id,
@@ -1407,6 +1634,9 @@ class AgenticAnalysisWorkflow:
             fundamental_agent_effect=response.fundamental_agent_effect,
             technical_agent_effect=response.technical_agent_effect,
             critic_effect=response.critic_effect,
+            synthesizer_effect=(
+                typed_synthesis.effect(response.decision) if typed_synthesis is not None else None
+            ),
         )
 
     @staticmethod
@@ -1464,6 +1694,11 @@ class AgenticAnalysisWorkflow:
                 if trace.critic_effect is not None
                 else None
             ),
+            synthesizer_effect=(
+                trace.synthesizer_effect.model_dump(mode="json")
+                if trace.synthesizer_effect is not None
+                else None
+            ),
         )
         steps = [AgentRunStep(run_id=trace.run_id, **step.model_dump()) for step in trace.steps]
         save_agent_run(run, steps, engine=self.engine)
@@ -1494,4 +1729,5 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         fundamental_agent_effect=run.fundamental_agent_effect,
         technical_agent_effect=run.technical_agent_effect,
         critic_effect=run.critic_effect,
+        synthesizer_effect=run.synthesizer_effect,
     )

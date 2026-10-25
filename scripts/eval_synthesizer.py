@@ -60,6 +60,8 @@ def _render_markdown(report: dict) -> str:
         f"| Fallback rate | {metrics['fallback_rate']:.1%} |",
         f"| Money-field count | {report['money_field_count']} |",
         f"| Promotion count | {report['promotion_count']} |",
+        f"| Fallback memos served | {report['fallback_memo_count']} |",
+        f"| Rejected memos without fallback (must be 0) | {report['rejected_without_fallback_count']} |",
         "",
         "| Case | Fallback | Expected | Reasons |",
         "| --- | ---: | ---: | --- |",

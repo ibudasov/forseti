@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.critique import AnalystView
+from app.schemas.memo import DecisionMemoItem
 
 if TYPE_CHECKING:
     from app.schemas.analyze import DecisionDiagnosis
@@ -40,6 +41,7 @@ class DecisionSynthesisRequest(BaseModel):
     known_metric_ids: list[str] = Field(default_factory=list)
     known_chunk_ids: list[int] = Field(default_factory=list)
     known_warning_codes: list[str] = Field(default_factory=list)
+    critic_findings: list[str] = Field(default_factory=list)
     allowed_decisions: list[SYNTHESIS_DECISION] = Field(default_factory=list)
     max_confidence: float = Field(ge=0, le=1)
 
@@ -57,21 +59,6 @@ class DecisionSynthesisRequest(BaseModel):
         _assert_unique(self.known_chunk_ids, "Chunk IDs")
         _assert_unique(self.known_warning_codes, "Warning codes")
         _assert_unique(self.allowed_decisions, "Allowed decisions")
-        return self
-
-
-class DecisionMemoItem(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    claim: str
-    metric_ids: list[str] = Field(default_factory=list)
-    chunk_ids: list[int] = Field(default_factory=list)
-    warning_codes: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _validate_claim(self) -> "DecisionMemoItem":
-        if not self.claim.strip():
-            raise ValueError("Memo claims must not be empty.")
         return self
 
 

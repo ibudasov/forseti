@@ -80,6 +80,7 @@ test: check-compose
 		-e ALLOW_PIPELINE_OVERRIDE=false \
 		-e FUNDAMENTAL_AGENT_MODE=off \
 		-e TECHNICAL_AGENT_MODE=off \
+		-e SYNTHESIZER_CONTRACT=legacy \
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
@@ -245,6 +246,7 @@ eval-critic: check-compose
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
 		-e FUNDAMENTAL_AGENT_MODE=off \
 		-e TECHNICAL_AGENT_MODE=off \
+		-e SYNTHESIZER_CONTRACT=legacy \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --json

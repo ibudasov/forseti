@@ -39,6 +39,8 @@ from app.schemas.technicals import (
     TechnicalAssessmentValidation,
     TechnicalContextCoverage,
 )
+from app.schemas.synthesis import DecisionMemoResponse, DecisionMemoResult, DecisionMemoValidation
+from app.services.decision_synthesizer import DecisionSynthesizer, ModelOutput as DecisionSynthesizerModelOutput
 from app.settings import Settings
 
 
@@ -1391,3 +1393,248 @@ def _technical_assessment(
         model_name="fake-technical",
         prompt_version="technical-analyst.v1",
     )
+
+
+class _ScriptedSynthesizerModel:
+    """Typed synthesizer model port: replays scripted memos bound to the request in the prompt."""
+
+    model_name = "scripted-synthesizer"
+
+    def __init__(self, *outputs: dict | str, token_usage: dict[str, int] | None = None) -> None:
+        self._outputs = list(outputs)
+        self._token_usage = token_usage or {}
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str):
+        self.prompts.append(prompt)
+        output = self._outputs[min(len(self.prompts), len(self._outputs)) - 1]
+        if isinstance(output, str):
+            return DecisionSynthesizerModelOutput(text=output, token_usage=self._token_usage)
+        request = json.loads(prompt.split("DecisionSynthesisRequest:\n", maxsplit=1)[1])
+        memo = {"schema_version": "1.0", "run_id": request["run_id"], "context_hash": request["context_hash"], **output}
+        return DecisionSynthesizerModelOutput(text=json.dumps(memo), token_usage=self._token_usage)
+
+
+def _memo_output(decision: str = "watchlist", confidence: float = 0.5, thesis: str = "Price data is stale.") -> dict:
+    return {
+        "proposed_decision": decision,
+        "confidence": confidence,
+        "thesis": thesis,
+        "key_reasons": [{"claim": "Prices are stale.", "warning_codes": ["stale_price_data"]}],
+        "key_risks": [],
+        "what_would_change": [],
+    }
+
+
+def _typed_workflow(monkeypatch, model: _ScriptedSynthesizerModel, *, events=None):
+    monkeypatch.setattr(workflow_module, "_synthesizer_contract", lambda: "typed")
+    workflow = _workflow(
+        monkeypatch,
+        events=events
+        if events is not None
+        else [_event("decision_synthesizer", text="typed"), _event("critic_guardrail", text="clear")],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(
+            update={"warnings": ["stale_price_data"]}, deep=True
+        ),
+    )
+    workflow.decision_synthesizer = DecisionSynthesizer(model, max_retries=1)
+    return workflow
+
+
+def _synthesizer_step(response):
+    return [step for step in response.trace.steps if step.agent_name == "decision_synthesizer"][0]
+
+
+def test_typed_synthesizer_happy_path_exposes_cited_memo_and_effect(monkeypatch):
+    model = _ScriptedSynthesizerModel(_memo_output(), token_usage={"total_token_count": 9})
+    response = _typed_workflow(monkeypatch, model).analyze("NVDA")
+
+    assert response.decision == "watchlist"
+    assert response.memo is not None
+    assert response.memo.thesis == "Price data is stale."
+    assert response.memo.key_reasons[0].warning_codes == ["stale_price_data"]
+    assert response.memo.risk_block == "Deterministic risk: no trade levels available."
+    step = _synthesizer_step(response)
+    assert step.status == "completed"
+    assert step.token_usage == {}
+    assert step.output["source"] == "typed_synthesis"
+    assert response.trace.token_usage["total_token_count"] == 9
+    effect = response.trace.synthesizer_effect
+    assert effect is not None
+    assert (effect.contract, effect.fallback_used, effect.validation_failures) == ("typed", False, [])
+    assert (effect.proposed_decision, effect.final_decision) == ("watchlist", "watchlist")
+    assert len(effect.memo_hash) == 64
+
+
+def test_typed_synthesizer_downgrade_is_applied(monkeypatch):
+    model = _ScriptedSynthesizerModel(_memo_output(decision="no_trade", confidence=0.3))
+
+    response = _typed_workflow(monkeypatch, model).analyze("NVDA")
+
+    assert (response.decision, response.confidence) == ("no_trade", 0.3)
+    assert _synthesizer_step(response).output["guardrail"] == "downgraded"
+    assert response.trace.synthesizer_effect.proposed_decision == "no_trade"
+    assert response.trace.synthesizer_effect.final_decision == "no_trade"
+
+
+def test_typed_synthesizer_validation_failure_uses_fallback_memo_never_unparsable(monkeypatch):
+    model = _ScriptedSynthesizerModel("this is not json")
+
+    response = _typed_workflow(monkeypatch, model).analyze("NVDA")
+
+    assert (response.decision, response.confidence) == ("watchlist", 0.64)
+    assert response.memo is not None
+    assert "no model claims were used" in response.memo.thesis
+    step = _synthesizer_step(response)
+    assert (step.status, step.output["reason"]) == ("degraded", "synthesis_fallback")
+    assert "unparsable_synthesis" not in str([trace_step.output for trace_step in response.trace.steps])
+    effect = response.trace.synthesizer_effect
+    assert effect.fallback_used is True
+    assert effect.validation_failures == ["malformed_json"]
+    assert len(model.prompts) == 2
+
+
+def test_typed_synthesizer_promotion_attempt_is_rejected_by_the_service(monkeypatch):
+    model = _ScriptedSynthesizerModel(_memo_output(decision="trade", confidence=0.9))
+
+    response = _typed_workflow(monkeypatch, model).analyze("NVDA")
+
+    assert (response.decision, response.confidence) == ("watchlist", 0.64)
+    effect = response.trace.synthesizer_effect
+    assert effect.fallback_used is True
+    assert {"decision_not_allowed", "decision_promotion", "confidence_above_baseline"} <= set(
+        effect.validation_failures
+    )
+
+
+def test_typed_synthesizer_promotion_is_ignored_even_if_the_service_returned_it(monkeypatch):
+    class _PromotingSynthesizer:
+        def synthesize(self, request):
+            promoted = DecisionMemoResponse.model_construct(
+                schema_version="1.0",
+                run_id=request.run_id,
+                context_hash=request.context_hash,
+                proposed_decision="trade",
+                confidence=0.99,
+                thesis="Promoted.",
+                key_reasons=[],
+                key_risks=[],
+                what_would_change=[],
+            )
+            return DecisionMemoResult(
+                response=promoted,
+                validation=DecisionMemoValidation(accepted=True),
+                rendered_memo="Decision: trade",
+                used_fallback=False,
+                model_name="promoter",
+                prompt_version="decision-synthesizer.v1",
+            )
+
+    workflow = _typed_workflow(monkeypatch, _ScriptedSynthesizerModel(_memo_output()))
+    workflow.decision_synthesizer = _PromotingSynthesizer()
+
+    response = workflow.analyze("NVDA")
+
+    assert (response.decision, response.confidence) == ("watchlist", 0.64)
+    assert response.entry_range is None
+
+
+def test_typed_synthesizer_slot_in_registry_makes_no_llm_call(monkeypatch):
+    captured: dict = {}
+    workflow = _typed_workflow(monkeypatch, _ScriptedSynthesizerModel(_memo_output()))
+
+    def _capture(config, engine=None, today=None, **kwargs):
+        captured.update(kwargs)
+        return AgentRegistry(tools={}, specialists={}, root_agent=None)
+
+    monkeypatch.setattr(workflow_module, "build_agent_registry", _capture)
+
+    response = workflow.analyze("NVDA")
+
+    assert response.memo is not None
+    assert "Decision: watchlist" in captured["synthesized_memo"]
+
+
+def test_legacy_synthesizer_contract_has_no_memo_and_no_effect(monkeypatch):
+    workflow = _workflow(
+        monkeypatch,
+        events=[_event("decision_synthesizer", text='{"decision":"watchlist","confidence":0.5,"reasons":[]}')],
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "analyze_request",
+        lambda request, engine=None: _watchlist_response().model_copy(deep=True),
+    )
+
+    response = workflow.analyze("NVDA")
+
+    assert response.memo is None
+    assert response.trace.synthesizer_effect is None
+
+
+def test_invalid_synthesizer_contract_is_rejected(monkeypatch):
+    monkeypatch.setenv("SYNTHESIZER_CONTRACT", "invalid")
+    workflow_module.get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="SYNTHESIZER_CONTRACT must be one of"):
+        workflow_module._synthesizer_contract()
+    workflow_module.get_settings.cache_clear()
+
+
+def test_typed_revision_loop_reuses_the_synthesizer_with_critic_findings(monkeypatch):
+    model = _ScriptedSynthesizerModel(
+        _memo_output(),
+        _memo_output(decision="no_trade", confidence=0.2, thesis="Revised after critic."),
+        token_usage={"total_token_count": 4},
+    )
+    _enable_critic(
+        monkeypatch,
+        mode="enforced",
+        critique_result=_critique_result(
+            verdict="revise",
+            revision_instructions="Lower confidence.",
+            objections=[_model_objection()],
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_module.AgenticAnalysisWorkflow,
+        "_build_revision_prompt",
+        lambda self, **kwargs: pytest.fail("Legacy revision prompt must not be used in typed mode."),
+    )
+
+    response = _typed_workflow(monkeypatch, model).analyze("NVDA")
+
+    assert len(model.prompts) == 2
+    assert "Lower confidence." in model.prompts[1]
+    assert "Unsupported claim." in model.prompts[1]
+    assert "Lower confidence." not in model.prompts[0]
+    assert response.critic_effect.revisions_performed == 1
+    assert (response.decision, response.confidence) == ("no_trade", 0.2)
+    assert response.memo.thesis == "Revised after critic."
+    step = _synthesizer_step(response)
+    assert step.retries == 1
+    assert step.token_usage == {}
+    assert response.trace.token_usage["total_token_count"] >= 8
+    assert response.trace.synthesizer_effect.proposed_decision == "watchlist"
+    assert response.trace.synthesizer_effect.final_decision == "no_trade"
+
+
+def test_typed_memo_claims_reach_the_critic_draft(monkeypatch):
+    seen_drafts: list[DraftRecommendation] = []
+    _enable_critic(monkeypatch, mode="shadow")
+    workflow = _typed_workflow(monkeypatch, _ScriptedSynthesizerModel(_memo_output()))
+    monkeypatch.setattr(
+        workflow_module,
+        "build_critique_request",
+        lambda *args, **kwargs: seen_drafts.append(kwargs["draft"]) or _critique_request(kwargs["draft"]),
+    )
+
+    workflow.analyze("NVDA")
+
+    draft = seen_drafts[0]
+    assert "Decision: watchlist" in draft.memo
+    assert draft.memo_claims == ["Price data is stale.", "Prices are stale."]

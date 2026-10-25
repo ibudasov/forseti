@@ -2,8 +2,8 @@
 
 The Decision Synthesizer turns the deterministic recommendation and typed analyst
 views into a structured, cited memo. Its contract and policy are implemented in
-`app/schemas/synthesis.py` and `app/services/decision_synthesizer.py`; this
-service is not yet wired into the workflow.
+`app/schemas/synthesis.py` and `app/services/decision_synthesizer.py`. The agentic
+workflow uses it when `SYNTHESIZER_CONTRACT=typed` (see [Workflow integration](#workflow-integration)).
 
 ## Authority and contract
 
@@ -23,6 +23,43 @@ The service validates run and context identity, downgrade-only authority,
 citations, numeric claims, decision labels, and deterministic risk numbers. It
 retries bounded provider/parse/validation failures, then returns a deterministic
 baseline memo. The fallback never raises the baseline decision or confidence.
+
+## Workflow integration
+
+`SYNTHESIZER_CONTRACT=legacy|typed` selects the synthesizer (default `legacy`; the
+Makefile test targets pin `legacy`). In `typed` mode the workflow:
+
+- builds a `DecisionSynthesisRequest` after the analyst views are known and calls
+  `DecisionSynthesizer.synthesize` outside ADK;
+- puts a deterministic `TypedDecisionMemoAgent` in the `decision_synthesizer` ADK slot
+  (no LLM call, no `calculate_risk` tool), so the step reports zero tokens;
+- applies `proposed_decision` through the shared downgrade-only transition, so a
+  promotion is ignored. Risk numbers always come from the rules and the memo risk
+  block is rendered from them;
+- never reaches `unparsable_synthesis`; a rejected memo becomes a deterministic
+  fallback memo and the step is marked degraded with reason `synthesis_fallback`;
+- reuses the service for the Critic revision loop with the Critic findings as extra
+  input (`critic_findings`), instead of the legacy revision prompt;
+- passes the rendered memo and its structured claims to the Critic, whose
+  deterministic rules check the claims against risk numbers and decision labels;
+- exposes `AnalyzeResponse.memo` (thesis, cited reasons/risks/change conditions,
+  rendered risk block; `null` in legacy mode) and persists `synthesizer_effect`
+  plus the memo hash on `agent_runs` (migration `0013_synthesizer_effect`).
+
+Invariants `synthesizer_step_zero_tokens_in_typed_mode` and
+`synthesizer_never_changes_risk_numbers` are evaluated with the other agentic
+invariants. The synthesizer evaluation report adds scorecard lines for fallback
+memos served and rejected memos without a fallback (must be 0).
+
+The repository keeps no OpenAPI snapshot file; the `/openapi.json` schema for `memo`
+is asserted in `tests/test_synthesizer_api.py`.
+
+### Rollout
+
+1. Run legacy and typed side by side on the golden fixtures (shadow comparison).
+2. When the comparison is clean, flip the default to `typed`.
+3. After one clean shadow cycle, delete the legacy path (`_GeminiDecisionRevisionModel`,
+   `_build_revision_prompt`, the legacy LLM synthesizer and `unparsable_synthesis`).
 
 ## Evaluation
 
