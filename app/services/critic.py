@@ -15,6 +15,7 @@ from app.schemas.critique import (
     CritiqueResult,
     CritiqueValidation,
 )
+from app.services.llm_schema import strict_parse_json
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -407,21 +408,12 @@ def _has_forbidden_response_fields(response: CritiqueResponse) -> bool:
 
 
 def _parse_response(raw_output: str) -> CritiqueResponse:
-    payload = json.loads(raw_output)
-    _ensure_no_forbidden_fields(payload)
-    return CritiqueResponse.model_validate(payload)
-
-
-def _ensure_no_forbidden_fields(payload: Any) -> None:
-    if isinstance(payload, dict):
-        if set(payload) & set(FORBIDDEN_RESPONSE_FIELDS):
-            raise ValueError("forbidden_field_present")
-        for value in payload.values():
-            _ensure_no_forbidden_fields(value)
-        return
-    if isinstance(payload, list):
-        for value in payload:
-            _ensure_no_forbidden_fields(value)
+    return strict_parse_json(
+        raw_output,
+        CritiqueResponse,
+        forbidden_fields=frozenset(FORBIDDEN_RESPONSE_FIELDS),
+        forbidden_field_error_code="forbidden_field_present",
+    )
 
 
 def _fallback_result(

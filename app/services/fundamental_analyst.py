@@ -15,7 +15,7 @@ from app.schemas.fundamentals import (
     FundamentalAssessmentResult,
     FundamentalAssessmentValidation,
 )
-from app.services.llm_schema import gemini_token_usage, inline_response_schema
+from app.services.llm_schema import gemini_token_usage, inline_response_schema, strict_parse_json
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -258,22 +258,11 @@ def _all_findings(response: FundamentalAssessmentResponse) -> list[CitedFinding]
 
 
 def _parse_response(raw_output: str) -> FundamentalAssessmentResponse:
-    payload = json.loads(raw_output)
-    _ensure_no_forbidden_fields(payload)
-    return FundamentalAssessmentResponse.model_validate(payload)
-
-
-def _ensure_no_forbidden_fields(payload: Any) -> None:
-    if isinstance(payload, dict):
-        forbidden = FORBIDDEN_RESPONSE_FIELDS & set(payload)
-        if forbidden:
-            raise ValueError(f"forbidden_response_field:{sorted(forbidden)[0]}")
-        for value in payload.values():
-            _ensure_no_forbidden_fields(value)
-        return
-    if isinstance(payload, list):
-        for value in payload:
-            _ensure_no_forbidden_fields(value)
+    return strict_parse_json(
+        raw_output,
+        FundamentalAssessmentResponse,
+        forbidden_fields=FORBIDDEN_RESPONSE_FIELDS,
+    )
 
 
 def _fallback_result(
