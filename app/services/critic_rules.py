@@ -4,7 +4,9 @@ import math
 from typing import Callable, Literal, Optional
 
 from app.schemas.critique import AnalystFinding, AnalystView, CritiqueObjection, CritiqueRequest, DraftRecommendation
+from app.schemas.analyze import AnalyzeResponse
 from app.services.fundamental_policy import HARD_BLOCKER_WARNINGS
+from app.trust.memo_checks import check_memo_decision_labels, check_memo_risk_numbers
 
 RULES_VERSION = "1.0"
 FLOAT_ABSOLUTE_TOLERANCE = 1e-6
@@ -52,6 +54,7 @@ def evaluate_deterministic_objections(
         _unsupported_claim_objections,
         _analyst_signal_conflict_objections,
         _technical_risk_flag_on_trade_objections,
+        _memo_claim_objections,
     )
     objections: list[CritiqueObjection] = []
     for evaluator in evaluators:
@@ -304,6 +307,52 @@ def _technical_risk_flag_on_trade_objections(
             warning_codes=warning_codes,
         )
     ]
+
+
+def _memo_claim_objections(
+    *,
+    request: CritiqueRequest,
+    baseline: DraftRecommendation,
+) -> list[CritiqueObjection]:
+    del baseline
+    if not request.draft.memo_claims:
+        return []
+    claims_text = "\n".join(request.draft.memo_claims)
+    issues = [
+        *check_memo_risk_numbers(claims_text, _draft_as_response(request)),
+        *check_memo_decision_labels(claims_text, request.draft.decision),
+    ]
+    return [
+        _objection(
+            objection_id=f"det:memo_claim_mismatch:{index}",
+            category="internal_inconsistency",
+            severity="high",
+            claim=issue.message,
+            warning_codes=[f"memo_claim_mismatch:{issue.code}"],
+        )
+        for index, issue in enumerate(
+            (issue for issue in issues if issue.severity == "failure"),
+            start=1,
+        )
+    ]
+
+
+def _draft_as_response(request: CritiqueRequest) -> AnalyzeResponse:
+    draft = request.draft
+    return AnalyzeResponse(
+        ticker=request.ticker,
+        decision=draft.decision,
+        entry_range=draft.entry_range,
+        stop_loss=draft.stop_loss,
+        take_profit=draft.take_profit,
+        risk_reward=draft.risk_reward,
+        position_size_eur=draft.position_size_eur,
+        confidence=draft.confidence,
+        reasons=draft.reasons,
+        warnings=draft.warnings,
+        engine_version="critic-rules",
+        trace_id=request.run_id,
+    )
 
 
 def _first_view_with_signal(

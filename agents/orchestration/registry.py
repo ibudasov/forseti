@@ -12,7 +12,11 @@ from google.adk.agents import BaseAgent, LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
 
 from agents.config import HARD_RULES_TEXT, AgentWorkflowConfig
-from agents.orchestration.typed_view_agent import TypedAnalystViewAgent, TypedTechnicalViewAgent
+from agents.orchestration.typed_view_agent import (
+    TypedAnalystViewAgent,
+    TypedDecisionMemoAgent,
+    TypedTechnicalViewAgent,
+)
 from agents.tools.data_collector import build_structured_data_collector_tool
 from agents.tools.retrieval import build_retriever_tool
 from agents.tools.risk_engine import build_risk_manager_tool
@@ -116,12 +120,42 @@ def build_deterministic_tools(
     return tools
 
 
+def _build_legacy_decision_synthesizer(
+    config: AgentWorkflowConfig,
+    tools: Dict[str, FunctionTool],
+    *,
+    generation_config: Dict[str, float],
+    view_guidance: str,
+) -> LlmAgent:
+    return LlmAgent(
+        name=DECISION_SYNTHESIZER_NAME,
+        model=config.model_name,
+        description="Combines the rules-engine output and analyst views into the final recommendation memo.",
+        instruction=(
+            f"{HARD_RULES_TEXT}\n\n"
+            f"{view_guidance}"
+            "You are the Decision Synthesizer. Combine the rules engine decision, "
+            "the risk manager's trade levels, and the analyst views into a single "
+            "human-readable memo. Reuse the risk manager's numbers verbatim; never "
+            "recompute them.\n"
+            "The only function you may call is `calculate_risk`. Write your memo as "
+            "plain text; never invent any other function name."
+        ),
+        tools=[tools[RISK_MANAGER_TOOL_NAME]] if RISK_MANAGER_TOOL_NAME in tools else [],
+        disallow_transfer_to_parent=True,
+        disallow_transfer_to_peers=True,
+        generate_content_config=generation_config,
+        output_key=DRAFT_RECOMMENDATION_OUTPUT_KEY,
+    )
+
+
 def build_specialist_agents(
     config: AgentWorkflowConfig,
     tools: Dict[str, FunctionTool],
     *,
     fundamental_assessment: Optional["FundamentalAssessmentResult"] = None,
     technical_assessment: Optional["TechnicalAssessmentResult"] = None,
+    synthesized_memo: Optional[str] = None,
 ) -> Dict[str, BaseAgent]:
     """Build the specialist agents (Fundamental Analyst, Technical Analyst,
     Decision Synthesizer, Critic/Guardrail).
@@ -216,27 +250,21 @@ def build_specialist_agents(
         else f"The fundamental view is stored in {_state_key_reference(FUNDAMENTAL_VIEW_OUTPUT_KEY)}.\n"
     )
 
-    decision_synthesizer = LlmAgent(
-        name=DECISION_SYNTHESIZER_NAME,
-        model=config.model_name,
-        description="Combines the rules-engine output and analyst views into the final recommendation memo.",
-        instruction=(
-            f"{HARD_RULES_TEXT}\n\n"
-            f"{fundamental_view_guidance}"
-            f"{technical_view_guidance}"
-            "You are the Decision Synthesizer. Combine the rules engine decision, "
-            "the risk manager's trade levels, and the analyst views into a single "
-            "human-readable memo. Reuse the risk manager's numbers verbatim; never "
-            "recompute them.\n"
-            "The only function you may call is `calculate_risk`. Write your memo as "
-            "plain text; never invent any other function name."
-        ),
-        tools=[tools[RISK_MANAGER_TOOL_NAME]] if RISK_MANAGER_TOOL_NAME in tools else [],
-        disallow_transfer_to_parent=True,
-        disallow_transfer_to_peers=True,
-        generate_content_config=generation_config,
-        output_key=DRAFT_RECOMMENDATION_OUTPUT_KEY,
-    )
+    decision_synthesizer: BaseAgent
+    if synthesized_memo is not None:
+        decision_synthesizer = TypedDecisionMemoAgent(
+            name=DECISION_SYNTHESIZER_NAME,
+            description="Renders the validated, cited decision memo; risk numbers come from the rules.",
+            state_key=DRAFT_RECOMMENDATION_OUTPUT_KEY,
+            rendered_memo=synthesized_memo,
+        )
+    else:
+        decision_synthesizer = _build_legacy_decision_synthesizer(
+            config,
+            tools,
+            generation_config=generation_config,
+            view_guidance=f"{fundamental_view_guidance}{technical_view_guidance}",
+        )
 
     critic = LlmAgent(
         name=CRITIC_NAME,
@@ -285,6 +313,7 @@ def build_agent_registry(
     today: Optional[date] = None,
     fundamental_assessment: Optional["FundamentalAssessmentResult"] = None,
     technical_assessment: Optional["TechnicalAssessmentResult"] = None,
+    synthesized_memo: Optional[str] = None,
 ) -> AgentRegistry:
     """Build the full agent registry for a single agentic workflow run.
 
@@ -298,6 +327,7 @@ def build_agent_registry(
         tools,
         fundamental_assessment=fundamental_assessment,
         technical_assessment=technical_assessment,
+        synthesized_memo=synthesized_memo,
     )
     root_agent = build_root_agent(specialists)
     return AgentRegistry(tools=tools, specialists=specialists, root_agent=root_agent)

@@ -22,7 +22,9 @@ Entities:
   - Append-only trading recommendations, including full API response payload and engine version.
 - `agent_runs`
   - One row per agentic workflow run, including persisted `fundamental_agent_effect`,
-    `technical_agent_effect`, and `critic_effect` guardrail outcomes as nullable `JSONB` columns.
+    `technical_agent_effect`, and `critic_effect` guardrail outcomes as nullable `JSONB` columns. `synthesizer_effect` (contract,
+    prompt version, fallback used, proposed vs final decision, validation failures, memo hash) is
+    written only when `SYNTHESIZER_CONTRACT=typed` and is `NULL` for legacy runs.
     `as_of_date` is the analysis date supplied by the request; its `as_of_date_source` is
     `request` or `created_at_backfill` for migrated legacy rows. Both columns are nullable
     when no analysis date was supplied. The `(ticker, as_of_date)` index supports date-scoped

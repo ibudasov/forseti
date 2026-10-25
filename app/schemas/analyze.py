@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.analyzer import validate_and_normalize_ticker
 from app.schemas.fundamentals import FundamentalAgentEffect
+from app.schemas.memo import DecisionMemo, SynthesizerEffect
 from app.schemas.technicals import TechnicalAgentEffect
 
 if TYPE_CHECKING:
@@ -74,6 +75,10 @@ class AnalysisTrace(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    synthesizer_effect: Optional[SynthesizerEffect] = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class DecisionDiagnosis(BaseModel):
@@ -110,6 +115,7 @@ class AnalyzeResponse(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    memo: Optional[DecisionMemo] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

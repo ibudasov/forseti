@@ -5,11 +5,13 @@ from pathlib import Path
 
 from agents.orchestration.registry import DECISION_SYNTHESIZER_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
 from app.schemas.analyze import AnalysisTrace
+from app.trust.invariants import check_synthesizer_step_zero_tokens_in_typed_mode
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "clear_trade_trajectory.json"
 TYPED_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_technical_view_trajectory.json"
 TYPED_VIEWS_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_views_trajectory.json"
+TYPED_SYNTHESIZER_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_synthesizer_trajectory.json"
 ALLOWED_TOOL_CALLS = {
     DECISION_SYNTHESIZER_NAME: {"calculate_risk"},
 }
@@ -80,3 +82,14 @@ def test_typed_views_trace_records_zero_tokens_for_both_analyst_steps():
         step = next(step for step in trace.steps if step.agent_name == agent_name)
         assert step.token_usage == {}
         assert step.output["source"] == "typed_assessment"
+
+
+def test_typed_synthesizer_trace_has_zero_tokens_and_no_risk_tool_call():
+    _, trace = _load_trace(TYPED_SYNTHESIZER_TRACE_FIXTURE)
+
+    assert [step.agent_name for step in trace.steps] == list(SPECIALIST_ORDER)
+    for agent_name in ("fundamental_analyst", TECHNICAL_ANALYST_NAME, DECISION_SYNTHESIZER_NAME):
+        step = next(step for step in trace.steps if step.agent_name == agent_name)
+        assert step.token_usage == {}
+        assert step.tool_calls == []
+    assert check_synthesizer_step_zero_tokens_in_typed_mode(trace) == []

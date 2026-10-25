@@ -379,6 +379,7 @@ class TestPipelineOverride:
             "diagnosis": None,
             "fundamental_agent_effect": None,
             "technical_agent_effect": None,
+            "memo": None,
         }
         assert "critic_effect" not in response.json()
 

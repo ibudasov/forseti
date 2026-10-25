@@ -321,6 +321,10 @@ class AgentRun(SQLModel, table=True):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+    synthesizer_effect: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
     technical_agent_effect: Optional[Dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSONB, nullable=True),
