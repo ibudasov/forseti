@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -30,6 +30,9 @@ help:
 	@echo "  make assess-fundamentals # Run one fundamental analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make assess-technicals # Run one technical analyst assessment (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make review-draft      # Run one critic draft review (use ticker=NVDA [as_of=2026-09-08] [live=1])"
+	@echo "  make synthesize-draft  # Synthesize one ticker draft (use ticker=NVDA [as_of=2026-09-08])"
+	@echo "  make eval-synthesizer  # Run the offline decision-synthesizer evaluation suite"
+	@echo "  make eval-synthesizer-live CONFIRM_COST=1 # Run live evaluation against Gemini"
 	@echo "  make eval-fundamental-agent # Run the frozen offline fundamental-agent evaluation suite"
 	@echo "  make eval-fundamental-agent-live CONFIRM_COST=yes # Run live model evaluation over the frozen suite"
 	@echo "  make fundamental-shadow-report # Aggregate persisted shadow-mode runs"
@@ -179,6 +182,37 @@ review-draft: check-compose
 		--env-from-file .env \
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.review_draft --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",) $(if $(live),--live,)
+
+synthesize-draft: check-compose
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make synthesize-draft ticker=NVDA [as_of=2026-09-08]'"; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.synthesize_draft --ticker "$(ticker)" $(if $(as_of),--as-of "$(as_of)",)
+
+eval-synthesizer: check-compose
+	$(DOCKER_COMPOSE) run --no-deps --rm --build \
+		--env-from-file .env \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_synthesizer --json
+
+eval-synthesizer-live: check-compose
+	@if [ "$(CONFIRM_COST)" != "1" ]; then \
+		echo "Error: eval-synthesizer-live requires CONFIRM_COST=1 because it makes live model calls."; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --no-deps --rm --build \
+		--env-from-file .env \
+		-v "$$PWD/tests:/app/tests" \
+		-v "$$PWD/scripts:/app/scripts" \
+		app python -m scripts.eval_synthesizer --live --confirm-cost "$(CONFIRM_COST)" --json
 
 eval-fundamental-agent: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
@@ -331,8 +365,8 @@ down: check-compose
 	$(DOCKER_COMPOSE) down
 
 lint: check-compose
-	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --select=E9,F63,F7,F82 --show-source --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" app python -m flake8 app agents tests --count --max-complexity=10 --max-line-length=127 --statistics
+	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \

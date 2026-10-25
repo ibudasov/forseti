@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -52,10 +53,10 @@ _DECISION_RANK = {"no_trade": 0, "watchlist": 1, "trade": 2}
 _NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?%?")
 
 
+@dataclass(frozen=True)
 class ModelOutput:
-    def __init__(self, text: str, token_usage: dict[str, int]) -> None:
-        self.text = text
-        self.token_usage = token_usage
+    text: str
+    token_usage: dict[str, int]
 
 
 class RetryableModelError(RuntimeError):
@@ -407,12 +408,7 @@ def _has_unsupported_numeric_claim(
         )
         if not _numbers_are_supported(item.claim, source_text):
             return True
-    thesis_sources = " ".join(
-        text
-        for claim_texts in known_source_text.values()
-        for text in claim_texts
-    )
-    return not _numbers_are_supported(response.thesis, thesis_sources)
+    return not _numbers_are_supported(response.thesis, "")
 
 
 def _numbers_are_supported(claim: str, source_text: str) -> bool:

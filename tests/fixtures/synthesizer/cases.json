@@ -1,0 +1,304 @@
+[
+  {
+    "name": "clean_trade",
+    "baseline_decision": "trade",
+    "baseline_confidence": 0.72,
+    "reasons": ["Momentum supports the setup."],
+    "warnings": [],
+    "analyst_views": [
+      {
+        "agent_name": "technical_analyst",
+        "status": "completed",
+        "overall_signal": "positive",
+        "findings": [
+          {
+            "finding_id": "technical-rsi",
+            "category": "momentum",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "RSI is 60 and momentum is stable.",
+            "metric_ids": ["rsi:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "technical_analyst",
+            "origin": "finding"
+          }
+        ]
+      }
+    ],
+    "known_metric_ids": ["rsi:2026-09-08"],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "trade",
+      "confidence": 0.72,
+      "thesis": "Available evidence supports the baseline.",
+      "key_reasons": [
+        {
+          "claim": "RSI is 60 and momentum is stable.",
+          "metric_ids": ["rsi:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        }
+      ],
+      "key_risks": [],
+      "what_would_change": []
+    },
+    "expected_fallback": false
+  },
+  {
+    "name": "watchlist",
+    "baseline_decision": "watchlist",
+    "baseline_confidence": 0.51,
+    "reasons": ["Evidence is mixed."],
+    "warnings": [],
+    "analyst_views": [
+      {
+        "agent_name": "technical_analyst",
+        "status": "completed",
+        "overall_signal": "neutral",
+        "findings": [
+          {
+            "finding_id": "technical-rsi",
+            "category": "momentum",
+            "direction": "mixed",
+            "materiality": "medium",
+            "claim": "Momentum has not confirmed the setup.",
+            "metric_ids": ["rsi:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "technical_analyst",
+            "origin": "finding"
+          }
+        ]
+      }
+    ],
+    "known_metric_ids": ["rsi:2026-09-08"],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "watchlist",
+      "confidence": 0.45,
+      "thesis": "The evidence supports a cautious stance.",
+      "key_reasons": [
+        {
+          "claim": "Momentum has not confirmed the setup.",
+          "metric_ids": ["rsi:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        }
+      ],
+      "key_risks": [],
+      "what_would_change": []
+    },
+    "expected_fallback": false
+  },
+  {
+    "name": "hard_blocker",
+    "baseline_decision": "no_trade",
+    "baseline_confidence": 0.15,
+    "reasons": ["A deterministic hard rule blocks the setup."],
+    "warnings": ["hard_veto:security restriction"],
+    "analyst_views": [],
+    "known_metric_ids": [],
+    "known_chunk_ids": [],
+    "known_warning_codes": ["hard_veto"],
+    "response": {
+      "proposed_decision": "no_trade",
+      "confidence": 0.1,
+      "thesis": "A deterministic blocker remains decisive.",
+      "key_reasons": [],
+      "key_risks": [
+        {
+          "claim": "A hard rule blocks the setup.",
+          "metric_ids": [],
+          "chunk_ids": [],
+          "warning_codes": ["hard_veto"]
+        }
+      ],
+      "what_would_change": []
+    },
+    "expected_fallback": false
+  },
+  {
+    "name": "conflicting_views",
+    "baseline_decision": "watchlist",
+    "baseline_confidence": 0.6,
+    "reasons": ["The analyst views conflict."],
+    "warnings": [],
+    "analyst_views": [
+      {
+        "agent_name": "fundamental_analyst",
+        "status": "completed",
+        "overall_signal": "positive",
+        "findings": [
+          {
+            "finding_id": "fundamental-growth",
+            "category": "growth_quality",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "Revenue grew 20%.",
+            "metric_ids": ["revenue_growth:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "fundamental_analyst",
+            "origin": "finding"
+          }
+        ]
+      },
+      {
+        "agent_name": "technical_analyst",
+        "status": "completed",
+        "overall_signal": "negative",
+        "findings": [
+          {
+            "finding_id": "technical-rsi",
+            "category": "momentum",
+            "direction": "negative",
+            "materiality": "high",
+            "claim": "RSI is 40.",
+            "metric_ids": ["rsi:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "technical_analyst",
+            "origin": "finding"
+          }
+        ]
+      }
+    ],
+    "known_metric_ids": ["revenue_growth:2026-09-08", "rsi:2026-09-08"],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "watchlist",
+      "confidence": 0.58,
+      "thesis": "Positive company metrics conflict with weakening technical evidence.",
+      "key_reasons": [
+        {
+          "claim": "Revenue grew 20%.",
+          "metric_ids": ["revenue_growth:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        },
+        {
+          "claim": "RSI is 40.",
+          "metric_ids": ["rsi:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        }
+      ],
+      "key_risks": [],
+      "what_would_change": []
+    },
+    "expected_fallback": false
+  },
+  {
+    "name": "hallucinated_number",
+    "baseline_decision": "trade",
+    "baseline_confidence": 0.72,
+    "reasons": ["Momentum supports the setup."],
+    "warnings": [],
+    "analyst_views": [
+      {
+        "agent_name": "technical_analyst",
+        "status": "completed",
+        "overall_signal": "positive",
+        "findings": [
+          {
+            "finding_id": "technical-rsi",
+            "category": "momentum",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "RSI is 60 and momentum is stable.",
+            "metric_ids": ["rsi:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "technical_analyst",
+            "origin": "finding"
+          }
+        ]
+      }
+    ],
+    "known_metric_ids": ["rsi:2026-09-08"],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "trade",
+      "confidence": 0.72,
+      "thesis": "The evidence supports the baseline.",
+      "key_reasons": [
+        {
+          "claim": "RSI is 99 and momentum is stable.",
+          "metric_ids": ["rsi:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        }
+      ],
+      "key_risks": [],
+      "what_would_change": []
+    },
+    "expected_fallback": true
+  },
+  {
+    "name": "money_field_leak",
+    "baseline_decision": "trade",
+    "baseline_confidence": 0.72,
+    "reasons": ["Momentum supports the setup."],
+    "warnings": [],
+    "analyst_views": [
+      {
+        "agent_name": "technical_analyst",
+        "status": "completed",
+        "overall_signal": "positive",
+        "findings": [
+          {
+            "finding_id": "technical-rsi",
+            "category": "momentum",
+            "direction": "positive",
+            "materiality": "high",
+            "claim": "RSI is 60 and momentum is stable.",
+            "metric_ids": ["rsi:2026-09-08"],
+            "chunk_ids": [],
+            "source_agent": "technical_analyst",
+            "origin": "finding"
+          }
+        ]
+      }
+    ],
+    "known_metric_ids": ["rsi:2026-09-08"],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "trade",
+      "confidence": 0.72,
+      "thesis": "The evidence supports the baseline.",
+      "key_reasons": [
+        {
+          "claim": "RSI is 60 and momentum is stable.",
+          "metric_ids": ["rsi:2026-09-08"],
+          "chunk_ids": [],
+          "warning_codes": []
+        }
+      ],
+      "key_risks": [],
+      "what_would_change": [],
+      "stop_loss": 99
+    },
+    "expected_fallback": true
+  },
+  {
+    "name": "promotion_attempt",
+    "baseline_decision": "watchlist",
+    "baseline_confidence": 0.5,
+    "reasons": ["Evidence is mixed."],
+    "warnings": [],
+    "analyst_views": [],
+    "known_metric_ids": [],
+    "known_chunk_ids": [],
+    "known_warning_codes": [],
+    "response": {
+      "proposed_decision": "trade",
+      "confidence": 0.5,
+      "thesis": "The evidence supports a cautious stance.",
+      "key_reasons": [],
+      "key_risks": [],
+      "what_would_change": []
+    },
+    "expected_fallback": true
+  }
+]

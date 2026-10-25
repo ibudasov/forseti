@@ -81,6 +81,12 @@ jobs:
         run: |
           make eval-technical-agent
 
+      - name: Decision Synthesizer evaluation
+        env:
+          DOCKER_COMPOSE: docker compose
+        run: |
+          make eval-synthesizer
+
       - name: Scorecard
         env:
           DOCKER_COMPOSE: docker compose
