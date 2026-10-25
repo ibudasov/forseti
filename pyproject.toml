@@ -1,7 +1,7 @@
 [project]
 name = "forseti"
 version = "0.1.0"
-description = "A FastAPI project scaffold using pedantic for request validation."
+description = "A FastAPI project scaffold using pydantic for request validation."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -11,26 +11,43 @@ authors = [
 dependencies = [
   "fastapi>=0.109.0",
   "uvicorn[standard]>=0.23.0",
-  "pedantic>=1.8.0",
+  "pydantic>=2.0.0",
   "sqlmodel>=0.0.8",
+  "sqlalchemy>=2.0.0,<2.1",
   "alembic>=1.11.0",
   "python-dotenv>=1.0.0",
   "pydantic-settings>=2.0.0",
   "psycopg2-binary>=2.9.0",
-  "psycopg[binary]>=3.2.0",
+  "pgvector>=0.3.0",
+  "yfinance>=0.2.0",
+  "pandas>=2.0.0",
+  "requests>=2.31.0",
+  "httpx>=0.24.0",
+  "google-cloud-aiplatform>=1.40.0",
+  "google-genai>=1.0.0",
   "google-adk>=1.0.0,<3.0.0",
   "exchange-calendars>=4.5.0,<5.0.0"
 ]
 
 [project.optional-dependencies]
-test = [
+dev = [
   "pytest>=7.0.0",
   "pytest-cov>=4.1.0",
-  "httpx>=0.24.0",
   "testcontainers[community]>=4.0.0",
   "flake8>=6.0.0",
-  "mypy>=1.8.0"
+  "mypy>=1.8.0",
+  "pip-tools>=7.4.0",
+  "deptry>=0.20.0",
+  "pip-audit>=2.7.0"
 ]
+test = ["forseti[dev]"]
+
+[tool.deptry]
+optional_dependencies_dev_groups = ["dev", "test"]
+
+[tool.deptry.per_rule_ignores]
+# loaded by name at runtime (server, DB URL driver, .env loading), not imported
+DEP002 = ["uvicorn", "psycopg2-binary", "python-dotenv"]
 
 [tool.coverage.run]
 source = ["app", "agents"]

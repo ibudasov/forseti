@@ -32,6 +32,16 @@ curl -s http://127.0.0.1:8000/screening | python3 -m json.tool
 
 The endpoint is intentionally write-free: it does not persist recommendations and it bypasses the agentic workflow. For per-ticker detail or audit trail, use `POST /analyze`.
 
+## Dependencies
+
+`pyproject.toml` is the only place dependencies are declared: runtime packages in
+`[project.dependencies]`, development tools in `[project.optional-dependencies].dev`
+(`test` is an alias). `requirements.txt` (runtime) and `requirements-dev.txt`
+(runtime + dev) are hash-pinned lock files generated from it.
+
+To add a package: edit `pyproject.toml`, run `make lock`, and commit both lock files.
+CI runs `deptry`, `pip-audit` and `pip check` to catch unused, missing or vulnerable packages.
+
 ## Test
 
 ```bash

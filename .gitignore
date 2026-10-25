@@ -16,3 +16,4 @@ ENV/
 # Local environment
 .env
 reports/trust/
+*.egg-info/
