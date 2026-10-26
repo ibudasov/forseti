@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: lock check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -376,6 +376,12 @@ typecheck: check-compose
 		app python -m mypy --explicit-package-bases --follow-imports=skip app agents
 
 check: lint typecheck
+
+lock:
+	docker run --rm -v "$$PWD:/work" -w /work python:3.11-slim sh -c '\
+		pip install --quiet pip-tools && \
+		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --output-file=requirements.txt pyproject.toml && \
+		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --extra dev --output-file=requirements-dev.txt pyproject.toml'
 
 scorecard: check-compose
 	@# Deliberately no --build: `make test`/`make typecheck` already build the

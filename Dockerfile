@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Some environments intercept outbound HTTPS with an internal CA that is not in
 # the default container trust store, so include the PyPI hosts explicitly as
 # trusted endpoints to keep Docker builds reproducible in sandboxed CI.
-COPY requirements.txt .
-RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org -r requirements.txt
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org -r requirements-dev.txt
 
 # Copy Alembic configuration and migrations for database commands
 COPY alembic.ini ./
