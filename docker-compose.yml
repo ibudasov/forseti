@@ -15,21 +15,26 @@ services:
       retries: 5
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "true"
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     env_file:
       - .env
     environment:
       # sourced from Codespaces/host secrets, not committed to .env
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
+      - PORT=${PORT:-8000}
     depends_on:
       postgresql:
         condition: service_healthy
     volumes:
       - ./app:/app/app
-      - ${HOME}/.config/gcloud/application_default_credentials.json:/root/.config/gcloud/application_default_credentials.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/home/forseti/.config/gcloud/application_default_credentials.json:ro
 
 volumes:
   db_data:

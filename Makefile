@@ -70,11 +70,21 @@ endif
 db-shell: check-compose
 	@$(DOCKER_COMPOSE) exec postgresql psql -U "$${POSTGRES_USER:-user}" -d "$${POSTGRES_DB:-forseti}"
 
+test-runtime: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		-e APP_ENV=local -e DEBUG_LLM_IO=false \
+		-e ALLOW_PIPELINE_OVERRIDE=false -e RAG_FAIL_LOUD=false \
+		-e FUNDAMENTAL_AGENT_MODE=off -e TECHNICAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off -e PIPELINE_MODE=linear -e SYNTHESIZER_CONTRACT=legacy \
+		-v "$$PWD/tests:/app/tests" \
+		app python -m pytest tests/test_runtime.py tests/test_settings.py -q
+
 test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e APP_ENV=local \
 		-e PIPELINE_MODE=linear \
 		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
@@ -378,7 +388,7 @@ typecheck: check-compose
 check: lint typecheck
 
 lock:
-	docker run --rm -v "$$PWD:/work" -w /work python:3.11-slim sh -c '\
+	docker run --rm -v "$$PWD:/work" -w /work python:3.12-slim sh -c '\
 		pip install --quiet pip-tools && \
 		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --output-file=requirements.txt pyproject.toml && \
 		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --extra dev --output-file=requirements-dev.txt pyproject.toml'

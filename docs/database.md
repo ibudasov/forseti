@@ -96,3 +96,50 @@ make db-shell
 - `alembic.ini` / `migrations/env.py` — Alembic configuration
 - `migrations/versions/0001_initial_schema.py` — initial schema migration
 - `migrations/versions/0002_pgvector_extension.py` — pgvector extension stub
+
+## Connection reuse and Cloud SQL
+
+`get_engine()` caches one SQLAlchemy engine per database URL per process, including
+when called through the API dependency or from different modules. Each engine uses
+a small connection pool rather than a single connection shared by concurrent
+requests. PostgreSQL defaults are:
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `DB_POOL_SIZE` | 3 | Persistent connections per process |
+| `DB_MAX_OVERFLOW` | 2 | Temporary extra connections under load |
+| `DB_POOL_RECYCLE_SECONDS` | 1800 | Recycle aged connections on checkout |
+
+Pre-ping is enabled. API lifespan shutdown disposes all pools after SIGTERM;
+job entrypoints dispose pools in a `finally` block, including after failures.
+`dispose_engines()` also clears the cache for test isolation.
+
+For Cloud SQL `db-f1-micro` (approximately 25 connections), cap the API at two
+instances with one worker process each and concurrency 4:
+
+| Consumer | Maximum connections |
+| --- | ---: |
+| API: 2 instances × (3 + 2) | 10 |
+| Refresh job: one process | 5 |
+| Housekeeping (configure smaller pools explicitly) | 2 |
+| Owner `psql` session | 1 |
+| Total | 18 (≤ 20, leaving headroom) |
+
+Additional worker processes, simultaneous jobs, database URLs, or rolling-revision
+overlap add pools. Account for these before raising instance limits or pool sizes.
+
+Unix-socket URLs are supported without a TCP host or port:
+
+```text
+postgresql://USER:PASSWORD@/forseti?host=/cloudsql/PROJECT:REGION:INSTANCE
+```
+
+Percent-encode credentials and inject the URL from Secret Manager. Attach the
+Cloud SQL instance to the Cloud Run service/job so the socket exists. No database
+role, migration, or collation-refresh behavior changes are included here.
+
+Use `/livez` for startup/liveness: it performs no database I/O. `/healthz` checks
+the shared pool with `SELECT 1`; in cloud mode its only fields are `app: ok` and
+`db: ok|unreachable`. Failures are logged server-side; local mode retains connection
+diagnostics. The response remains HTTP 200 for compatibility, so readiness monitors
+must inspect `db`. Liveness must not depend on database availability.
