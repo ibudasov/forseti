@@ -136,8 +136,9 @@ def validate_runtime_settings(settings: Optional[Settings] = None) -> None:
             errors.append(f"{name} must be false")
     if not settings.RAG_FAIL_LOUD:
         errors.append("RAG_FAIL_LOUD must be true")
-    if settings.DATABASE_URL == Settings.model_fields["DATABASE_URL"].default:
-        errors.append("DATABASE_URL must not use the local default")
+    database_url = settings.DATABASE_URL.strip()
+    if not database_url or database_url == Settings.model_fields["DATABASE_URL"].default:
+        errors.append("DATABASE_URL must be set and must not use the local default")
     for name in ("GOOGLE_CLOUD_PROJECT", "VERTEX_AI_PROJECT"):
         if not (getattr(settings, name) or "").strip():
             errors.append(f"{name} must be set")

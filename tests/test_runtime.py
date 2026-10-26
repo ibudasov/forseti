@@ -5,10 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 
-from app import main
+from app import main, runtime
 from app.db import session
 from app.settings import Settings, validate_runtime_settings
-from app import runtime
 
 
 @pytest.fixture
@@ -35,6 +34,8 @@ def cloud_settings():
     ("ALLOW_PIPELINE_OVERRIDE", True),
     ("RAG_FAIL_LOUD", False),
     ("DATABASE_URL", Settings.model_fields["DATABASE_URL"].default),
+    ("DATABASE_URL", ""),
+    ("DATABASE_URL", " "),
     ("GOOGLE_CLOUD_PROJECT", None),
     ("GOOGLE_CLOUD_PROJECT", " "),
     ("VERTEX_AI_PROJECT", None),
@@ -91,12 +92,16 @@ def test_engine_shared_between_callers_and_threads(monkeypatch, cloud_settings, 
     assert session.get_engine("postgresql://other-db/forseti") is not engines[0]
 
 
-def test_pool_configuration_and_disposal(monkeypatch, cloud_settings, engine_cache):
+@pytest.mark.parametrize(("pool_size", "overflow", "recycle"), [(3, 2, 1800), (1, 0, 60)])
+def test_pool_configuration_and_disposal(monkeypatch, cloud_settings, engine_cache, pool_size, overflow, recycle):
+    cloud_settings = cloud_settings.model_copy(update={
+        "DB_POOL_SIZE": pool_size, "DB_MAX_OVERFLOW": overflow, "DB_POOL_RECYCLE_SECONDS": recycle,
+    })
     monkeypatch.setattr(session, "get_settings", lambda: cloud_settings)
     engine = session.get_engine()
-    assert engine.pool.size() == 3
-    assert engine.pool._max_overflow == 2
-    assert engine.pool._recycle == 1800
+    assert engine.pool.size() == pool_size
+    assert engine.pool._max_overflow == overflow
+    assert engine.pool._recycle == recycle
     assert engine.pool._pre_ping is True
     dispose = Mock(wraps=engine.dispose)
     monkeypatch.setattr(engine, "dispose", dispose)
@@ -154,8 +159,16 @@ def test_local_health_keeps_diagnostics(monkeypatch, cloud_settings):
     monkeypatch.setattr(main, "get_engine", lambda _: engine)
     response = TestClient(main.app).get("/healthz")
     assert response.json()["db"] == {
-        "status": "unreachable", "detail": "connection refused", "host": "local-db", "port": 5432,
+        "status": "unreachable", "detail": "Database connection failed; see server logs", "host": "local-db", "port": 5432,
     }
+
+
+def test_health_handles_malformed_url_without_exposing_it(monkeypatch, cloud_settings):
+    monkeypatch.setattr(main, "get_settings", lambda: cloud_settings)
+    monkeypatch.setenv("DATABASE_URL", "malformed-private-database-url")
+    response = TestClient(main.app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"app": "ok", "db": "unreachable"}
 
 
 def test_lifespan_validates_and_disposes(monkeypatch, cloud_settings):

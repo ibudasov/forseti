@@ -67,6 +67,8 @@ API requests and jobs share one bounded database pool per URL per process; pools
 are disposed on API shutdown and job exit. See [database configuration and connection
 budget](docs/database.md#connection-reuse-and-cloud-sql) before increasing concurrency
 or replica limits. Local ADC files mounted by Compose must be readable by uid 10001.
+Make targets that write migrations or bind-mounted reports run with the host
+UID/GID so their output remains writable locally; the deployment image stays uid 10001.
 
 ## Test
 

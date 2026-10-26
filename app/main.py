@@ -61,9 +61,9 @@ def _check_database_connectivity(db_url: str) -> dict:
         with get_engine(db_url).connect() as connection:
             connection.execute(text("SELECT 1"))
         status, detail = "ok", "ok"
-    except Exception as exc:
+    except Exception:
         logger.exception("Database health check failed")
-        status, detail = "unreachable", str(exc)
+        status, detail = "unreachable", "Database connection failed; see server logs"
     return {"status": status, "detail": detail,
             "host": connection_info.get("host"), "port": connection_info.get("port")}
 
