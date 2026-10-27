@@ -113,7 +113,7 @@ def test_pool_configuration_and_disposal(monkeypatch, cloud_settings, engine_cac
 def test_cloud_sql_socket_engine_and_parsing(engine_cache):
     url = "postgresql://cloud-user@/forseti?host=/cloudsql/project:region:instance"
     engine = session.get_engine(url)
-    assert engine.url == make_url(url)
+    assert engine.url == make_url(url).set(drivername="postgresql+psycopg2")
     assert engine.dialect.create_connect_args(engine.url)[1]["host"] == "/cloudsql/project:region:instance"
     parsed = main._parse_database_url(url)
     assert parsed["host"] == "/cloudsql/project:region:instance"

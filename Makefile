@@ -3,7 +3,7 @@ HOST_USER := $(shell id -u):$(shell id -g)
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
 # Tests drop and recreate every table, so they must never point at the application database.
 POSTGRES_TEST_DB ?= forseti_test
-TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
+TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
 .PHONY: lock check-compose reports-dir help migrate migration db-shell test-runtime test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
