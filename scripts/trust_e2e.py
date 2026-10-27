@@ -683,4 +683,6 @@ def _settings_override(**env_updates: str) -> Iterator[None]:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from app.runtime import run_job
+
+    sys.exit(run_job(main))
