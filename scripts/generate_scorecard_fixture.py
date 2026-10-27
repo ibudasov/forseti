@@ -232,4 +232,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from app.runtime import run_job
+
+    run_job(main)

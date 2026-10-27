@@ -1,10 +1,11 @@
 .DEFAULT_GOAL := help
+HOST_USER := $(shell id -u):$(shell id -g)
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
 # Tests drop and recreate every table, so they must never point at the application database.
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose help migrate migration db-shell test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: lock check-compose reports-dir help migrate migration db-shell test-runtime test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -62,7 +63,7 @@ ifeq ($(strip $(name)),)
 	@echo "Error: name is required. Run 'make migration name=your_migration_name'"
 	@exit 1
 else
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		-v "$$PWD/migrations:/app/migrations" \
 		app python -m alembic revision --autogenerate -m "$(name)"
 endif
@@ -70,11 +71,21 @@ endif
 db-shell: check-compose
 	@$(DOCKER_COMPOSE) exec postgresql psql -U "$${POSTGRES_USER:-user}" -d "$${POSTGRES_DB:-forseti}"
 
+test-runtime: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		-e APP_ENV=local -e DEBUG_LLM_IO=false \
+		-e ALLOW_PIPELINE_OVERRIDE=false -e RAG_FAIL_LOUD=false \
+		-e FUNDAMENTAL_AGENT_MODE=off -e TECHNICAL_AGENT_MODE=off \
+		-e CRITIC_MODE=off -e PIPELINE_MODE=linear -e SYNTHESIZER_CONTRACT=legacy \
+		-v "$$PWD/tests:/app/tests" \
+		app python -m pytest tests/test_runtime.py tests/test_settings.py -q
+
 test: check-compose
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then echo "Error: Neither 'docker compose' nor 'docker-compose' is available."; exit 1; fi
 	$(DOCKER_COMPOSE) run --rm --build \
 		--env-from-file .env \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e APP_ENV=local \
 		-e PIPELINE_MODE=linear \
 		-e CRITIC_MODE=off\
 		-e ALLOW_PIPELINE_OVERRIDE=false \
@@ -261,8 +272,11 @@ eval-critic-live: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_critic --live --confirm-cost "$(CONFIRM_COST)" --json
 
-critic-shadow-report: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
+reports-dir:
+	mkdir -p reports/trust
+
+critic-shadow-report: check-compose reports-dir
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
@@ -289,8 +303,8 @@ eval-technical-agent-live: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		app python -m scripts.eval_technical_agent --live --confirm-cost "$(CONFIRM_COST)" --json
 
-technical-shadow-report: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
+technical-shadow-report: check-compose reports-dir
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-e FUNDAMENTAL_AGENT_MODE=off \
 		-e CRITIC_MODE=off \
@@ -299,19 +313,19 @@ technical-shadow-report: check-compose
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.eval_technical_agent --shadow-report --json $(if $(SAMPLE),--sample "$(SAMPLE)",) $(if $(OUT),--out "$(OUT)",)
 
-technical-backtest: check-compose
-	$(DOCKER_COMPOSE) run --rm --build \
+technical-backtest: check-compose reports-dir
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.technical_backtest --report-dir reports/trust $(if $(HORIZON_DAYS),--horizon-days "$(HORIZON_DAYS)",) --json
 
-technical-shadow-batch: check-compose
+technical-shadow-batch: check-compose reports-dir
 	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
 		echo "Error: technical-shadow-batch requires CONFIRM_COST=yes because it makes live network/model calls."; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-e TECHNICAL_AGENT_MODE=shadow \
 		-e FUNDAMENTAL_AGENT_MODE=$(if $(FUNDAMENTAL_AGENT_MODE),$(FUNDAMENTAL_AGENT_MODE),off) \
@@ -320,36 +334,36 @@ technical-shadow-batch: check-compose
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust --repeat "$(if $(REPEAT),$(REPEAT),1)"
 
-critic-shadow-batch: check-compose
+critic-shadow-batch: check-compose reports-dir
 	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
 		echo "Error: critic-shadow-batch requires CONFIRM_COST=yes because it makes live network/model calls."; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-e CRITIC_MODE=shadow \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust --repeat "$(if $(REPEAT),$(REPEAT),1)"
 
-trust-e2e: check-compose
+trust-e2e: check-compose reports-dir
 	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
 		echo "Error: trust-e2e requires CONFIRM_COST=yes because it makes live network/model calls."; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-e CRITIC_MODE=off \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/reports:/app/reports" \
 		app python -m scripts.trust_e2e --matrix scripts/trust_tickers.json --report-dir reports/trust
 
-trust-consistency: check-compose
+trust-consistency: check-compose reports-dir
 	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
 		echo "Error: trust-consistency requires CONFIRM_COST=yes because it makes live network/model calls."; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm --build \
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
 		-e CRITIC_MODE=off \
 		-e FUNDAMENTAL_AGENT_MODE=enforced \
@@ -378,7 +392,7 @@ typecheck: check-compose
 check: lint typecheck
 
 lock:
-	docker run --rm -v "$$PWD:/work" -w /work python:3.11-slim sh -c '\
+	docker run --rm -v "$$PWD:/work" -w /work python:3.12-slim sh -c '\
 		pip install --quiet pip-tools && \
 		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --output-file=requirements.txt pyproject.toml && \
 		pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras --extra dev --output-file=requirements-dev.txt pyproject.toml'

@@ -3,7 +3,7 @@ name = "forseti"
 version = "0.1.0"
 description = "A FastAPI project scaffold using pydantic for request validation."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
   { name = "Forseti User" }

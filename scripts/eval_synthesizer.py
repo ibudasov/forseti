@@ -76,4 +76,6 @@ def _render_markdown(report: dict) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from app.runtime import run_job
+
+    sys.exit(run_job(main))

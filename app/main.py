@@ -1,12 +1,14 @@
+import logging
 import os
-import socket
-from typing import Literal, Optional, Tuple
-from urllib.parse import urlparse
+from contextlib import asynccontextmanager
+from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from agents.orchestration.workflow import GoogleWorkflowError
-from app.db.session import get_engine
+from app.db.session import dispose_engines, get_engine
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, EvidenceBlock
 from app.schemas.screening import ScreeningResponse
 from app.schemas.diagnostics import UniverseDiagnosticsResponse
@@ -21,75 +23,49 @@ from app.services.pipeline import (
 from app.services.screening import run_screening
 from app.services.universe_diagnostics import build_universe_diagnostics
 from app.services.ticker_profile import build_ticker_profile
-from app.settings import get_settings
+from app.settings import get_settings, validate_runtime_settings
 
-app = FastAPI(title="Forseti API")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        validate_runtime_settings(get_settings())
+        yield
+    finally:
+        dispose_engines()
+
+
+app = FastAPI(title="Forseti API", lifespan=lifespan)
 
 
 def _parse_database_url(url: str) -> Optional[dict]:
     if not url:
         return None
-    parsed = urlparse(url)
+    parsed = make_url(url)
     return {
-        "scheme": parsed.scheme,
+        "scheme": parsed.drivername,
         "username": parsed.username,
         "password": parsed.password,
-        "host": parsed.hostname,
+        "host": parsed.query.get("host") or parsed.host,
         "port": parsed.port,
-        "path": parsed.path[1:] if parsed.path.startswith("/") else parsed.path,
+        "path": parsed.database,
     }
-
-
-def _tcp_check(host: Optional[str], port: Optional[int], timeout: float = 1.0) -> bool:
-    if not host or not port:
-        return False
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except Exception:
-        return False
-
-
-def _psycopg_check(db_url: str) -> Tuple[bool, str]:
-    try:
-        import psycopg2
-    except Exception:
-        return False, "psycopg2 not installed; falling back to TCP check"
-
-    try:
-        conn = psycopg2.connect(db_url)
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.fetchone()
-        cur.close()
-        conn.close()
-        return True, "ok"
-    except Exception as e:
-        return False, str(e)
 
 
 def _check_database_connectivity(db_url: str) -> dict:
-    """Check DB connectivity via psycopg2 if available, falling back to TCP."""
-    connection_info = _parse_database_url(db_url)
-    if not connection_info:
-        return {"status": "unknown", "detail": "DATABASE_URL could not be parsed"}
-
-    ok, detail = _psycopg_check(db_url)
-    if ok:
-        return {
-            "status": "ok",
-            "detail": detail,
-            "host": connection_info.get("host"),
-            "port": connection_info.get("port"),
-        }
-
-    tcp_ok = _tcp_check(connection_info.get("host"), connection_info.get("port"))
-    return {
-        "status": "ok" if tcp_ok else "unreachable",
-        "detail": "TCP fallback ok" if tcp_ok else detail,
-        "host": connection_info.get("host"),
-        "port": connection_info.get("port"),
-    }
+    connection_info = {}
+    try:
+        connection_info = _parse_database_url(db_url) or {}
+        with get_engine(db_url).connect() as connection:
+            connection.execute(text("SELECT 1"))
+        status, detail = "ok", "ok"
+    except Exception:
+        logger.exception("Database health check failed")
+        status, detail = "unreachable", "Database connection failed; see server logs"
+    return {"status": status, "detail": detail,
+            "host": connection_info.get("host"), "port": connection_info.get("port")}
 
 
 @app.get("/")
@@ -101,7 +77,16 @@ def read_root():
 def healthz():
     """Health endpoint that checks application and DB connectivity."""
     db_url = os.getenv("DATABASE_URL") or get_settings().DATABASE_URL
-    return {"app": "ok", "db": _check_database_connectivity(db_url)}
+    database = _check_database_connectivity(db_url)
+    if get_settings().APP_ENV == "cloud":
+        return {"app": "ok", "db": database["status"]}
+    return {"app": "ok", "db": database}
+
+
+@app.get("/livez")
+def livez():
+    """Liveness and startup probe independent of the database."""
+    return {"app": "ok"}
 
 
 def get_analysis_engine():

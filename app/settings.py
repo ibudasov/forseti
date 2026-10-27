@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 try:
     from pydantic import BaseSettings, Field
@@ -15,6 +15,12 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8"
     )
+
+    APP_ENV: Literal["local", "cloud"] = "local"
+    DB_POOL_SIZE: int = Field(default=3, gt=0)
+    DB_MAX_OVERFLOW: int = Field(default=2, ge=0)
+    DB_POOL_RECYCLE_SECONDS: int = Field(default=1800, gt=0)
+    GOOGLE_CLOUD_PROJECT: Optional[str] = None
 
     DATABASE_URL: str = Field(
         default="postgresql://user:password@postgresql:5432/forseti",
@@ -117,3 +123,40 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime_settings(settings: Optional[Settings] = None) -> None:
+    settings = settings or get_settings()
+    if settings.APP_ENV != "cloud":
+        return
+
+    errors = []
+    for name in ("DEBUG_LLM_IO", "ALLOW_PIPELINE_OVERRIDE"):
+        if getattr(settings, name):
+            errors.append(f"{name} must be false")
+    if not settings.RAG_FAIL_LOUD:
+        errors.append("RAG_FAIL_LOUD must be true")
+    database_url = settings.DATABASE_URL.strip()
+    if not database_url or database_url == Settings.model_fields["DATABASE_URL"].default:
+        errors.append("DATABASE_URL must be set and must not use the local default")
+    for name in ("GOOGLE_CLOUD_PROJECT", "VERTEX_AI_PROJECT"):
+        if not (getattr(settings, name) or "").strip():
+            errors.append(f"{name} must be set")
+    errors.extend(_invalid_agent_settings(settings))
+    if errors:
+        raise ValueError("Invalid cloud runtime settings: " + "; ".join(errors))
+
+
+def _invalid_agent_settings(settings: Settings) -> list[str]:
+    allowed_values = {
+        "PIPELINE_MODE": ("linear", "agentic"),
+        "FUNDAMENTAL_AGENT_MODE": ("off", "shadow", "enforced"),
+        "TECHNICAL_AGENT_MODE": ("off", "shadow", "enforced"),
+        "CRITIC_MODE": ("off", "shadow", "enforced"),
+        "SYNTHESIZER_CONTRACT": ("legacy", "typed"),
+    }
+    return [
+        f"{name} must be one of {allowed}"
+        for name, allowed in allowed_values.items()
+        if getattr(settings, name).strip().lower() not in allowed
+    ]

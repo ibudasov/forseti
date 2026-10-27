@@ -102,4 +102,6 @@ def _load_shadow_runs(*, limit: int) -> list[AgentRun]:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from app.runtime import run_job
+
+    sys.exit(run_job(main))
