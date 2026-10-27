@@ -45,4 +45,6 @@ def _default_run_id(ticker: str, as_of: date | None) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from app.runtime import run_job
+
+    sys.exit(run_job(main))
