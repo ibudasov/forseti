@@ -42,10 +42,38 @@ The endpoint is intentionally write-free: it does not persist recommendations an
 To add a package: edit `pyproject.toml`, run `make lock`, and commit both lock files.
 CI runs `deptry`, `pip-audit` and `pip check` to catch unused, missing or vulnerable packages.
 
+## Container runtime
+
+The image and lock-generation environment use Python 3.12. Compose builds with
+`INSTALL_DEV=true` for development and `make test`. For deployment:
+
+```bash
+docker build --build-arg INSTALL_DEV=false -t forseti:cloud .
+```
+
+This image excludes development dependencies and compilers, runs as uid 10001,
+and honors `PORT` (default 8000). TLS verification is on; only restricted build
+environments should supply `--build-arg PIP_TRUSTED_HOSTS="pypi.org files.pythonhosted.org"`.
+Forwarded headers are trusted for Cloud Run's ingress proxy; do not expose the
+container directly to untrusted clients on another platform.
+
+Use `.env.cloud.example` as the cloud configuration reference, inject secrets at
+runtime, and use the service's managed identity for Google credentials. `APP_ENV=cloud`
+rejects unsafe debug/override switches, silent RAG fallback, missing projects, the
+local database default, and invalid agent modes/contracts before serving requests
+or running jobs. Environment files are never copied into the image.
+
+API requests and jobs share one bounded database pool per URL per process; pools
+are disposed on API shutdown and job exit. See [database configuration and connection
+budget](docs/database.md#connection-reuse-and-cloud-sql) before increasing concurrency
+or replica limits. Local ADC files mounted by Compose must be readable by uid 10001.
+Make targets that write migrations or bind-mounted reports run with the host
+UID/GID so their output remains writable locally; the deployment image stays uid 10001.
+
 ## Test
 
 ```bash
-python3 -m pytest
+make test
 ```
 
 ## Data ingestion
