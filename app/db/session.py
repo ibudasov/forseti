@@ -4,7 +4,7 @@ from typing import Optional
 from threading import RLock
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Session
 
 from app.settings import get_settings
@@ -52,12 +52,16 @@ def _create_engine(url: str) -> Engine:
     settings = get_settings()
     connect_args = {}
     pool_options = {}
+    engine_url = make_url(url)
+    if engine_url.drivername == "postgresql":
+        engine_url = engine_url.set(drivername="postgresql+psycopg2")
+
     if url.startswith("postgresql"):
         connect_args = {"options": "-c timezone=utc"}
         pool_options = {"pool_size": settings.DB_POOL_SIZE, "max_overflow": settings.DB_MAX_OVERFLOW}
 
     engine = create_engine(
-        url, echo=False, future=True, connect_args=connect_args,
+        engine_url, echo=False, future=True, connect_args=connect_args,
         pool_recycle=settings.DB_POOL_RECYCLE_SECONDS, pool_pre_ping=True, **pool_options,
     )
     # Register event listener to refresh collation on each new connection

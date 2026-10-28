@@ -94,7 +94,7 @@ def db_engine():
         return
 
     with PostgresContainer(PGVECTOR_IMAGE) as postgres:
-        container_url = postgres.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+        container_url = postgres.get_connection_url()
         engine = _prepare_engine(container_url)
         yield engine
         engine.dispose()
