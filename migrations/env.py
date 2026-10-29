@@ -13,6 +13,7 @@ from sqlmodel import SQLModel
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from app.db.session import normalize_database_url
 from app.settings import get_settings
 from app.db import models  # noqa: F401
 
@@ -20,7 +21,11 @@ config = context.config
 fileConfig(config.config_file_name)
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+database_url = normalize_database_url(settings.DATABASE_URL)
+config.set_main_option(
+    "sqlalchemy.url",
+    database_url.render_as_string(hide_password=False).replace("%", "%%"),
+)
 
 target_metadata = SQLModel.metadata
 

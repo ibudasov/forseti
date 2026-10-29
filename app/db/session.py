@@ -4,7 +4,7 @@ from typing import Optional
 from threading import RLock
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.engine import Engine, URL, make_url
 from sqlmodel import Session
 
 from app.settings import get_settings
@@ -48,13 +48,18 @@ def get_engine(database_url: Optional[str] = None) -> Engine:
         return _engines[url]
 
 
+def normalize_database_url(database_url: str) -> URL:
+    engine_url = make_url(database_url)
+    if engine_url.drivername != "postgresql":
+        return engine_url
+    return engine_url.set(drivername="postgresql+psycopg2")
+
+
 def _create_engine(url: str) -> Engine:
     settings = get_settings()
     connect_args = {}
     pool_options = {}
-    engine_url = make_url(url)
-    if engine_url.drivername == "postgresql":
-        engine_url = engine_url.set(drivername="postgresql+psycopg2")
+    engine_url = normalize_database_url(url)
 
     if url.startswith("postgresql"):
         connect_args = {"options": "-c timezone=utc"}
