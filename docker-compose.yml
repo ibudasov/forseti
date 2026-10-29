@@ -15,7 +15,8 @@ services:
       retries: 5
 
   app:
-    build:
+    image: forseti-app
+    build: &app-build
       context: .
       args:
         INSTALL_DEV: "true"
@@ -35,6 +36,37 @@ services:
     volumes:
       - ./app:/app/app
       - ${HOME}/.config/gcloud/application_default_credentials.json:/home/forseti/.config/gcloud/application_default_credentials.json:ro
+
+  infra-tools:
+    image: forseti-app
+    build: *app-build
+    profiles: ["tools"]
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./tests:/app/tests:ro
+      - ./infra:/app/infra:ro
+      - ./docs:/app/docs
+
+  terraform:
+    image: hashicorp/terraform:1.17.1
+    profiles: ["tools"]
+    working_dir: /workspace/infra/terraform
+    volumes:
+      - .:/workspace
+
+  actionlint:
+    image: rhysd/actionlint:1.7.12
+    profiles: ["tools"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+
+  tflint:
+    image: ghcr.io/terraform-linters/tflint:v0.65.0
+    profiles: ["tools"]
+    working_dir: /workspace/infra/terraform
+    volumes:
+      - .:/workspace
 
 volumes:
   db_data:

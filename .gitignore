@@ -17,3 +17,12 @@ ENV/
 .env
 reports/trust/
 *.egg-info/
+
+# Terraform owner inputs, credentials, state and saved plans
+*.tfvars
+!*.tfvars.example
+.terraform/
+*.tfstate*
+*.tfplan
+backend.generated.tf
+crash.log

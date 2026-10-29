@@ -1,0 +1,5 @@
+project_id         = "forseti-505116"
+region             = "europe-west4"
+owner_email        = "REPLACE_WITH_OWNER_EMAIL"
+billing_account_id = "REPLACE_WITH_BILLING_ACCOUNT_ID"
+monthly_budget_eur = 30

@@ -1,0 +1,60 @@
+{
+  "service_accounts": {
+    "forseti-api": {
+      "purpose": "Cloud Run API",
+      "project_roles": ["aiplatform.user", "cloudsql.client", "cloudtrace.agent", "logging.logWriter", "monitoring.metricWriter"],
+      "act_as": [],
+      "workflow": null
+    },
+    "forseti-jobs": {
+      "purpose": "Cloud Run data jobs",
+      "project_roles": ["aiplatform.user", "cloudsql.client", "cloudtrace.agent", "logging.logWriter", "monitoring.metricWriter"],
+      "act_as": [],
+      "workflow": null
+    },
+    "forseti-housekeeping": {
+      "purpose": "Database housekeeping; exclusive reader of owner DB secrets (GCP-3b)",
+      "project_roles": ["cloudsql.client", "logging.logWriter"],
+      "act_as": [],
+      "workflow": null
+    },
+    "forseti-scheduler": {
+      "purpose": "Cloud Scheduler; job invocation added in GCP-5",
+      "project_roles": [],
+      "act_as": [],
+      "workflow": null
+    },
+    "forseti-tf-plan": {
+      "purpose": "Read-only infrastructure plans and drift checks",
+      "project_roles": ["viewer", "iam.securityReviewer"],
+      "act_as": [],
+      "workflow": {"file": "infra.yml", "environment": null, "events": ["workflow_dispatch", "schedule"]}
+    },
+    "forseti-tf-apply": {
+      "purpose": "Approved infrastructure applies; no identity or billing administration",
+      "project_roles": ["run.admin", "cloudsql.admin", "secretmanager.admin", "artifactregistry.admin", "cloudscheduler.admin", "monitoring.editor", "logging.configWriter"],
+      "conditional_project_roles": [{"role": "storage.admin", "condition": "exclude_state_bucket"}],
+      "act_as": ["forseti-api", "forseti-jobs", "forseti-housekeeping", "forseti-scheduler"],
+      "workflow": {"file": "infra.yml", "environment": "gcp-infra", "events": ["push", "workflow_dispatch"]}
+    },
+    "forseti-deployer": {
+      "purpose": "Deploy application images from main",
+      "project_roles": ["run.developer", "artifactregistry.writer"],
+      "act_as": ["forseti-api", "forseti-jobs", "forseti-housekeeping"],
+      "workflow": {"file": "deploy.yml", "environment": "gcp-dev", "events": ["push", "workflow_dispatch"]}
+    },
+    "forseti-verifier": {
+      "purpose": "Read-only live operational verification; no secret values or table data",
+      "project_roles": ["run.viewer", "cloudsql.viewer", "secretmanager.viewer", "iam.securityReviewer", "iam.workloadIdentityPoolViewer", "logging.viewer", "monitoring.viewer", "cloudtrace.user", "cloudscheduler.viewer", "artifactregistry.reader"],
+      "act_as": [],
+      "workflow": {"file": "ops.yml", "environment": null, "events": ["workflow_dispatch", "schedule", "push"]}
+    }
+  },
+  "state_owner_role": "storage.admin",
+  "state_listing_role": "storage.legacyBucketReader",
+  "state_grants": [
+    {"member": "forseti-tf-plan", "role": "storage.objectViewer", "prefix": "main/"},
+    {"member": "forseti-tf-apply", "role": "storage.objectAdmin", "prefix": "main/"}
+  ],
+  "resource_grants": []
+}

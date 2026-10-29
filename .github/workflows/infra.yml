@@ -1,0 +1,265 @@
+name: Infrastructure
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'scripts/terraform_cli.py'
+      - 'scripts/check_terraform_policy.py'
+      - 'scripts/iam_doc.py'
+      - 'tests/test_terraform.py'
+      - 'docs/gcp-access.md'
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - '.github/workflows/infra.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - 'scripts/terraform_cli.py'
+      - 'scripts/check_terraform_policy.py'
+      - 'scripts/iam_doc.py'
+      - 'docs/gcp-access.md'
+      - '.github/workflows/infra.yml'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Cloud operation (always executes the workflow from main)
+        type: choice
+        options: [plan, apply]
+        default: plan
+      pr_number:
+        description: Same-repository PR to plan (blank plans main; ignored for apply)
+        type: string
+        default: ''
+      allow_destroy:
+        description: Allow deletes/replacements in a manually approved apply
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Offline infrastructure checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate configuration without cloud authentication
+        run: make infra-check test-infra
+
+  changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      workloads: ${{ steps.paths.outputs.workloads }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if git diff --name-only "$BEFORE" "$AFTER" -- infra/terraform/main/ infra/terraform/bootstrap/identities.json | grep -q .; then
+            echo "workloads=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  plan:
+    name: Manual cloud plan
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'plan' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    env:
+      TF_VAR_owner_email: ${{ secrets.OWNER_EMAIL }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - name: Resolve reviewed PR head
+        id: source
+        uses: actions/github-script@v9
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const number = process.env.PR_NUMBER;
+            if (!number) {
+              core.setOutput('sha', context.sha);
+              return;
+            }
+            if (!/^[1-9][0-9]*$/.test(number)) throw new Error('Invalid PR number');
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(number)
+            });
+            if (pr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('Cloud plans for forks are prohibited');
+            }
+            if (pr.base.ref !== 'main' || pr.state !== 'open') throw new Error('Expected an open PR targeting main');
+            core.setOutput('sha', pr.head.sha);
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+      - name: Validate selected configuration before authenticating
+        run: make infra-check
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_PLAN_SA }}
+      - name: Plan workloads
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          terraform -chdir=infra/terraform/main init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
+          if ! terraform -chdir=infra/terraform/main plan -input=false -lock=false -no-color > plan.txt 2> plan-error.txt; then
+            echo "::error::Cloud plan failed. Inspect authentication, variables and provider configuration; raw provider errors are withheld to protect private values."
+            exit 1
+          fi
+          {
+            echo "## Cloud plan for ${{ steps.source.outputs.sha }}"
+            echo '```'
+            head -c 58000 plan.txt
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Update one PR plan comment
+        if: inputs.pr_number != ''
+        uses: actions/github-script@v9
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PLAN_SHA: ${{ steps.source.outputs.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- forseti-terraform-plan -->';
+            const plan = fs.readFileSync('plan.txt', 'utf8').slice(0, 58000);
+            const bootstrap = fs.existsSync('infra/terraform/bootstrap') ?
+              '\nBootstrap changes must be applied by the owner with `make tf-bootstrap` before merging.\n' : '';
+            const body = `${marker}\nManual cloud plan for ${process.env.PLAN_SHA}.${bootstrap}\n\`\`\`\n${plan}\n\`\`\``;
+            const params = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER) };
+            const comments = await github.paginate(github.rest.issues.listComments, params);
+            const existing = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: params.owner, repo: params.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...params, body });
+            }
+      - name: Remove runner-local plan captures
+        if: always()
+        run: rm -f plan.txt plan-error.txt
+
+  apply:
+    name: Approved workload apply
+    needs: [checks, changes]
+    if: >-
+      always() && needs.checks.result == 'success' && github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && needs.changes.outputs.workloads == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.operation == 'apply'))
+    runs-on: ubuntu-latest
+    environment: gcp-infra
+    concurrency:
+      group: terraform-main
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_owner_email: ${{ secrets.OWNER_EMAIL }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Refuse a superseded approved revision
+        run: |
+          current=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo "::error::main advanced while approval was pending; run apply for the latest main instead."
+            exit 1
+          fi
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_APPLY_SA }}
+      - name: Plan, enforce destruction gate and apply the saved plan
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy }}
+        run: |
+          set -euo pipefail
+          directory=infra/terraform/main
+          terraform -chdir="$directory" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
+          if ! terraform -chdir="$directory" plan -input=false -out=apply.tfplan > plan.txt 2> plan-error.txt; then
+            echo "::error::Cloud plan failed; raw provider errors are withheld to protect private values."
+            exit 1
+          fi
+          if [ "$ALLOW_DESTROY" != true ]; then
+            python3 scripts/check_terraform_policy.py --plan "$directory/apply.tfplan"
+          fi
+          if ! terraform -chdir="$directory" apply -input=false apply.tfplan > apply.txt 2> apply-error.txt; then
+            echo "::error::Cloud apply failed; inspect live resource status as owner before retrying. Raw provider errors are withheld."
+            exit 1
+          fi
+          echo "Applied reviewed workload plan for $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove sensitive runner-local files
+        if: always()
+        run: rm -f infra/terraform/main/apply.tfplan plan.txt plan-error.txt apply.txt apply-error.txt
+
+  drift:
+    name: Nightly drift check
+    needs: checks
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_owner_email: ${{ secrets.OWNER_EMAIL }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_PLAN_SA }}
+      - name: Detect drift without taking a write lock
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          terraform -chdir=infra/terraform/main init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
+          set +e
+          terraform -chdir=infra/terraform/main plan -input=false -lock=false -detailed-exitcode > drift.txt 2> drift-error.txt
+          status=$?
+          set -e
+          if [ "$status" -eq 2 ]; then
+            echo "::error::Infrastructure drift detected; open a corrective PR."
+            echo "Infrastructure drift detected." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Drift check failed; verify authentication and configuration."
+            exit 1
+          fi
+          echo "No infrastructure drift." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove runner-local captures
+        if: always()
+        run: rm -f drift.txt drift-error.txt
