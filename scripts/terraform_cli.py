@@ -145,6 +145,10 @@ def bootstrap() -> None:
         write_backend(bucket)
         terraform("bootstrap", ["init", "-migrate-state", "-force-copy"], environment)
         remove_local_state()
+    # GCS creates/locks an empty state on first access, even for -lock=false
+    # plans. Seed it as owner so the read-only planner never needs write access.
+    terraform("main", ["init", f"-backend-config=bucket={bucket}"], environment)
+    terraform("main", ["state", "list"], environment)
 
 
 def main() -> int:

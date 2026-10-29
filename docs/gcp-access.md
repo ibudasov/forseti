@@ -137,6 +137,10 @@ remain valid until expiry. Re-enable deliberately with `--no-disabled`.
    rerun the same command. A fresh checkout detects the existing bucket
    and reconnects to remote state. Do not delete the bucket or backend file
    as a way to resolve initialization errors.
+   The command also initializes the empty `main/` state as owner without
+   applying workloads. GCS creates/locks state on first access even for a
+   later `-lock=false` plan; doing this now keeps the planner strictly
+   read-only from its very first cloud plan.
 5. Run `make tf-bootstrap` again: expect **No changes**. Verify the budget
    and email channel, GitHub environments, variables and secret.
 6. Run `make cloud-logout`. If you supplied `TF_GITHUB_TOKEN`, also

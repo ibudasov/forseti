@@ -113,6 +113,13 @@ def test_bootstrap_ignores_builtin_tokens_and_migrates_state(owner_tools):
     assert not (directory / "terraform.tfstate").exists()
     assert not (directory / "terraform.tfstate.backup").exists()
     assert not any("owner-test-token" in argument for command in docker for argument in command["args"])
+    workloads = [
+        command["args"] for command in docker
+        if "/workspace/infra/terraform/main" in command["args"]
+    ]
+    assert workloads[0][-2:] == ["init", "-backend-config=bucket=forseti-505116-tfstate"]
+    assert workloads[1][-2:] == ["state", "list"]
+    assert not any("apply" in command for command in workloads)
 
 
 def test_explicit_owner_token_does_not_read_ambient_login(owner_tools, monkeypatch):
