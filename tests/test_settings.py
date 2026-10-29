@@ -28,6 +28,11 @@ def test_pipeline_override_defaults_to_false():
     assert settings.ALLOW_PIPELINE_OVERRIDE is False
 
 
+def test_vertex_ai_location_defaults_to_europe_west4():
+    settings = Settings(_env_file=None)
+    assert settings.VERTEX_AI_LOCATION == "europe-west4"
+
+
 def test_fundamental_agent_mode_defaults_to_off():
     settings = Settings(_env_file=None)
     assert settings.FUNDAMENTAL_AGENT_MODE == "off"
