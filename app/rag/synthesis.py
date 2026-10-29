@@ -121,7 +121,7 @@ def synthesize(
     chunks: List[DocumentChunk],
     gemini_model: Optional[str] = None,
     vertex_project: Optional[str] = None,
-    vertex_location: str = "us-central1",
+    vertex_location: str = "europe-west4",
     fail_loud: bool = False,
 ) -> SynthesisOutput:
     """Call Gemini with the retrieved chunks and return a :class:`SynthesisOutput`.

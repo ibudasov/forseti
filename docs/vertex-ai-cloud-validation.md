@@ -8,17 +8,56 @@ Vertex AI, before starting the ADK agentic workflow stage.
 These steps are manual — run them yourself, not via the agent/CI.
 
 ```bash
-gcloud services enable aiplatform.googleapis.com --project=<PROJECT_ID>
-gcloud auth application-default login
+make gcloud-login
+gcloud services enable aiplatform.googleapis.com --project=forseti-505116
 ```
 
 - Billing must be enabled on the GCP project (Vertex AI returns
   `PERMISSION_DENIED` otherwise).
 - The authenticated principal needs role `roles/aiplatform.user` on the
   project.
-- Region: the default `us-central1` is correct — both `text-embedding-004`
-  and `gemini-2.0-flash-001` are available there.
-- `gcloud auth application-default login` writes Application Default
+- Region: use `europe-west4` for both Vertex AI and Google GenAI
+  (`VERTEX_AI_LOCATION` and `GOOGLE_CLOUD_LOCATION`). Confirm each model is
+  supported in this region before a live run; an older model ID may have
+  reached its retirement date.
+- Verify model lifecycle and regional availability in the official [model
+  versions and lifecycle](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions),
+  [locations](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations),
+  and [embedding model reference](https://cloud.google.com/vertex-ai/generative-ai/docs/embeddings/model-reference).
+  Then make a small authenticated request to each configured publisher model in
+  `europe-west4`. A successful response verifies access; a `404` can indicate a
+  retired model or unsupported region, while permission and quota errors do not
+  establish retirement:
+
+  ```bash
+  # Set both model IDs to the exact values configured in .env.
+  PROJECT_ID=forseti-505116
+  REGION=europe-west4
+  GEMINI_MODEL=gemini-2.0-flash-001
+  EMBEDDING_MODEL=text-embedding-004
+  curl -sS -X POST \
+    --oauth2-bearer "$(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    "https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/${GEMINI_MODEL}:generateContent" \
+    -d '{"contents":[{"role":"user","parts":[{"text":"pre-flight check"}]}]}'
+  curl -sS -X POST \
+    --oauth2-bearer "$(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    "https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/${EMBEDDING_MODEL}:predict" \
+    -d '{"instances":[{"content":"pre-flight check"}],"parameters":{"outputDimensionality":768}}'
+  ```
+
+  Confirm the returned embedding has 768 values. If the embedding API rejects
+  `outputDimensionality`, check the model reference for its supported request
+  format and verify the returned dimension before ingestion.
+- `text-embedding-004` and `gemini-2.0-flash-001` are the repository defaults,
+  but their live lifecycle status must be checked against Google's
+  documentation before relying on them. If `text-embedding-004` is retired,
+  choose a currently supported embedding model that returns exactly 768
+  dimensions, update `EMBEDDING_MODEL`, and keep `EMBEDDING_DIM=768` aligned
+  with `document_chunks.embedding`. Re-embedding is free while the database is
+  empty.
+- `make gcloud-login` creates Application Default
   Credentials (ADC) to `${HOME}/.config/gcloud/application_default_credentials.json`.
   `docker-compose.yml` mounts this exact path read-only into the `app`
   container. Run this command **before** `docker compose up` — if the file is

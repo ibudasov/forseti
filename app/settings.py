@@ -67,7 +67,7 @@ class Settings(BaseSettings):
         default=None, validation_alias="VERTEX_AI_PROJECT"
     )
     VERTEX_AI_LOCATION: str = Field(
-        default="us-central1", validation_alias="VERTEX_AI_LOCATION"
+        default="europe-west4", validation_alias="VERTEX_AI_LOCATION"
     )
     GEMINI_MODEL: str = Field(
         default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"

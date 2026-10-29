@@ -1,0 +1,5 @@
+{
+  "name": "Forseti",
+  "image": "mcr.microsoft.com/devcontainers/universal:6-noble",
+  "onCreateCommand": "sudo bash .devcontainer/install-gcloud.sh"
+}

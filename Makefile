@@ -5,7 +5,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose reports-dir help migrate migration db-shell test-runtime test replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: lock check-compose reports-dir preflight-dir help migrate migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -48,6 +48,9 @@ help:
 	@echo "  make critic-shadow-batch CONFIRM_COST=yes [REPEAT=1] # Run the trust ticker matrix with CRITIC_MODE=shadow"
 	@echo "  make trust-e2e CONFIRM_COST=yes # Run the manual live agentic-vs-linear trust matrix"
 	@echo "  make trust-consistency CONFIRM_COST=yes [REPEAT=5] # Run repeated live trust matrix consistency checks"
+	@echo "  make live-preflight CONFIRM_COST=yes [TICKERS=NVDA,AMD] # Run a live linear/agentic pre-flight"
+	@echo "  make gcloud-login    # Sign in to gcloud and create application-default credentials"
+	@echo "  make cloud-logout    # Revoke gcloud and application-default credentials"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -99,6 +102,19 @@ test: check-compose
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70 \
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
 			-W "ignore:BaseAgentConfig is deprecated and will be removed in future versions.:DeprecationWarning"
+
+test-live-preflight: check-compose
+	$(DOCKER_COMPOSE) run --rm --build \
+		-e APP_ENV=local \
+		-e PIPELINE_MODE=linear \
+		-e CRITIC_MODE=off \
+		-e ALLOW_PIPELINE_OVERRIDE=false \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
+		-e SYNTHESIZER_CONTRACT=legacy \
+		-e DEBUG_LLM_IO=false \
+		-v "$$PWD/tests:/app/tests" \
+		app python -m pytest tests/test_live_preflight.py -q
 
 replay: check-compose
 	@if [ -z "$(RUN_ID)" ]; then echo "Error: RUN_ID is required. Run 'make replay RUN_ID=<run id from the trace>'"; exit 1; fi
@@ -275,6 +291,41 @@ eval-critic-live: check-compose
 reports-dir:
 	mkdir -p reports/trust
 
+preflight-dir:
+	mkdir -p reports/preflight
+
+live-preflight: check-compose preflight-dir
+	@if [ "$(CONFIRM_COST)" != "yes" ]; then \
+		echo "Error: live-preflight requires CONFIRM_COST=yes because it makes live model calls."; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
+		--env-from-file .env \
+		-v "$$PWD/reports:/app/reports" \
+		app python -m scripts.live_preflight --confirm-cost "$(CONFIRM_COST)" $(if $(TICKERS),--tickers "$(TICKERS)",)
+
+gcloud-login:
+	@adc_path="$$HOME/.config/gcloud/application_default_credentials.json"; \
+	if [ -d "$$adc_path" ] && [ -z "$$(find "$$adc_path" -mindepth 1 -maxdepth 1 -print -quit)" ]; then \
+		rmdir "$$adc_path"; \
+	fi
+	gcloud config set project forseti-505116
+	gcloud auth login --update-adc --no-launch-browser
+
+cloud-logout:
+	@adc_path="$$HOME/.config/gcloud/application_default_credentials.json"; \
+	if [ -f "$$adc_path" ]; then \
+		gcloud auth application-default revoke --quiet; \
+	else \
+		echo "No application-default credentials to revoke"; \
+	fi
+	@active_accounts="$$(gcloud auth list --filter=status:ACTIVE --format='value(account)')"; \
+	if [ -n "$$active_accounts" ]; then \
+		gcloud auth revoke --all --quiet; \
+	else \
+		echo "No gcloud accounts to revoke"; \
+	fi
+
 critic-shadow-report: check-compose reports-dir
 	$(DOCKER_COMPOSE) run --rm --build --user $(HOST_USER) \
 		--env-from-file .env \
@@ -381,8 +432,8 @@ down: check-compose
 	$(DOCKER_COMPOSE) down
 
 lint: check-compose
-	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
+	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
