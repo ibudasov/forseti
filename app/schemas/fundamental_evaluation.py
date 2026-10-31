@@ -95,7 +95,7 @@ class FundamentalEvaluationMetrics(BaseModel):
     status_counts: dict[str, int]
     counterfactual_confusion_matrix: dict[str, int]
     latency_ms: dict[str, float]
-    token_usage: dict[str, float]
+    token_usage: dict[str, float | None]
 
 
 class FundamentalEvaluationGateResult(BaseModel):
@@ -139,4 +139,4 @@ class FundamentalShadowReport(BaseModel):
     missing_information_counts: dict[str, int]
     baseline_counterfactual_matrix: dict[str, int]
     latency_ms: dict[str, float]
-    token_usage: dict[str, float]
+    token_usage: dict[str, float | None]

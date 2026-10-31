@@ -28,7 +28,8 @@ from app.trust.invariants import (
     check_technical_numeric_claims_grounded,
     evaluate_agentic_invariants,
 )
-from app.services.token_pricing import estimate_usage_cost_usd
+from app.services.cost_model import format_cost_usd
+from app.services.trace_cost import price_trace
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MATRIX_PATH = REPO_ROOT / "scripts" / "trust_tickers.json"
@@ -55,6 +56,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--matrix", default=str(DEFAULT_MATRIX_PATH))
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR))
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--allow-unpriced",
+        action="store_true",
+        help="Do not fail when a completed run could not be fully priced.",
+    )
     return parser.parse_args(argv)
 
 
@@ -213,6 +219,9 @@ def main(argv: list[str] | None = None) -> int:
     consistency_status = report["summary"].get("consistency", {}).get("status")
     if consistency_status == "failed":
         exit_code = 1
+    if report["summary"]["runtime"]["unpriced_run_count"] and not args.allow_unpriced:
+        print("error\tunpriced runs in report; update app/pricing/catalog.json or pass --allow-unpriced")
+        exit_code = 1
     return exit_code
 
 
@@ -250,7 +259,7 @@ def _response_summary(response: AnalyzeResponse) -> dict[str, Any]:
 
 
 def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
-    estimated_cost_usd = estimate_usage_cost_usd(get_settings().GEMINI_MODEL, trace.token_usage)
+    estimated_cost_usd, cost_status, pricing_version = _trace_cost(trace)
     return {
         "run_id": trace.run_id,
         "as_of_date": trace.as_of_date.isoformat() if trace.as_of_date is not None else None,
@@ -259,6 +268,8 @@ def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
         "total_latency_ms": trace.total_latency_ms,
         "token_usage": dict(trace.token_usage),
         "estimated_cost_usd": estimated_cost_usd,
+        "cost_status": cost_status,
+        "pricing_version": pricing_version,
         "warnings": list(trace.warnings),
         "entered_agent_layer": trace.entered_agent_layer,
         "adk_event_count": trace.adk_event_count,
@@ -279,6 +290,13 @@ def _trace_summary(trace: AnalysisTrace) -> dict[str, Any]:
             for step in trace.steps
         ],
     }
+
+
+def _trace_cost(trace: AnalysisTrace) -> tuple[float | None, str, str | None]:
+    if trace.cost_status is not None:
+        return trace.estimated_cost_usd, trace.cost_status, trace.pricing_version
+    estimate, _ = price_trace(trace.steps, trace.token_usage)
+    return estimate.usd, estimate.status, estimate.pricing_version
 
 
 def _build_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str, Any]:
@@ -303,23 +321,19 @@ def _build_summary(runs: list[dict[str, Any]], *, repeat_count: int) -> dict[str
 
 
 def _runtime_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
-    latencies = [
-        float(trace["total_latency_ms"])
+    completed_traces = [
+        trace
         for run in runs
-        if isinstance((trace := run.get("trace")), dict)
-        and run.get("status") in {"passed", "failed"}
-        and trace.get("estimated_cost_usd") is not None
+        if isinstance((trace := run.get("trace")), dict) and run.get("status") in {"passed", "failed"}
     ]
-    costs = [
-        float(trace["estimated_cost_usd"])
-        for run in runs
-        if isinstance((trace := run.get("trace")), dict)
-        and run.get("status") in {"passed", "failed"}
-        and trace.get("estimated_cost_usd") is not None
-    ]
+    priced_traces = [trace for trace in completed_traces if trace.get("cost_status", "priced") == "priced"]
+    unpriced_run_count = len(completed_traces) - len(priced_traces)
+    latencies = [float(trace["total_latency_ms"]) for trace in priced_traces]
+    costs = [float(trace["estimated_cost_usd"]) for trace in priced_traces]
     if not latencies or not costs:
         return {
             "completed_run_count": 0,
+            "unpriced_run_count": unpriced_run_count,
             "latency_ms": {"mean": None, "p50": None, "p95": None},
             "estimated_cost_usd": {"mean": None, "p95": None, "total": 0.0},
         }
@@ -327,6 +341,7 @@ def _runtime_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     ordered_costs = sorted(costs)
     return {
         "completed_run_count": len(costs),
+        "unpriced_run_count": unpriced_run_count,
         "latency_ms": {
             "mean": statistics.mean(latencies),
             "p50": _percentile(ordered_latencies, 0.50),
@@ -450,7 +465,7 @@ def _print_summary(runs: list[dict[str, Any]], report_path: Path) -> None:
         if isinstance(run.get("trace"), dict):
             latency_ms = str(run["trace"].get("total_latency_ms", "-"))
             cost_value = run["trace"].get("estimated_cost_usd")
-            estimated_cost_usd = "-" if cost_value is None else f"{float(cost_value):.6f}"
+            estimated_cost_usd = format_cost_usd(None if cost_value is None else float(cost_value))
         memo_checks = run.get("memo_checks") or {}
         citation_summary = run.get("fundamental_citation_resolution") or {}
         print(

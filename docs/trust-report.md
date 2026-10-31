@@ -66,7 +66,7 @@ default remains `off`.
 
 - Persisted traces already keep per-step `latency_ms` plus per-step `prompt_token_count` / `candidates_token_count` / `total_token_count`.
 - `scripts/trust_e2e.py` now logs per-run `total_latency_ms`, aggregate token usage, and `estimated_cost_usd`, and summarizes runtime as p50/p95 latency plus mean/p95/total estimated cost across completed agentic runs.
-- Pricing is centralized in `Settings.MODEL_PRICING_USD_PER_MILLION` instead of being hard-coded inline.
+- Pricing comes from the versioned catalog `app/pricing/catalog.json` via `app/services/cost_model.py`: each trace step is priced with its own model, thoughts tokens at the output rate, cached tokens at the cached rate. Runs that cannot be priced show `unpriced` (never `0.000000`), and `scripts/trust_e2e.py` fails on them unless `--allow-unpriced` is passed. See [cost-tracking.md](cost-tracking.md).
 - In this sandbox, live trust runs are still blocked before model completion, so there is **no trustworthy live p50/p95 or mean-cost sample yet**.
 
 ## Known limitations

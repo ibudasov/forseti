@@ -280,6 +280,28 @@ def test_synthesizer_effect_migration_adds_and_drops_jsonb_column(db_engine):
         assert {column["name"] for column in inspect(connection).get_columns("agent_runs")} == {"run_id"}
 
 
+def test_agent_run_cost_migration_adds_and_drops_columns(db_engine):
+    migration = import_module("migrations.versions.0014_agent_run_cost")
+    with db_engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS agent_run_steps CASCADE"))
+        connection.execute(text("DROP TABLE IF EXISTS agent_runs CASCADE"))
+        connection.execute(text("CREATE TABLE agent_runs (run_id VARCHAR(36) PRIMARY KEY)"))
+
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+
+        columns = {column["name"]: column for column in inspect(connection).get_columns("agent_runs")}
+        assert columns["cost_usd"]["type"].__class__.__name__ == "NUMERIC"
+        assert columns["cost_breakdown"]["type"].__class__.__name__ == "JSONB"
+        assert columns["pricing_version"]["nullable"] is True
+        assert columns["cost_usd"]["nullable"] is True
+
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.downgrade()
+
+        assert {column["name"] for column in inspect(connection).get_columns("agent_runs")} == {"run_id"}
+
+
 def test_synthesizer_report_has_scorecard_line_for_rejections_without_fallback():
     from scripts.eval_synthesizer import _render_markdown
     from tests.fixtures.synthesizer.loader import evaluate_synthesizer_cases, load_synthesizer_cases

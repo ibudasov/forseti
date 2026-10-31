@@ -7,6 +7,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import DocumentChunk
+from app.services.llm_schema import gemini_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ class SynthesisOutput(BaseModel):
     red_flags: List[EvidenceItem] = Field(default_factory=list)
     chunk_count: int = 0
     status: str = "ok"
+    model_name: Optional[str] = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _guardrail_no_trade_params(self) -> "SynthesisOutput":
@@ -153,13 +156,14 @@ def synthesize(
             generation_config={"response_mime_type": "application/json"},
         )
         raw_json = response.text
+        token_usage = gemini_token_usage(response)
         logger.info(
-            "Synthesis tokens — ticker=%s input=%s output=%s",
-            ticker,
-            getattr(response.usage_metadata, "prompt_token_count", "?"),
-            getattr(response.usage_metadata, "candidates_token_count", "?"),
+            "Synthesis tokens — ticker=%s model=%s usage=%s", ticker, model_name, token_usage
         )
-        return _parse_llm_json(ticker, raw_json, chunks, fail_loud=True)
+        output = _parse_llm_json(ticker, raw_json, chunks, fail_loud=True)
+        output.model_name = model_name
+        output.token_usage = token_usage
+        return output
     except Exception as exc:
         logger.warning("Gemini synthesis failed for %s: %s", ticker, exc)
         raise

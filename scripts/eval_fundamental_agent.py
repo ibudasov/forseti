@@ -16,6 +16,7 @@ from app.services.fundamental_evaluation import (
     build_shadow_report,
     evaluate_live_suite,
     evaluate_recorded_suite,
+    has_unpriced_cost,
     load_fundamental_evaluation_suite,
     render_evaluation_markdown,
     render_shadow_markdown,
@@ -45,6 +46,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=200,
         help="Maximum persisted runs to include in --shadow-report mode.",
     )
+    parser.add_argument(
+        "--allow-unpriced",
+        action="store_true",
+        help="Do not fail when the report cannot price its token usage.",
+    )
     return parser.parse_args(argv)
 
 
@@ -64,9 +70,9 @@ def main(argv: list[str] | None = None) -> int:
             report_data = report.model_dump(mode="json")
             report_data.update(date_summary)
             print(json.dumps(report_data, indent=2))
-            return 0
+            return _unpriced_exit_code(report.token_usage, args.allow_unpriced)
         print(render_shadow_markdown(report) + render_agent_run_date_summary(date_summary), end="")
-        return 0
+        return _unpriced_exit_code(report.token_usage, args.allow_unpriced)
 
     suite = load_fundamental_evaluation_suite(args.fixture)
     if args.live:
@@ -79,7 +85,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report.model_dump(mode="json"), indent=2))
     else:
         print(render_evaluation_markdown(report), end="")
+    if _unpriced_exit_code(report.metrics.token_usage, args.allow_unpriced):
+        return 1
     return 0 if report.gates.passed else 1
+
+
+def _unpriced_exit_code(token_usage: dict[str, float | None], allow_unpriced: bool) -> int:
+    if allow_unpriced or not has_unpriced_cost(token_usage):
+        return 0
+    print("Error: report contains unpriced runs; update app/pricing/catalog.json or pass --allow-unpriced.", file=sys.stderr)
+    return 1
 
 
 def _require_live_confirmation(confirm_cost: str) -> None:

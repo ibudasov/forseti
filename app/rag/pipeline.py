@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.db.models import DocumentChunk
 from app.db.repository import upsert_document_chunks
 from app.rag.chunking import chunk_text
-from app.rag.embedding import EmbeddingClient
+from app.rag.embedding import EmbeddingClient, embedding_usage_of
 from app.rag.ingestion.base import IngestionResult, RawDocument, compute_source_hash
 from app.rag.ingestion.earnings import EarningsCallIngestor
 from app.rag.ingestion.edgar import SECEdgarIngestor
 from app.rag.ingestion.news import CompanyNewsIngestor, SectorNewsIngestor
+from app.services.cost_model import CHARACTER_USAGE_FIELD, CostEstimate, price_lines, price_usage
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,12 @@ def _build_chunks(
     return result
 
 
+@dataclass(frozen=True)
+class IngestionSummary:
+    chunk_count: int
+    embedding_cost: CostEstimate
+
+
 def ingest_ticker(
     ticker: str,
     embedding_client: EmbeddingClient,
@@ -61,6 +69,21 @@ def ingest_ticker(
     engine=None,
 ) -> int:
     """Run the full ingestion pipeline for *ticker*; return number of new chunks stored."""
+    return ingest_ticker_with_cost(
+        ticker, embedding_client, user_agent=user_agent, sector=sector, engine=engine
+    ).chunk_count
+
+
+def ingest_ticker_with_cost(
+    ticker: str,
+    embedding_client: EmbeddingClient,
+    user_agent: Optional[str] = None,
+    sector: Optional[str] = None,
+    engine=None,
+) -> IngestionSummary:
+    """Run the full ingestion pipeline for *ticker*; return chunk count and embedding cost."""
+    usage = embedding_usage_of(embedding_client)
+    characters_before = usage.characters if usage is not None else 0
     settings = get_settings()
     chunk_size = settings.CHUNK_SIZE_TOKENS
     overlap = settings.CHUNK_OVERLAP_TOKENS
@@ -92,4 +115,13 @@ def ingest_ticker(
 
     upsert_document_chunks(all_chunks, engine=engine)
     logger.info("Ingested %d chunks for %s", len(all_chunks), ticker)
-    return len(all_chunks)
+    return IngestionSummary(
+        chunk_count=len(all_chunks),
+        embedding_cost=_embedding_cost(usage, characters_before),
+    )
+
+
+def _embedding_cost(usage, characters_before: int) -> CostEstimate:
+    if usage is None:
+        return price_lines([]).estimate
+    return price_usage(usage.model, {CHARACTER_USAGE_FIELD: usage.characters - characters_before})

@@ -182,7 +182,7 @@ Safety rules:
     divergence cases
   - every numeric claim passes citation validation
 - it prints latency, token usage, and an estimated cost per case (using
-  `Settings.MODEL_PRICING_USD_PER_MILLION`)
+  the price catalog in `app/pricing/catalog.json`)
 - live cases are marked `@pytest.mark.live` and, in `tests/test_technical_golden.py`,
   are only ever run against a stub model port keyed off the fixture's
   `run_id` — `make test` and CI never make a real network call, even for

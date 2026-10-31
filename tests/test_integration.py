@@ -496,6 +496,27 @@ class TestRunTraceEndpoint:
         assert body["observed_agents"] == ["trade_analyst_supervisor", "fundamental_analyst"]
         assert body["critic_effect"] == response.critic_effect.model_dump(mode="json")
 
+    def test_get_run_returns_persisted_cost_fields(self, db_client, db_engine):
+        self._seed_security(db_engine)
+        workflow = AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), engine=db_engine)
+        trace = AnalysisTrace(
+            run_id="run-with-cost",
+            ticker="NVDA",
+            steps=[],
+            estimated_cost_usd=0.001234,
+            cost_status="priced",
+            cost_breakdown={"status": "priced", "unpriced_models": [], "lines": []},
+            pricing_version="2026-10-31",
+        )
+        workflow._persist_trace(trace)
+
+        body = db_client.get("/runs/run-with-cost").json()
+
+        assert body["estimated_cost_usd"] == 0.001234
+        assert body["cost_status"] == "priced"
+        assert body["pricing_version"] == "2026-10-31"
+        assert body["cost_breakdown"]["status"] == "priced"
+
     def test_get_run_returns_same_critic_effect_as_agentic_post_analyze(self, db_client, db_engine, monkeypatch):
         self._seed_security(db_engine)
         workflow = AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), engine=db_engine)

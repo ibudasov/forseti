@@ -93,3 +93,34 @@ def test_typed_synthesizer_trace_has_zero_tokens_and_no_risk_tool_call():
         assert step.token_usage == {}
         assert step.tool_calls == []
     assert check_synthesizer_step_zero_tokens_in_typed_mode(trace) == []
+
+
+def test_recorded_agentic_trace_is_priced_for_every_step_with_tokens():
+    from app.services.trace_cost import price_trace
+
+    _, trace = _load_trace()
+    total_usage: dict[str, int] = {}
+    for step in trace.steps:
+        for field_name, value in step.token_usage.items():
+            total_usage[field_name] = total_usage.get(field_name, 0) + value
+
+    estimate, breakdown = price_trace(trace.steps, total_usage)
+
+    assert estimate.status == "priced"
+    assert estimate.usd is not None and estimate.usd > 0
+    priced_steps = {line["step"] for line in breakdown["lines"] if line["usd"] is not None}
+    steps_with_tokens = {f"{step.sequence}:{step.agent_name}" for step in trace.steps if any(step.token_usage.values())}
+    assert steps_with_tokens <= priced_steps
+
+
+def test_typed_view_steps_with_zero_tokens_cost_nothing():
+    from app.services.trace_cost import price_trace
+
+    _, trace = _load_trace(TYPED_VIEWS_TRACE_FIXTURE)
+
+    estimate, breakdown = price_trace(trace.steps, {})
+
+    zero_token_lines = [line for line in breakdown["lines"] if not any(line["token_usage"].values())]
+    assert zero_token_lines
+    assert all(line["usd"] == 0.0 for line in zero_token_lines)
+    assert estimate.status == "priced"

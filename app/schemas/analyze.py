@@ -69,6 +69,10 @@ class AnalysisTrace(BaseModel):
     entered_agent_layer: bool = False
     adk_event_count: int = 0
     observed_agents: List[str] = Field(default_factory=list)
+    estimated_cost_usd: Optional[float] = None
+    cost_status: Optional[Literal["priced", "partially_priced", "unpriced"]] = None
+    cost_breakdown: Optional[dict[str, Any]] = None
+    pricing_version: Optional[str] = None
     fundamental_agent_effect: Optional[FundamentalAgentEffect] = None
     technical_agent_effect: Optional[TechnicalAgentEffect] = None
     critic_effect: Optional["CriticEffect"] = Field(

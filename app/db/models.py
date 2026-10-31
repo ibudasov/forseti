@@ -325,6 +325,18 @@ class AgentRun(SQLModel, table=True):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+    cost_usd: Optional[Decimal] = Field(
+        default=None,
+        sa_column=Column(sa.Numeric(12, 6), nullable=True),
+    )
+    cost_breakdown: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    pricing_version: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.String(length=64), nullable=True),
+    )
     technical_agent_effect: Optional[Dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSONB, nullable=True),

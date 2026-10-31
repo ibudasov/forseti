@@ -73,9 +73,7 @@ class Settings(BaseSettings):
         default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
     )
     MODEL_PRICING_USD_PER_MILLION: dict[str, dict[str, float]] = Field(
-        default_factory=lambda: {
-            "gemini-2.0-flash-001": {"input": 0.10, "output": 0.40},
-        },
+        default_factory=dict,
         validation_alias="MODEL_PRICING_USD_PER_MILLION",
     )
     RAG_FAIL_LOUD: bool = Field(default=False, validation_alias="RAG_FAIL_LOUD")

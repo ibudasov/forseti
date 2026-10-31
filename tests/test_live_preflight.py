@@ -135,7 +135,7 @@ def test_run_preflight_reports_degradation_and_failed_invariants(monkeypatch):
 
     run = report["runs"][0]
     assert run["status"] == "failed"
-    assert run["agentic"]["cost_status"] == "pending"
+    assert run["agentic"]["cost_status"] == "unpriced"
     assert run["agentic"]["degraded_flags"] == {
         "unparsable_synthesis": True,
         "guardrail_rejected": True,
@@ -219,7 +219,7 @@ def test_aggregate_summary_calculates_latency_percentiles_and_total_tokens():
     }
 
 
-def test_markdown_summary_includes_decisions_latency_and_pending_cost():
+def test_markdown_summary_includes_decisions_latency_and_unpriced_cost():
     report = {
         "generated_at": "2026-10-29T00:00:00+00:00",
         "model_name": "fixture-model",
@@ -254,7 +254,7 @@ def test_markdown_summary_includes_decisions_latency_and_pending_cost():
     assert "| NVDA | passed | trade | watchlist |" in summary
     assert r"decision\_synthesizer: 12.5 ms" in summary
     assert "End-to-end latency p50/p95: 13.0 / 13.0 ms" in summary
-    assert "| 20 | pending |" in summary
+    assert "| 20 | unpriced |" in summary
 
 
 def test_markdown_cell_escapes_untrusted_warning_markup():
@@ -265,3 +265,19 @@ def test_markdown_cell_escapes_untrusted_warning_markup():
     assert "&lt;tag&gt;" in escaped
     assert r"https\:\/\/example.test" in escaped
     assert "\n" not in escaped
+
+
+def test_unpriced_runs_are_detected_in_report_summary():
+    priced = {"summary": {"estimated_cost_usd": {"total": 0.1, "pending_run_count": 0}}}
+    unpriced = {"summary": {"estimated_cost_usd": {"total": 0.0, "pending_run_count": 2}}}
+
+    assert live_preflight._has_unpriced_runs(priced) is False
+    assert live_preflight._has_unpriced_runs(unpriced) is True
+
+
+def test_trace_cost_prefers_the_cost_model_estimate_recorded_on_the_trace():
+    priced = _trace().model_copy(update={"estimated_cost_usd": 0.5, "cost_status": "priced"})
+    unpriced = _trace().model_copy(update={"estimated_cost_usd": None, "cost_status": "unpriced"})
+
+    assert live_preflight._trace_cost_usd(priced, "any-model", {}) == 0.5
+    assert live_preflight._trace_cost_usd(unpriced, "any-model", {}) is None

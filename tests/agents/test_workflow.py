@@ -733,6 +733,41 @@ def test_critic_token_usage_is_merged_into_trace_total(monkeypatch):
     assert response.trace.token_usage["total_token_count"] == 14
 
 
+def test_trace_carries_cost_estimate_for_run_token_usage(monkeypatch):
+    response = _workflow(
+        monkeypatch,
+        events=[
+            _event(
+                "decision_synthesizer",
+                text='{"decision":"watchlist","confidence":0.5,"reasons":["first"]}',
+                token_usage={"prompt_token_count": 1000, "candidates_token_count": 500},
+            )
+        ],
+    ).analyze("NVDA")
+
+    trace = response.trace
+    assert trace.cost_status == "priced"
+    assert trace.estimated_cost_usd == pytest.approx((1000 * 0.10 + 500 * 0.40) / 1_000_000)
+    assert trace.pricing_version
+    assert trace.cost_breakdown["lines"]
+
+
+def test_persisted_run_stores_cost_columns(monkeypatch, db_engine):
+    run_id = "run-priced"
+    monkeypatch.setattr(workflow_module, "uuid4", lambda: run_id)
+    _workflow(
+        monkeypatch,
+        events=[_event("decision_synthesizer", token_usage={"prompt_token_count": 1_000_000})],
+        engine=db_engine,
+    ).analyze("NVDA")
+
+    trace = load_trace(run_id, engine=db_engine)
+
+    assert trace.estimated_cost_usd == pytest.approx(0.10)
+    assert trace.cost_status == "priced"
+    assert trace.pricing_version
+
+
 def test_completed_non_deterministic_steps_do_not_exceed_event_count(monkeypatch):
     events = [_event("fundamental_analyst"), _event("technical_analyst")]
     response = _workflow(monkeypatch, events=events).analyze("NVDA")

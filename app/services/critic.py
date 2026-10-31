@@ -15,7 +15,7 @@ from app.schemas.critique import (
     CritiqueResult,
     CritiqueValidation,
 )
-from app.services.llm_schema import strict_parse_json
+from app.services.llm_schema import gemini_token_usage, strict_parse_json
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class GeminiCriticModel:
             )
         except Exception as exc:
             raise RetryableModelError(str(exc)) from exc
-        return ModelOutput(text=response.text, token_usage=_token_usage(response))
+        return ModelOutput(text=response.text, token_usage=gemini_token_usage(response))
 
 
 class Critic:
@@ -480,14 +480,3 @@ def _validation_error_diagnostics(exc: ValidationError) -> list[str]:
         location = ".".join(str(part) for part in error["loc"]) or "<root>"
         diagnostics.append(f"{location}:{error['type']}")
     return diagnostics
-
-
-def _token_usage(response: Any) -> dict[str, int]:
-    usage = getattr(response, "usage_metadata", None)
-    if usage is None:
-        return {}
-    return {
-        "prompt_token_count": int(getattr(usage, "prompt_token_count", 0) or 0),
-        "candidates_token_count": int(getattr(usage, "candidates_token_count", 0) or 0),
-        "total_token_count": int(getattr(usage, "total_token_count", 0) or 0),
-    }

@@ -25,7 +25,8 @@ from app.settings import get_settings
 from app.services.fundamental_analyst import FundamentalAnalyst, validate_fundamental_assessment
 from app.services.fundamental_context import compute_fundamental_context_hash
 from app.services.fundamental_policy import apply_fundamental_policy
-from app.services.token_pricing import estimate_usage_cost_usd, token_totals
+from app.services.cost_model import format_cost_usd, price_usage
+from app.services.token_pricing import token_totals
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_EVALUATION_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "fundamental_agent_eval" / "suite.json"
@@ -142,6 +143,10 @@ def build_shadow_report(runs: list[AgentRun]) -> FundamentalShadowReport:
     )
 
 
+def has_unpriced_cost(token_usage: dict[str, float | None]) -> bool:
+    return token_usage.get("estimated_cost_usd") is None
+
+
 def render_evaluation_markdown(report: FundamentalEvaluationReport) -> str:
     metrics = report.metrics
     lines = [
@@ -167,8 +172,8 @@ def render_evaluation_markdown(report: FundamentalEvaluationReport) -> str:
         f"| latency_p50_ms | {metrics.latency_ms['p50']:.1f} |",
         f"| latency_p90_ms | {metrics.latency_ms['p90']:.1f} |",
         f"| latency_max_ms | {metrics.latency_ms['max']:.1f} |",
-        f"| total_tokens | {int(metrics.token_usage['total_token_count'])} |",
-        f"| estimated_cost_usd | {metrics.token_usage['estimated_cost_usd']:.6f} |",
+        f"| total_tokens | {int(metrics.token_usage['total_token_count'] or 0)} |",
+        f"| estimated_cost_usd | {format_cost_usd(metrics.token_usage['estimated_cost_usd'])} |",
     ]
     if report.gates.failures:
         lines.extend(["", "## Gate failures", ""])
@@ -187,8 +192,8 @@ def render_shadow_markdown(report: FundamentalShadowReport) -> str:
         f"| latency_p50_ms | {report.latency_ms['p50']:.1f} |",
         f"| latency_p90_ms | {report.latency_ms['p90']:.1f} |",
         f"| latency_max_ms | {report.latency_ms['max']:.1f} |",
-        f"| total_tokens | {int(report.token_usage['total_token_count'])} |",
-        f"| estimated_cost_usd | {report.token_usage['estimated_cost_usd']:.6f} |",
+        f"| total_tokens | {int(report.token_usage['total_token_count'] or 0)} |",
+        f"| estimated_cost_usd | {format_cost_usd(report.token_usage['estimated_cost_usd'])} |",
     ]
     for name, count in report.outcome_counts.items():
         lines.append(f"| outcome:{name} | {count} |")
@@ -542,17 +547,15 @@ def _token_summary(
     total_candidate_tokens: int,
     total_tokens: int,
     item_count: int,
-) -> dict[str, float]:
-    estimated_cost_usd = estimate_usage_cost_usd(
+) -> dict[str, float | None]:
+    estimated_cost_usd = price_usage(
         get_settings().GEMINI_MODEL,
         {
             "prompt_token_count": total_prompt_tokens,
             "candidates_token_count": total_candidate_tokens,
             "total_token_count": total_tokens,
         },
-    )
-    if estimated_cost_usd is None:
-        estimated_cost_usd = 0.0
+    ).usd
     average_tokens = 0.0 if item_count == 0 else total_tokens / item_count
     return {
         "prompt_token_count": float(total_prompt_tokens),
