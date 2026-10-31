@@ -83,6 +83,7 @@ Pool/provider: `github/github`. The provider admits only immutable repository
 ID `1323914036` and owner ID `3657892`. Each service-account binding uses a
 composite `attribute.pipeline`, calculated from the exact workflow path
 **at `refs/heads/main`**, ref, subject (including environment) and event.
+Subjects use GitHub's immutable `repo:OWNER@OWNER_ID/REPO@REPO_ID` prefix.
 Other branches, workflows, environments and PR events map to `denied`.
 There are no account keys. Workflow/ref/environment claims are also mapped
 individually for inspection.
