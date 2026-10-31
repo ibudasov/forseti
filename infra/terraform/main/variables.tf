@@ -12,3 +12,9 @@ variable "owner_email" {
   type      = string
   sensitive = true
 }
+
+variable "credentials_version" {
+  description = "Bump to rotate the database passwords; all write-only credentials rotate together."
+  type        = number
+  default     = 1
+}

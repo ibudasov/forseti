@@ -53,7 +53,10 @@ both layers, this generated documentation, and future live IAM verification
 
 | Resource kind | Resource | Member | Role |
 |---|---|---|---|
-| None yet | Added by later milestones | None | None |
+| secret | forseti-database-url | forseti-api | secretmanager.secretAccessor |
+| secret | forseti-database-url | forseti-jobs | secretmanager.secretAccessor |
+| secret | forseti-alpha-vantage-api-key | forseti-api | secretmanager.secretAccessor |
+| secret | forseti-alpha-vantage-api-key | forseti-jobs | secretmanager.secretAccessor |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,
