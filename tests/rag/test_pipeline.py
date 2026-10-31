@@ -7,6 +7,7 @@ import pytest
 
 from app.db.models import SourceQualityTier, SourceType
 from app.rag import pipeline
+from app.rag.embedding import EmbeddingUsage
 from app.rag.ingestion.base import IngestionResult, RawDocument
 from app.rag.ingestion.edgar import SECEdgarIngestor
 
@@ -140,3 +141,38 @@ class TestIngestTickerFailLoud:
         pipeline.ingest_ticker(ticker="NVDA", embedding_client=_MockEmbeddingClient())
 
         assert stored_chunks[0].text == malicious_text
+
+
+class _BilledEmbeddingClient(_MockEmbeddingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.usage = EmbeddingUsage(model="text-embedding-004")
+
+    def embed_texts(self, texts):
+        self.usage.record(texts)
+        return super().embed_texts(texts)
+
+
+class TestIngestionEmbeddingCost:
+    def test_summary_prices_only_characters_embedded_during_this_ingestion(self, monkeypatch):
+        _patch_ingestors(monkeypatch)
+        monkeypatch.setattr(pipeline, "get_settings", lambda: _settings(rag_fail_loud=False))
+        monkeypatch.setattr(pipeline, "upsert_document_chunks", lambda chunks, engine=None: None)
+        client = _BilledEmbeddingClient()
+        client.embed_texts(["x" * 1_000_000])
+
+        summary = pipeline.ingest_ticker_with_cost(ticker="NVDA", embedding_client=client)
+
+        embedded_characters = client.usage.characters - 1_000_000
+        assert embedded_characters > 0
+        assert summary.embedding_cost.status == "priced"
+        assert summary.embedding_cost.usd == pytest.approx(embedded_characters * 0.025 / 1_000_000)
+
+    def test_clients_without_usage_tracking_cost_nothing(self, monkeypatch):
+        _patch_ingestors(monkeypatch)
+        monkeypatch.setattr(pipeline, "get_settings", lambda: _settings(rag_fail_loud=False))
+        monkeypatch.setattr(pipeline, "upsert_document_chunks", lambda chunks, engine=None: None)
+
+        summary = pipeline.ingest_ticker_with_cost(ticker="NVDA", embedding_client=_MockEmbeddingClient())
+
+        assert summary.embedding_cost.usd == 0.0

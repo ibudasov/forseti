@@ -159,3 +159,40 @@ class TestFailLoud:
 
         with pytest.raises(RuntimeError, match="gemini backend unavailable"):
             synthesize("NVDA", chunks=chunks, vertex_project="proj")
+
+
+class TestSynthesisUsageCapture:
+    def test_synthesis_records_model_and_token_usage(self, monkeypatch):
+        fake_vertexai = types.ModuleType("vertexai")
+        fake_vertexai.init = lambda **kwargs: None
+        fake_generative_models = types.ModuleType("vertexai.generative_models")
+        usage = types.SimpleNamespace(
+            prompt_token_count=120,
+            candidates_token_count=30,
+            total_token_count=150,
+            thoughts_token_count=10,
+        )
+
+        class _Model:
+            def __init__(self, model_name):
+                pass
+
+            def generate_content(self, prompt, generation_config=None):
+                return types.SimpleNamespace(text="{}", usage_metadata=usage)
+
+        fake_generative_models.GenerativeModel = _Model
+        fake_vertexai.generative_models = fake_generative_models
+        monkeypatch.setitem(sys.modules, "vertexai", fake_vertexai)
+        monkeypatch.setitem(sys.modules, "vertexai.generative_models", fake_generative_models)
+
+        output = synthesize(
+            "NVDA", chunks=[_make_chunk(1)], gemini_model="gemini-2.5-flash-lite", vertex_project="proj"
+        )
+
+        assert output.model_name == "gemini-2.5-flash-lite"
+        assert output.token_usage == {
+            "prompt_token_count": 120,
+            "candidates_token_count": 30,
+            "total_token_count": 150,
+            "thoughts_token_count": 10,
+        }

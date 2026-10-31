@@ -190,3 +190,18 @@ def test_eval_script_returns_zero_for_recorded_fixture():
 def test_eval_script_live_mode_requires_explicit_cost_confirmation():
     with pytest.raises(RuntimeError, match="confirm-cost yes"):
         eval_script.main(["--live"])
+
+
+def test_token_summary_reports_unpriced_instead_of_zero_for_unknown_model(monkeypatch):
+    from app.services import fundamental_evaluation as evaluation
+    from app.settings import Settings
+
+    monkeypatch.setattr(
+        evaluation, "get_settings", lambda: Settings(_env_file=None, GEMINI_MODEL="mystery-model")
+    )
+
+    summary = evaluation._token_summary(10, 5, 15, 1)
+
+    assert summary["estimated_cost_usd"] is None
+    assert evaluation.has_unpriced_cost(summary)
+    assert evaluation.format_cost_usd(summary["estimated_cost_usd"]) == "unpriced"

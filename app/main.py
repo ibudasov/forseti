@@ -23,6 +23,7 @@ from app.services.pipeline import (
 from app.services.screening import run_screening
 from app.services.universe_diagnostics import build_universe_diagnostics
 from app.services.ticker_profile import build_ticker_profile
+from app.services.cost_model import check_pricing_coverage
 from app.settings import get_settings, validate_runtime_settings
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     try:
         validate_runtime_settings(get_settings())
+        check_pricing_coverage(get_settings())
         yield
     finally:
         dispose_engines()

@@ -9,6 +9,7 @@ import os
 import time
 from dataclasses import dataclass, field as dataclass_field
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Callable, Iterable, Literal, Optional, Protocol, cast
 from uuid import uuid4
 
@@ -38,7 +39,7 @@ from agents.orchestration.trace_recorder import TraceRecorder
 from agents.tools.ticker_resolver import resolve_ticker
 from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
-from app.rag.embedding import EmbeddingClient
+from app.rag.embedding import EmbeddingClient, embedding_usage_of
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
 from app.schemas.fundamentals import FundamentalAssessmentResult
@@ -48,6 +49,7 @@ from app.schemas.technicals import TechnicalAgentEffect, TechnicalAnalysisReques
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
+from app.services.trace_cost import price_trace
 from app.services.decision_synthesizer import DecisionSynthesizer, build_decision_memo, memo_hash
 from app.services.critique_context import (
     build_analyst_views,
@@ -288,6 +290,7 @@ def _token_usage(response: Any) -> dict[str, int]:
             "candidates_token_count",
             "total_token_count",
             "thoughts_token_count",
+            "cached_content_token_count",
         )
         if (value := getattr(usage_metadata, key, None)) is not None
     }
@@ -470,11 +473,13 @@ class AgenticAnalysisWorkflow:
         # is `off` or the assessment step was never reached.
         self.last_technical_assessment: Optional[TechnicalAssessmentResult] = None
         self.last_technical_request: Optional[TechnicalAnalysisRequest] = None
+        self._embedding_characters_at_start = 0
 
     def analyze(self, ticker_reference: str, request: Optional[AnalyzeRequest] = None) -> AnalyzeResponse:
         run_id = str(uuid4())
         self.last_technical_assessment = None
         self.last_technical_request = None
+        self._embedding_characters_at_start = self._embedding_characters()
         recorder = self.llm_io_recorder or build_llm_io_recorder(run_id, config=self.config)
         trace_recorder = TraceRecorder()
         warnings: list[str] = []
@@ -1618,15 +1623,27 @@ class AgenticAnalysisWorkflow:
         observed_agents: list[str],
         typed_synthesis: _TypedSynthesisRun | None = None,
     ) -> AnalysisTrace:
+        steps = trace_recorder.steps()
+        embedding_usage = embedding_usage_of(self.embedding_client)
+        cost, cost_breakdown = price_trace(
+            steps,
+            token_usage,
+            embedding_model=embedding_usage.model if embedding_usage is not None else None,
+            embedding_characters=self._embedding_characters() - self._embedding_characters_at_start,
+        )
         return AnalysisTrace(
             run_id=run_id,
             ticker=ticker,
             as_of_date=as_of_date,
             as_of_date_source="request" if as_of_date is not None else None,
-            steps=trace_recorder.steps(),
+            steps=steps,
             final_decision=response.decision,
             total_latency_ms=total_latency_ms,
             token_usage=token_usage,
+            estimated_cost_usd=cost.usd,
+            cost_status=cost.status,
+            cost_breakdown=cost_breakdown,
+            pricing_version=cost.pricing_version,
             warnings=warnings,
             entered_agent_layer=adk_event_count > 0,
             adk_event_count=adk_event_count,
@@ -1638,6 +1655,10 @@ class AgenticAnalysisWorkflow:
                 typed_synthesis.effect(response.decision) if typed_synthesis is not None else None
             ),
         )
+
+    def _embedding_characters(self) -> int:
+        usage = embedding_usage_of(self.embedding_client)
+        return usage.characters if usage is not None else 0
 
     @staticmethod
     def _default_runner_factory(registry: AgentRegistry, ticker: str) -> Iterable[Any]:
@@ -1679,6 +1700,13 @@ class AgenticAnalysisWorkflow:
             entered_agent_layer=trace.entered_agent_layer,
             adk_event_count=trace.adk_event_count,
             observed_agents=trace.observed_agents,
+            cost_usd=(
+                Decimal(str(trace.estimated_cost_usd))
+                if trace.estimated_cost_usd is not None
+                else None
+            ),
+            cost_breakdown=trace.cost_breakdown,
+            pricing_version=trace.pricing_version,
             fundamental_agent_effect=(
                 trace.fundamental_agent_effect.model_dump(mode="json")
                 if trace.fundamental_agent_effect is not None
@@ -1726,6 +1754,10 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
         entered_agent_layer=run.entered_agent_layer,
         adk_event_count=run.adk_event_count,
         observed_agents=run.observed_agents,
+        estimated_cost_usd=float(run.cost_usd) if run.cost_usd is not None else None,
+        cost_status=(run.cost_breakdown or {}).get("status"),
+        cost_breakdown=run.cost_breakdown,
+        pricing_version=run.pricing_version,
         fundamental_agent_effect=run.fundamental_agent_effect,
         technical_agent_effect=run.technical_agent_effect,
         critic_effect=run.critic_effect,

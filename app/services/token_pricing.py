@@ -1,9 +1,11 @@
+"""Backwards-compatible token pricing helpers backed by :mod:`app.services.cost_model`."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Mapping
 
-from app.settings import Settings, get_settings
+from app.services.cost_model import price_catalog, price_usage
+from app.settings import Settings
 
 
 @dataclass(frozen=True)
@@ -24,13 +26,12 @@ def get_model_token_pricing(
     *,
     settings: Settings | None = None,
 ) -> ModelTokenPricing | None:
-    configured_settings = settings or get_settings()
-    price_mapping = configured_settings.MODEL_PRICING_USD_PER_MILLION.get(model_name)
-    if price_mapping is None:
+    entry = price_catalog(settings).entry_for(model_name)
+    if entry is None or entry.unit != "per_million_tokens":
         return None
     return ModelTokenPricing(
-        input_usd_per_million_tokens=float(price_mapping["input"]),
-        output_usd_per_million_tokens=float(price_mapping["output"]),
+        input_usd_per_million_tokens=entry.input,
+        output_usd_per_million_tokens=entry.output,
     )
 
 
@@ -40,11 +41,4 @@ def estimate_usage_cost_usd(
     *,
     settings: Settings | None = None,
 ) -> float | None:
-    pricing = get_model_token_pricing(model_name, settings=settings)
-    if pricing is None:
-        return None
-    prompt_tokens, candidate_tokens, _ = token_totals(token_usage)
-    return (
-        prompt_tokens * pricing.input_usd_per_million_tokens
-        + candidate_tokens * pricing.output_usd_per_million_tokens
-    ) / 1_000_000
+    return price_usage(model_name, token_usage, settings=settings).usd

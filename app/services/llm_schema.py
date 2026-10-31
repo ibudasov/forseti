@@ -28,11 +28,20 @@ def gemini_token_usage(response: Any) -> dict[str, int]:
     usage = getattr(response, "usage_metadata", None)
     if usage is None:
         return {}
-    return {
+    return _usage_counts(usage)
+
+
+def _usage_counts(usage: Any) -> dict[str, int]:
+    counts = {
         "prompt_token_count": int(getattr(usage, "prompt_token_count", 0) or 0),
         "candidates_token_count": int(getattr(usage, "candidates_token_count", 0) or 0),
         "total_token_count": int(getattr(usage, "total_token_count", 0) or 0),
     }
+    for billed_field in ("thoughts_token_count", "cached_content_token_count"):
+        value = int(getattr(usage, billed_field, 0) or 0)
+        if value:
+            counts[billed_field] = value
+    return counts
 
 
 def strict_parse_json(

@@ -14,6 +14,7 @@ from agents.config import AGENTIC_PIPELINE_MODE, LINEAR_PIPELINE_MODE, load_agen
 from app.db.session import get_engine
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.pipeline import AnalysisPipeline, select_pipeline
+from app.services.cost_model import format_cost_usd
 from app.services.token_pricing import estimate_usage_cost_usd
 from app.settings import Settings, get_settings
 from app.trust.invariants import CRITIC_OFF_ALLOWED_SKIPS, evaluate_agentic_invariants
@@ -30,6 +31,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tickers", default=None)
     parser.add_argument("--matrix", default=str(DEFAULT_MATRIX_PATH))
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR))
+    parser.add_argument(
+        "--allow-unpriced",
+        action="store_true",
+        help="Do not fail when an agentic run could not be priced.",
+    )
     return parser.parse_args(argv)
 
 
@@ -66,7 +72,14 @@ def main(argv: list[str] | None = None) -> int:
     markdown_path.write_text(render_markdown(report), encoding="utf-8")
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {markdown_path}")
+    if _has_unpriced_runs(report) and not args.allow_unpriced:
+        print("Error: report contains unpriced runs; update app/pricing/catalog.json or pass --allow-unpriced.")
+        return 1
     return 0 if all(run["status"] == "passed" for run in report["runs"]) else 1
+
+
+def _has_unpriced_runs(report: dict[str, Any]) -> bool:
+    return report["summary"]["estimated_cost_usd"]["pending_run_count"] > 0
 
 
 def _build_pipeline(mode: str, engine: Any, settings: Settings) -> AnalysisPipeline:
@@ -186,6 +199,16 @@ def _analyze(
     return response, (time.monotonic() - started_at) * 1000, None
 
 
+def _trace_cost_usd(
+    trace: Any,
+    model_name: str,
+    token_usage: dict[str, int],
+) -> float | None:
+    if trace is not None and trace.cost_status is not None:
+        return trace.estimated_cost_usd if trace.cost_status == "priced" else None
+    return estimate_usage_cost_usd(model_name, token_usage)
+
+
 def _analysis_summary(
     response: AnalyzeResponse | None,
     elapsed_ms: float,
@@ -200,7 +223,7 @@ def _analysis_summary(
     estimated_cost = (
         0.0
         if is_linear
-        else estimate_usage_cost_usd(model_name, token_usage)
+        else _trace_cost_usd(trace, model_name, token_usage)
     )
     steps = trace.steps if trace is not None else []
     return {
@@ -213,7 +236,7 @@ def _analysis_summary(
         "token_usage": token_usage,
         "stage_token_usage": _stage_token_usage(steps),
         "estimated_cost_usd": estimated_cost,
-        "cost_status": "estimated" if estimated_cost is not None else "pending",
+        "cost_status": "estimated" if estimated_cost is not None else "unpriced",
         "degraded_flags": _degraded_flags(trace),
     }
 
@@ -313,7 +336,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         if run["invariants"] is not None:
             invariant_status = "passed" if run["invariants"]["passed"] else "failed"
         cost = agentic.get("estimated_cost_usd")
-        cost_text = "pending" if cost is None else f"{cost:.6f}"
+        cost_text = format_cost_usd(cost)
         tokens = agentic.get("token_usage", {}).get("total_token_count", 0)
         lines.append(
             f"| {_markdown_cell(run['ticker'])} | {run['status']} | "
@@ -351,7 +374,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Completed analyses: {summary.get('agentic_run_count', 0)}",
             f"- End-to-end latency p50/p95: {latency.get('p50')} / {latency.get('p95')} ms",
             f"- Total estimated cost: {cost.get('total', 0.0):.6f} USD "
-            f"({cost.get('pending_run_count', 0)} pending)",
+            f"({cost.get('pending_run_count', 0)} unpriced)",
             f"- Total token usage: {_markdown_cell(json.dumps(summary.get('token_usage', {}), sort_keys=True))}",
         ]
     )

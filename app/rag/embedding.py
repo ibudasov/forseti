@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import List, Protocol
 
 from app.settings import get_settings
@@ -12,6 +13,23 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 20
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
+
+
+@dataclass
+class EmbeddingUsage:
+    """Cumulative billable input characters sent to one embedding model."""
+
+    model: str
+    characters: int = 0
+
+    def record(self, texts: List[str]) -> None:
+        self.characters += sum(len(text) for text in texts)
+
+
+def embedding_usage_of(client: object) -> EmbeddingUsage | None:
+    """Return the client's usage counter, or None when it does not track usage."""
+    usage = getattr(client, "usage", None)
+    return usage if isinstance(usage, EmbeddingUsage) else None
 
 
 class EmbeddingClient(Protocol):
@@ -32,6 +50,7 @@ class VertexAIEmbeddingClient:
         aiplatform.init(project=project, location=location)
         self._model = TextEmbeddingModel.from_pretrained(model)
         self._dimension = dimension
+        self.usage = EmbeddingUsage(model=model)
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         results: List[List[float]] = []
@@ -44,6 +63,7 @@ class VertexAIEmbeddingClient:
         for attempt in range(_MAX_RETRIES):
             try:
                 embeddings = self._model.get_embeddings(batch)
+                self.usage.record(batch)
                 return [e.values for e in embeddings]
             except Exception as exc:
                 if attempt == _MAX_RETRIES - 1:
@@ -55,7 +75,7 @@ class VertexAIEmbeddingClient:
 
 
 class MockEmbeddingClient:
-    """Deterministic mock for unit tests — returns fixed-length zero vectors."""
+    """Deterministic mock for unit tests — returns fixed-length zero vectors; never billed."""
 
     def __init__(self, dimension: int = 768) -> None:
         self._dimension = dimension
