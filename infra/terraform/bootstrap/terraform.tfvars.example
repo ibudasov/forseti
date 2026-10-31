@@ -1,5 +1,5 @@
 project_id         = "forseti-505116"
 region             = "europe-west4"
-owner_email        = "REPLACE_WITH_OWNER_EMAIL"
-billing_account_id = "REPLACE_WITH_BILLING_ACCOUNT_ID"
+owner_email        = "igor.budasov@gmail.com"
+billing_account_id = "0126E9-D4E6FC-7FEA2F"
 monthly_budget_eur = 30
