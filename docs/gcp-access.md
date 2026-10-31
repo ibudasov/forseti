@@ -57,6 +57,8 @@ both layers, this generated documentation, and future live IAM verification
 | secret | forseti-database-url | forseti-jobs | secretmanager.secretAccessor |
 | secret | forseti-alpha-vantage-api-key | forseti-api | secretmanager.secretAccessor |
 | secret | forseti-alpha-vantage-api-key | forseti-jobs | secretmanager.secretAccessor |
+| secret | forseti-owner-database-url | forseti-housekeeping | secretmanager.secretAccessor |
+| secret | forseti-app-db-password | forseti-housekeeping | secretmanager.secretAccessor |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,
@@ -73,9 +75,9 @@ targets and workflow impersonation all originate in that manifest.
 Only `exclude_state_bucket` is supported for conditional project grants.
 Remove grants through the same review/bootstrap process to revoke access.
 
-Database roles and owner-secret isolation belong to GCP-3b; see
-[database operations](database.md). That milestone must add the detailed
-role/runbook section before creating database users or secret grants.
+Database roles and owner-secret isolation: see
+[roles and privileges](database.md#roles-and-privileges). Only `forseti-housekeeping`
+reads the owner secrets, and only `forseti-deployer` and the owner can run the job.
 
 ## Federation and GitHub settings
 

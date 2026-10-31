@@ -7,7 +7,7 @@ from typing import Any, Dict, Sequence, Tuple
 
 import pytest
 
-from scripts.cloud_scorecard import gcp2
+from scripts.cloud_scorecard import gcp2, gcp3b
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -50,6 +50,9 @@ KEYS = ("iam", "service-accounts", "keys", "list")
 PROVIDER = ("iam", "workload-identity-pools", "providers", "describe")
 REPOSITORY = ("artifacts", "repositories", "describe")
 SECRET_POLICY = ("secrets", "get-iam-policy")
+JOBS = ("run", "jobs")
+DEPLOYER = "serviceAccount:forseti-deployer@forseti-test.iam.gserviceaccount.com"
+HOUSEKEEPING = "serviceAccount:forseti-housekeeping@forseti-test.iam.gserviceaccount.com"
 DRIFT = ("repos/example/repo/actions/workflows/infra.yml/runs",)
 
 
@@ -181,6 +184,89 @@ class TestNightlyDrift:
         assert gcp2.check_nightly_drift(drift_environment(recorded)).status is expected
 
 
+def job(service_account: str) -> dict:
+    return {"spec": {"template": {"spec": {"template": {"spec": {"serviceAccountName": service_account}}}}}}
+
+
+def policy(role: str, *members: str) -> dict:
+    return {"bindings": [{"role": role, "members": list(members)}]}
+
+
+class TestHousekeepingJob:
+    def test_passes_when_the_job_runs_as_housekeeping(self):
+        env = environment({JOBS: job("forseti-housekeeping@forseti-test.iam.gserviceaccount.com")})
+
+        assert gcp3b.check_job_identity(env).status is Status.PASS
+
+    def test_fails_when_the_job_runs_as_another_identity(self):
+        env = environment({JOBS: job("forseti-api@forseti-test.iam.gserviceaccount.com")})
+
+        assert gcp3b.check_job_identity(env).status is Status.FAIL
+
+    def test_is_pending_without_the_job(self):
+        assert gcp3b.check_job_identity(environment({JOBS: None})).status is Status.PENDING
+
+    @pytest.mark.parametrize(
+        ("executions", "expected"),
+        [
+            ([{"status": {"conditions": [{"type": "Completed", "status": "True"}]}}], Status.PASS),
+            ([{"status": {"conditions": [{"type": "Completed", "status": "False"}]}}], Status.FAIL),
+            ([{"status": {"conditions": [{"type": "Completed", "status": "Unknown"}]}}], Status.PENDING),
+            ([{"status": {}}], Status.PENDING),
+            ([], Status.PENDING),
+        ],
+    )
+    def test_reflects_the_last_execution(self, executions, expected):
+        env = environment({JOBS: executions})
+
+        assert gcp3b.check_last_execution(env).status is expected
+
+
+class TestOwnerSecretIsolation:
+    def test_passes_when_only_housekeeping_reads_both_secrets(self):
+        env = environment({SECRET_POLICY: policy("roles/secretmanager.secretAccessor", HOUSEKEEPING)})
+
+        assert gcp3b.check_owner_secret_readers(env).status is Status.PASS
+
+    def test_ignores_non_reader_roles(self):
+        recorded = {"bindings": [
+            {"role": "roles/secretmanager.secretAccessor", "members": [HOUSEKEEPING]},
+            {"role": "roles/secretmanager.admin", "members": ["user:owner@example.com"]},
+        ]}
+
+        assert gcp3b.check_owner_secret_readers(environment({SECRET_POLICY: recorded})).status is Status.PASS
+
+    def test_fails_when_another_identity_can_read(self):
+        env = environment({SECRET_POLICY: policy("roles/secretmanager.secretAccessor", HOUSEKEEPING, DEPLOYER)})
+
+        assert gcp3b.check_owner_secret_readers(env).status is Status.FAIL
+
+    def test_is_pending_before_the_secrets_exist(self):
+        assert gcp3b.check_owner_secret_readers(environment({SECRET_POLICY: None})).status is Status.PENDING
+
+
+class TestJobRunners:
+    def test_passes_for_the_deployer_and_the_owner(self):
+        env = environment({JOBS: policy("roles/run.developer", DEPLOYER, "user:owner@example.com")})
+
+        assert gcp3b.check_job_runners(env).status is Status.PASS
+
+    def test_passes_without_job_level_grants(self):
+        assert gcp3b.check_job_runners(environment({JOBS: {}})).status is Status.PASS
+
+    @pytest.mark.parametrize(
+        "member",
+        ["allUsers", HOUSEKEEPING, "serviceAccount:forseti-verifier@forseti-test.iam.gserviceaccount.com"],
+    )
+    def test_fails_for_any_other_member(self, member):
+        env = environment({JOBS: policy("roles/run.invoker", DEPLOYER, member)})
+
+        assert gcp3b.check_job_runners(env).status is Status.FAIL
+
+    def test_is_pending_without_the_job(self):
+        assert gcp3b.check_job_runners(environment({JOBS: None})).status is Status.PENDING
+
+
 class TestRunner:
     def test_paid_checks_are_skipped_unless_requested(self):
         check = Check("paid.example", "Exit criteria", "Paid", Cost.PAID, lambda _: Outcome.passed("ran"))
@@ -227,6 +313,7 @@ class TestMarkdown:
         env = environment({
             SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
             KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
+            JOBS: None,
         }, {("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
             fixture("drift_success")})
         reports = run_checks(ALL_CHECKS, env, include_paid)
@@ -244,7 +331,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 4 · ❌ 1 · ⏳ 6 · ➖ 1" in markdown
+        assert "✅ 4 · ❌ 2 · ⏳ 8 · ➖ 1" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)

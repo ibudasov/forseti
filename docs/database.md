@@ -70,7 +70,10 @@ From the repository root:
 make migrate
 ```
 
-This runs Alembic inside the `app` container and applies migrations to the PostgreSQL service.
+This runs the housekeeping command (`python -m app.jobs.housekeeping`) inside the `app`
+container against the PostgreSQL service. The compose superuser `user` acts as owner and
+`.env` stays unchanged. Run a single step with `make housekeeping step=extensions|migrate|roles|collation`.
+Locally the `roles` step is skipped unless `APP_DB_PASSWORD` is set.
 
 ### Create a new migration
 
@@ -121,9 +124,9 @@ instances with one worker process each and concurrency 4:
 | --- | ---: |
 | API: 2 instances × (3 + 2) | 10 |
 | Refresh job: one process | 5 |
-| Housekeeping (configure smaller pools explicitly) | 2 |
-| Owner `psql` session | 1 |
-| Total | 18 (≤ 20, leaving headroom) |
+| Housekeeping job (`NullPool`, at most 2 at a time) | 2 |
+| Cloud SQL Auth Proxy sessions (`make cloud-db-shell`) | 1 |
+| Total | 18 (≤ 20 of about 25, leaving headroom) |
 
 Additional worker processes, simultaneous jobs, database URLs, or rolling-revision
 overlap add pools. Account for these before raising instance limits or pool sizes.
@@ -135,8 +138,50 @@ postgresql://USER:PASSWORD@/forseti?host=/cloudsql/PROJECT:REGION:INSTANCE
 ```
 
 Percent-encode credentials and inject the URL from Secret Manager. Attach the
-Cloud SQL instance to the Cloud Run service/job so the socket exists. No database
-role, migration, or collation-refresh behavior changes are included here.
+Cloud SQL instance to the Cloud Run service/job so the socket exists.
+
+## Roles and privileges
+
+| Role | Used by | Rights | Why |
+| --- | --- | --- | --- |
+| `forseti_app` | API, daily refresh job, on-demand ops jobs (`forseti-database-url`) | `CONNECT`, `USAGE` on schema `public`, `SELECT/INSERT/UPDATE/DELETE` on all tables, `USAGE/SELECT` on all sequences. No DDL, no `TRUNCATE`. | A bug or misuse of the API must not be able to drop tables or alter the database. |
+| `forseti_owner` | Only the private `forseti-housekeeping` Cloud Run Job (`forseti-owner-database-url`) and the owner's `make cloud-db-shell` | Owner of the schema and database (`cloudsqlsuperuser`). | `CREATE EXTENSION vector`, `ALTER TABLE`, `ALTER DATABASE ... REFRESH COLLATION VERSION` need owner rights. |
+
+The application never runs `ALTER DATABASE`; the per-connection collation listener is gone.
+
+### How the roles are created
+
+`forseti_owner` is the only user created through the Cloud SQL API (Terraform), because
+that is what makes it a `cloudsqlsuperuser` member. `forseti_app` is created **only** by the
+housekeeping `roles` step, never by hand or through the Cloud SQL API (API-created users
+get `cloudsqlsuperuser`). The step runs
+`CREATE ROLE ... LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE` (or `ALTER ROLE` to rotate the
+password) with `APP_DB_PASSWORD`, quoted by the driver and never logged, then grants
+the privileges above and sets `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` so tables created
+by later migrations are covered automatically. Add `TRUNCATE` only if ingestion needs it.
+
+### Housekeeping job
+
+`python -m app.jobs.housekeeping [--step all|extensions|migrate|roles|collation] [--dry-run] [--reindex]`
+runs idempotent steps and logs one `housekeeping_completed` event:
+
+1. `extensions`: `CREATE EXTENSION IF NOT EXISTS vector`.
+2. `migrate`: Alembic `upgrade head`, connecting with `HOUSEKEEPING_DATABASE_URL` (falls back to `DATABASE_URL` locally).
+3. `roles`: the role and grants described above.
+4. `collation`: on a `datcollversion` mismatch, refreshes the version and warns; `--reindex` also runs `REINDEX DATABASE`.
+
+In the cloud it is the Cloud Run Job `forseti-housekeeping`: no URL, no ingress, no scheduler.
+Only `forseti-deployer` (deploy pipeline) and the owner can run it:
+
+```bash
+gcloud run jobs execute forseti-housekeeping --region europe-west4 --wait
+```
+
+### Rotating the `forseti_app` password
+
+1. Bump `credentials_version` in Terraform so new secret versions are written (`*_wo_version`).
+2. Run the housekeeping job (the `roles` step applies the new password).
+3. Redeploy the API and jobs so they read the new `forseti-database-url` version.
 
 Use `/livez` for startup/liveness: it performs no database I/O. `/healthz` checks
 the shared pool with `SELECT 1`; in cloud mode its only fields are `app: ok` and

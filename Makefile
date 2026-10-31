@@ -5,7 +5,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose reports-dir preflight-dir help migrate migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
+.PHONY: lock check-compose reports-dir preflight-dir help migrate housekeeping migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -15,7 +15,8 @@ check-compose:
 
 help:
 	@echo "Available targets:"
-	@echo "  make migrate          # Run Alembic migrations to head"
+	@echo "  make migrate          # Run all housekeeping steps (extensions, migrations, roles, collation)"
+	@echo "  make housekeeping [step=extensions|migrate|roles|collation] # Run one housekeeping step"
 	@echo "  make migration name=...  # Generate a new Alembic revision"
 	@echo "  make db-shell         # Open psql against the Postgres service"
 	@echo "  make test             # Run pytest inside the app container"
@@ -70,7 +71,10 @@ help:
 	@echo "  make scorecard-baseline  # Rewrite docs/scorecard-baseline.json (explicit, reviewable diff)"
 
 migrate: check-compose
-	$(DOCKER_COMPOSE) run --rm --build app python -m alembic upgrade head
+	$(DOCKER_COMPOSE) run --rm --build app python -m app.jobs.housekeeping
+
+housekeeping: check-compose
+	$(DOCKER_COMPOSE) run --rm --build app python -m app.jobs.housekeeping --step $(or $(step),all)
 
 migration: check-compose
 ifeq ($(strip $(name)),)

@@ -26,6 +26,12 @@ class Settings(BaseSettings):
         default="postgresql://user:password@postgresql:5432/forseti",
         validation_alias="DATABASE_URL",
     )
+    HOUSEKEEPING_DATABASE_URL: Optional[str] = Field(
+        default=None,
+        validation_alias="HOUSEKEEPING_DATABASE_URL",
+    )
+    APP_DB_ROLE: str = Field(default="forseti_app", validation_alias="APP_DB_ROLE")
+    APP_DB_PASSWORD: Optional[str] = Field(default=None, validation_alias="APP_DB_PASSWORD")
     POSTGRES_USER: str = Field(default="user", validation_alias="POSTGRES_USER")
     POSTGRES_PASSWORD: str = Field(default="password", validation_alias="POSTGRES_PASSWORD")
     POSTGRES_DB: str = Field(default="forseti", validation_alias="POSTGRES_DB")
