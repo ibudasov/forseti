@@ -1,10 +1,11 @@
 locals {
   federated_accounts = { for name, account in local.accounts : name => account if account.workflow != null }
+  subject_prefix     = "repo:${split("/", var.github_repository)[0]}@${var.github_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repository_id}"
   workflow_conditions = {
     for name, account in local.federated_accounts : name => join(" && ", [
       "assertion.workflow_ref == '${var.github_repository}/.github/workflows/${account.workflow.file}@refs/heads/main'",
       "assertion.ref == 'refs/heads/main'",
-      "assertion.sub == 'repo:${var.github_repository}:${account.workflow.environment == null ? "ref:refs/heads/main" : "environment:${account.workflow.environment}"}'",
+      "assertion.sub == '${local.subject_prefix}:${account.workflow.environment == null ? "ref:refs/heads/main" : "environment:${account.workflow.environment}"}'",
       "assertion.event_name in ${jsonencode(account.workflow.events)}",
     ])
   }

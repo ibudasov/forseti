@@ -36,6 +36,19 @@ run "foundation_plan" {
   }
   assert {
     condition = alltrue([
+      for name, subject in {
+        forseti-tf-apply = "repo:ibudasov@3657892/forseti@1323914036:environment:gcp-infra"
+        forseti-deployer = "repo:ibudasov@3657892/forseti@1323914036:environment:gcp-dev"
+        forseti-tf-plan  = "repo:ibudasov@3657892/forseti@1323914036:ref:refs/heads/main"
+        forseti-verifier = "repo:ibudasov@3657892/forseti@1323914036:ref:refs/heads/main"
+      } :
+      strcontains(local.workflow_conditions[name], "assertion.sub == '${subject}'") &&
+      strcontains(google_iam_workload_identity_pool_provider.github.attribute_mapping["attribute.pipeline"], local.workflow_conditions[name])
+    ])
+    error_message = "Federation must match immutable GitHub subjects for both environment and branch workflows."
+  }
+  assert {
+    condition = alltrue([
       for grant in google_project_iam_member.storage_except_state :
       strcontains(grant.condition[0].expression, "!resource.name.startsWith('projects/_/buckets/forseti-505116-tfstate')")
     ])
