@@ -1,0 +1,19 @@
+{
+  "service_accounts": {
+    "forseti-api": {
+      "project_roles": ["cloudsql.client", "logging.logWriter"],
+      "act_as": [],
+      "workflow": null
+    },
+    "forseti-tf-apply": {
+      "project_roles": ["run.admin"],
+      "conditional_project_roles": [{"role": "storage.admin", "condition": "exclude_state_bucket"}],
+      "act_as": ["forseti-api"],
+      "workflow": null
+    }
+  },
+  "resource_grants": [
+    {"kind": "secret", "resource": "forseti-database-url", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-database-url", "member": "owner", "role": "secretmanager.admin"}
+  ]
+}

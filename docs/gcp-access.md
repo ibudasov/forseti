@@ -204,6 +204,41 @@ No plan artifacts are uploaded. The nightly drift check fails on any
 non-empty plan; inspect its run summary and open a corrective PR rather
 than changing the console by hand.
 
+## Scorecard and ops commands
+
+Agents hold no cloud credentials, so `.github/workflows/ops.yml` checks the
+cloud for them. It authenticates as `forseti-verifier` (read-only; no secret
+values or table data) and edits **one** comment on issue #121, found by the
+hidden marker `<!-- forseti-scorecard -->`. The same Markdown goes to the job
+summary. Everything is redacted first: no URLs, emails, project numbers or
+long identifiers are printed or posted, because the repository is public.
+
+| Trigger | What it does | Who | Cost |
+|---|---|---|---|
+| nightly schedule, after the Deploy workflow, `workflow_dispatch` | free checks | automatic / owner | none |
+| `/verify` comment on #121 | free checks | repository owner only | none |
+| `/verify full` comment on #121 | free and `paid` checks (demo and trust, #129) | repository owner only | a few cents per run |
+
+Comments must match exactly; other authors and other issues are ignored (the
+job is skipped). The runner reacts 👀 on the command, then 🚀 on success or
+😕 on failure. Statuses: ✅ pass, ❌ exists but is wrong, ⏳ resource not
+created yet (milestone not started), ➖ skipped (paid check on `/verify`).
+
+Checks live in `scripts/cloud_scorecard/` (not `scripts/scorecard/`, which is
+the product scorecard in `scripts/scorecard.py`). Each has an id, group, cost
+flag and a function returning a status plus a short detail. Unit tests replay
+recorded `gcloud` JSON from `tests/fixtures/cloud_scorecard/`. A new cloud
+resource ships its checks, its group's `later_groups.py` placeholder is
+replaced, and its grants are added to `identities.json` (the verifier needs
+`run.invoker` on resources it calls).
+
+Agents read the scorecard comment instead of running `gcloud`. An assistant
+acting with the owner's GitHub account can post `/verify`. Tick a Validation
+box only with a link to evidence: a CI run, a PR plan comment or the scorecard.
+
+Changing the workflow events in `identities.json` requires the owner to run
+`make tf-bootstrap` so the federation condition admits them.
+
 ## Live acceptance checklist (owner only)
 
 Offline checks cannot establish any of the following. Record actual observed

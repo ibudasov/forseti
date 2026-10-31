@@ -1,0 +1,8 @@
+{
+  "name": "projects/forseti-test/locations/europe-west4/repositories/forseti",
+  "format": "DOCKER",
+  "cleanupPolicies": {
+    "delete-old-untagged": {"action": "DELETE", "condition": {"olderThan": "604800s", "tagState": "UNTAGGED"}},
+    "keep-recent": {"action": "KEEP", "mostRecentVersions": {"keepCount": 10}}
+  }
+}

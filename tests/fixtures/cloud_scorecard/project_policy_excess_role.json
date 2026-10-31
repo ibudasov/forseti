@@ -1,0 +1,11 @@
+{
+  "bindings": [
+    {"role": "roles/cloudsql.client", "members": ["serviceAccount:forseti-api@forseti-test.iam.gserviceaccount.com"]},
+    {"role": "roles/logging.logWriter", "members": ["serviceAccount:forseti-api@forseti-test.iam.gserviceaccount.com"]},
+    {"role": "roles/editor", "members": ["serviceAccount:forseti-api@forseti-test.iam.gserviceaccount.com"]},
+    {"role": "roles/run.admin", "members": ["serviceAccount:forseti-tf-apply@forseti-test.iam.gserviceaccount.com"]},
+    {"role": "roles/storage.admin", "members": ["serviceAccount:forseti-tf-apply@forseti-test.iam.gserviceaccount.com"],
+     "condition": {"title": "exclude_state_bucket", "expression": "resource.name != 'projects/_/buckets/state'"}}
+  ],
+  "version": 3
+}

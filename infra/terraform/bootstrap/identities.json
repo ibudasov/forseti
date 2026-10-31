@@ -47,7 +47,7 @@
       "purpose": "Read-only live operational verification; no secret values or table data",
       "project_roles": ["run.viewer", "cloudsql.viewer", "secretmanager.viewer", "iam.securityReviewer", "iam.workloadIdentityPoolViewer", "logging.viewer", "monitoring.viewer", "cloudtrace.user", "cloudscheduler.viewer", "artifactregistry.reader"],
       "act_as": [],
-      "workflow": {"file": "ops.yml", "environment": null, "events": ["workflow_dispatch", "schedule", "push"]}
+      "workflow": {"file": "ops.yml", "environment": null, "events": ["workflow_dispatch", "schedule", "workflow_run", "issue_comment"]}
     }
   },
   "state_owner_role": "storage.admin",
