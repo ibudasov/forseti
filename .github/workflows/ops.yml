@@ -1,0 +1,88 @@
+name: Ops
+
+on:
+  schedule:
+    - cron: '37 5 * * *'
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the paid checks
+        type: boolean
+        default: false
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ops
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    name: Cloud scorecard
+    # Comment commands are owner-only and exact. The comment body is only compared here, never passed to a shell.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.number == 121 &&
+      github.event.comment.author_association == 'OWNER' &&
+      (github.event.comment.body == '/verify' || github.event.comment.body == '/verify full'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SCORECARD_ISSUE: '121'
+      COMMENT_ID: ${{ github.event.comment.id }}
+      RUN_PAID_CHECKS: ${{ (github.event_name == 'workflow_dispatch' && inputs.full) || (github.event_name == 'issue_comment' && github.event.comment.body == '/verify full') }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+      GITHUB_REPOSITORY_OWNER_ID: ${{ github.repository_owner_id }}
+      CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
+    steps:
+      - name: Acknowledge the command
+        if: github.event_name == 'issue_comment'
+        run: gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes > /dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_VERIFIER_SA }}
+      - name: Run checks
+        run: |
+          full=()
+          if [ "$RUN_PAID_CHECKS" = true ]; then full=(--full); fi
+          python3 -m scripts.cloud_scorecard "${full[@]}" > scorecard.md
+      - name: Publish the scorecard
+        run: |
+          cat scorecard.md >> "$GITHUB_STEP_SUMMARY"
+          { echo '<!-- forseti-scorecard -->'; cat scorecard.md; } > comment.md
+          ids=$(gh api --paginate "repos/$GH_REPO/issues/$SCORECARD_ISSUE/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- forseti-scorecard -->"))) | .id')
+          existing=${ids%%$'\n'*}
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" -F body=@comment.md > /dev/null
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$SCORECARD_ISSUE/comments" -F body=@comment.md > /dev/null
+          fi
+      - name: Report the outcome on the command
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          reaction=confused
+          if [ "$JOB_STATUS" = success ]; then reaction=rocket; fi
+          gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content="$reaction" > /dev/null
+      - name: Remove runner-local captures
+        if: always()
+        run: rm -f scorecard.md comment.md

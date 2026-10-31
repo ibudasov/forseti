@@ -12,6 +12,7 @@ on:
       - 'Makefile'
       - 'docker-compose.yml'
       - '.github/workflows/infra.yml'
+      - '.github/workflows/ops.yml'
   push:
     branches: [main]
     paths:
@@ -21,6 +22,7 @@ on:
       - 'scripts/iam_doc.py'
       - 'docs/gcp-access.md'
       - '.github/workflows/infra.yml'
+      - '.github/workflows/ops.yml'
   workflow_dispatch:
     inputs:
       operation:

@@ -1,0 +1,290 @@
+"""Offline tests for the live cloud scorecard, driven by recorded gcloud JSON."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, Sequence, Tuple
+
+import pytest
+
+from scripts.cloud_scorecard import gcp2
+from scripts.cloud_scorecard.environment import CloudQueryError, Environment
+from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
+from scripts.cloud_scorecard.redaction import redact
+from scripts.cloud_scorecard.registry import ALL_CHECKS, GROUPS, run_check, run_checks
+from scripts.cloud_scorecard.render import render_markdown
+from scripts.cloud_scorecard.__main__ import current_revision
+
+FIXTURES = Path(__file__).parent / "fixtures" / "cloud_scorecard"
+PROJECT = "forseti-test"
+
+
+def fixture(name: str) -> Any:
+    return json.loads((FIXTURES / f"{name}.json").read_text())
+
+
+class RecordedQueries:
+    """Answers queries by argument prefix; an unrecorded query fails the test."""
+
+    def __init__(self, routes: Dict[Tuple[str, ...], Any]) -> None:
+        self.routes = routes
+
+    def __call__(self, arguments: Sequence[str]) -> Any:
+        for prefix, response in self.routes.items():
+            if tuple(arguments[: len(prefix)]) == prefix:
+                return response
+        raise AssertionError(f"unrecorded query: {list(arguments)}")
+
+
+def environment(gcloud: Dict[Tuple[str, ...], Any], github: Dict[Tuple[str, ...], Any] | None = None) -> Environment:
+    return Environment(
+        project=PROJECT, region="europe-west4", repository="example/repo",
+        repository_id="111", owner_id="222", manifest=fixture("manifest"),
+        gcloud=RecordedQueries(gcloud), github=RecordedQueries(github or {}),
+    )
+
+
+SERVICE_ACCOUNTS = ("iam", "service-accounts", "list")
+PROJECT_POLICY = ("projects", "get-iam-policy")
+KEYS = ("iam", "service-accounts", "keys", "list")
+PROVIDER = ("iam", "workload-identity-pools", "providers", "describe")
+REPOSITORY = ("artifacts", "repositories", "describe")
+SECRET_POLICY = ("secrets", "get-iam-policy")
+DRIFT = ("repos/example/repo/actions/workflows/infra.yml/runs",)
+
+
+def drift_environment(name: str) -> Environment:
+    path = "repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1"
+    return environment({}, {(path,): fixture(name)})
+
+
+class TestIdentities:
+    def test_passes_when_roles_match_exactly(self):
+        env = environment({SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy")})
+
+        assert gcp2.check_identities(env).status is Status.PASS
+
+    def test_fails_on_an_extra_role(self):
+        env = environment(
+            {SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy_excess_role")}
+        )
+
+        outcome = gcp2.check_identities(env)
+
+        assert outcome.status is Status.FAIL
+        assert "roles/editor" in outcome.detail
+
+    def test_fails_when_only_some_identities_exist(self):
+        env = environment({SERVICE_ACCOUNTS: fixture("service_accounts")[:1]})
+
+        outcome = gcp2.check_identities(env)
+
+        assert outcome.status is Status.FAIL
+        assert "forseti-tf-apply" in outcome.detail
+
+    def test_is_pending_before_bootstrap(self):
+        env = environment({SERVICE_ACCOUNTS: []})
+
+        assert gcp2.check_identities(env).status is Status.PENDING
+
+    def test_conditional_role_without_condition_fails(self):
+        policy = fixture("project_policy")
+        for binding in policy["bindings"]:
+            binding.pop("condition", None)
+        env = environment({SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: policy})
+
+        assert gcp2.check_identities(env).status is Status.FAIL
+
+
+class TestResourceGrants:
+    def test_passes_and_ignores_owner_members(self):
+        env = environment({SECRET_POLICY: fixture("secret_policy")})
+
+        assert gcp2.check_resource_grants(env).status is Status.PASS
+
+    def test_fails_on_an_undeclared_identity_grant(self):
+        env = environment({SECRET_POLICY: fixture("secret_policy_extra_reader")})
+
+        assert gcp2.check_resource_grants(env).status is Status.FAIL
+
+    def test_is_pending_when_the_resource_does_not_exist(self):
+        env = environment({SECRET_POLICY: None})
+
+        assert gcp2.check_resource_grants(env).status is Status.PENDING
+
+
+class TestServiceAccountKeys:
+    def test_passes_without_user_managed_keys(self):
+        env = environment({SERVICE_ACCOUNTS: fixture("service_accounts"), KEYS: []})
+
+        assert gcp2.check_no_service_account_keys(env).status is Status.PASS
+
+    def test_fails_and_names_the_account_with_a_key(self):
+        env = environment({SERVICE_ACCOUNTS: fixture("service_accounts"), KEYS: fixture("user_managed_keys")})
+
+        outcome = gcp2.check_no_service_account_keys(env)
+
+        assert outcome.status is Status.FAIL
+        assert "forseti-api" in outcome.detail
+
+    def test_is_pending_without_service_accounts(self):
+        env = environment({SERVICE_ACCOUNTS: []})
+
+        assert gcp2.check_no_service_account_keys(env).status is Status.PENDING
+
+
+class TestFederationCondition:
+    def test_passes_when_both_ids_are_pinned(self):
+        env = environment({PROVIDER: fixture("provider")})
+
+        assert gcp2.check_federation_condition(env).status is Status.PASS
+
+    def test_fails_when_the_repository_is_not_pinned(self):
+        env = environment({PROVIDER: fixture("provider_loose")})
+
+        assert gcp2.check_federation_condition(env).status is Status.FAIL
+
+    def test_is_pending_without_provider(self):
+        env = environment({PROVIDER: None})
+
+        assert gcp2.check_federation_condition(env).status is Status.PENDING
+
+
+class TestArtifactRegistry:
+    def test_passes_with_enforced_cleanup_policies(self):
+        env = environment({REPOSITORY: fixture("artifact_repository")})
+
+        assert gcp2.check_artifact_registry(env).status is Status.PASS
+
+    def test_fails_in_dry_run_mode(self):
+        env = environment({REPOSITORY: fixture("artifact_repository_dry_run")})
+
+        assert gcp2.check_artifact_registry(env).status is Status.FAIL
+
+    def test_fails_without_cleanup_policies(self):
+        env = environment({REPOSITORY: {"format": "DOCKER"}})
+
+        assert gcp2.check_artifact_registry(env).status is Status.FAIL
+
+    def test_is_pending_without_repository(self):
+        env = environment({REPOSITORY: None})
+
+        assert gcp2.check_artifact_registry(env).status is Status.PENDING
+
+
+class TestNightlyDrift:
+    @pytest.mark.parametrize(
+        ("recorded", "expected"),
+        [("drift_success", Status.PASS), ("drift_failure", Status.FAIL), ("drift_none", Status.PENDING)],
+    )
+    def test_reflects_latest_nightly_run(self, recorded, expected):
+        assert gcp2.check_nightly_drift(drift_environment(recorded)).status is expected
+
+
+class TestRunner:
+    def test_paid_checks_are_skipped_unless_requested(self):
+        check = Check("paid.example", "Exit criteria", "Paid", Cost.PAID, lambda _: Outcome.passed("ran"))
+
+        assert run_check(check, environment({}), include_paid=False).outcome.status is Status.SKIP
+        assert run_check(check, environment({}), include_paid=True).outcome.status is Status.PASS
+
+    def test_query_errors_become_failures_without_raw_output(self):
+        def denied(_):
+            raise CloudQueryError("gcloud access denied")
+
+        check = Check("free.example", "GCP-2", "Denied", Cost.FREE, denied)
+
+        outcome = run_check(check, environment({}), include_paid=False).outcome
+
+        assert (outcome.status, outcome.detail) == (Status.FAIL, "gcloud access denied")
+
+    def test_a_crashing_check_reports_only_its_type(self):
+        def crash(_):
+            raise KeyError("secret-looking-value")
+
+        check = Check("free.crash", "GCP-2", "Crash", Cost.FREE, crash)
+
+        outcome = run_check(check, environment({}), include_paid=False).outcome
+
+        assert outcome.status is Status.FAIL
+        assert "secret-looking-value" not in outcome.detail
+
+    def test_every_check_belongs_to_a_known_group(self):
+        assert {check.group for check in ALL_CHECKS} <= set(GROUPS)
+        assert set(GROUPS) == {check.group for check in ALL_CHECKS}
+
+    def test_current_revision_reads_latest_ready_revision(self):
+        env = environment({("run", "services", "describe"): fixture("cloud_run_service")})
+
+        assert current_revision(env) == "forseti-api-00012-abc"
+
+    def test_current_revision_before_deployment(self):
+        assert current_revision(environment({("run", "services", "describe"): None})) == "none yet"
+
+
+class TestMarkdown:
+    def render(self, include_paid: bool = False) -> str:
+        env = environment({
+            SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
+            KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
+        }, {("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
+            fixture("drift_success")})
+        reports = run_checks(ALL_CHECKS, env, include_paid)
+        return render_markdown(reports, GROUPS, "abc1234", "forseti-api-00012-abc")
+
+    def test_shows_one_table_per_group_with_all_four_statuses(self):
+        markdown = self.render()
+
+        for group in GROUPS:
+            assert f"### {group}" in markdown
+        for status in Status:
+            assert status.value in markdown
+
+    def test_reports_commit_revision_and_totals(self):
+        markdown = self.render()
+
+        assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
+        assert "✅ 4 · ❌ 1 · ⏳ 6 · ➖ 1" in markdown
+
+    def test_full_run_includes_paid_checks(self):
+        assert "➖ 0" in self.render(include_paid=True)
+
+    def test_escapes_table_separators_in_details(self):
+        check = Check("free.pipe", "GCP-2", "Pipes", Cost.FREE, lambda _: Outcome.failed("a | b\nc"))
+        reports = run_checks([check], environment({}), include_paid=False)
+
+        assert "a \\| b c" in render_markdown(reports, ["GCP-2"], "abc1234", "none yet")
+
+
+class TestRedaction:
+    @pytest.mark.parametrize(
+        ("sensitive", "leaked"),
+        [
+            ("see https://forseti-api-abc123-ew.a.run.app/docs now", "run.app"),
+            ("owner someone@example.com failed", "someone@example.com"),
+            ("forseti-api@forseti-test.iam.gserviceaccount.com", "iam.gserviceaccount.com"),
+            ("projects/123456789012/locations/global", "123456789012"),
+            ("unique id 104857612345678901234", "104857612345678901234"),
+            ("key 0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"),
+            ("gs://bucket-name/object", "gs://"),
+        ],
+    )
+    def test_removes_sensitive_values(self, sensitive, leaked):
+        assert leaked not in redact(sensitive)
+
+    def test_keeps_ordinary_scorecard_text(self):
+        text = "Commit `abc1234` · `gcp2.identities` missing ['roles/editor']"
+
+        assert redact(text) == text
+
+    def test_rendered_scorecard_from_sensitive_fixtures_is_clean(self):
+        check = Check(
+            "free.leak", "GCP-2", "Leaky", Cost.FREE,
+            lambda _: Outcome.failed("https://example.com a@b.co projects/123456789012 104857612345678901234"),
+        )
+        reports = run_checks([check], environment({}), include_paid=False)
+
+        scrubbed = redact(render_markdown(reports, ["GCP-2"], "abc1234", "none yet"))
+
+        for leaked in ("https://", "a@b.co", "123456789012", "104857612345678901234"):
+            assert leaked not in scrubbed
