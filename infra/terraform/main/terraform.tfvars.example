@@ -1,0 +1,3 @@
+project_id  = "forseti-505116"
+region      = "europe-west4"
+owner_email = "REPLACE_WITH_OWNER_EMAIL"

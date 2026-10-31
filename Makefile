@@ -50,7 +50,16 @@ help:
 	@echo "  make trust-consistency CONFIRM_COST=yes [REPEAT=5] # Run repeated live trust matrix consistency checks"
 	@echo "  make live-preflight CONFIRM_COST=yes [TICKERS=NVDA,AMD] # Run a live linear/agentic pre-flight"
 	@echo "  make gcloud-login    # Sign in to gcloud and create application-default credentials"
-	@echo "  make cloud-logout    # Revoke gcloud and application-default credentials"
+	@echo "  make cloud-logout    # Revoke Google and stored GitHub credentials"
+	@echo "  make gh-login        # Sign in as the GitHub owner for Terraform bootstrap"
+	@echo "  make tf-bootstrap    # Owner-only identity/bootstrap apply and remote-state migration"
+	@echo "  make tf-fmt          # Format Terraform configuration"
+	@echo "  make tf-validate dir=bootstrap|main # Validate Terraform without cloud access"
+	@echo "  make tf-init dir=bootstrap|main # Initialize Terraform"
+	@echo "  make tf-plan dir=bootstrap|main # Plan Terraform; workloads apply only in CI"
+	@echo "  make infra-check     # Offline Terraform, workflow, policy and IAM documentation checks"
+	@echo "  make test-infra      # Offline owner-tooling and policy regression tests"
+	@echo "  make iam-doc         # Regenerate access tables from identities.json"
 	@echo "  make adk-web          # Open the ADK dev UI on :8010 (needs Vertex credentials)"
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
@@ -98,6 +107,8 @@ test: check-compose
 		-e DEBUG_LLM_IO=false \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/infra:/app/infra:ro" \
+		-v "$$PWD/docs:/app/docs:ro" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70 \
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
@@ -319,11 +330,16 @@ cloud-logout:
 	else \
 		echo "No application-default credentials to revoke"; \
 	fi
-	@active_accounts="$$(gcloud auth list --filter=status:ACTIVE --format='value(account)')"; \
+	@active_accounts="$$(gcloud auth list --format='value(account)')"; \
 	if [ -n "$$active_accounts" ]; then \
 		gcloud auth revoke --all --quiet; \
 	else \
 		echo "No gcloud accounts to revoke"; \
+	fi
+	@if command -v gh >/dev/null 2>&1 && env -u GITHUB_TOKEN -u GH_TOKEN gh auth status --hostname github.com >/dev/null 2>&1; then \
+		env -u GITHUB_TOKEN -u GH_TOKEN gh auth logout --hostname github.com; \
+	else \
+		echo "No stored GitHub login to revoke"; \
 	fi
 
 critic-shadow-report: check-compose reports-dir
@@ -434,11 +450,15 @@ down: check-compose
 lint: check-compose
 	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
 	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/scripts:/app/scripts" app python -m flake8 scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py --max-complexity=10 --max-line-length=127
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
 		-v "$$PWD/pyproject.toml:/app/pyproject.toml:ro" \
 		app python -m mypy --explicit-package-bases --follow-imports=skip app agents
+	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools python -m mypy \
+		--explicit-package-bases --follow-imports=skip \
+		scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py
 
 check: lint typecheck
 
@@ -473,3 +493,32 @@ scorecard-baseline: check-compose
 		app python -m scripts.scorecard \
 			--fixture tests/fixtures/scorecard/universe.json \
 			--json > docs/scorecard-baseline.json
+
+.PHONY: gh-login tf-fmt tf-validate tf-init tf-plan tf-bootstrap iam-doc infra-check test-infra
+
+gh-login:
+	env -u GITHUB_TOKEN -u GH_TOKEN GH_PROMPT_DISABLED=1 gh auth login --hostname github.com --web --scopes repo
+
+tf-fmt tf-validate tf-init tf-plan:
+	@python3 scripts/terraform_cli.py $(patsubst tf-%,%,$@) --dir "$(if $(dir),$(dir),main)"
+
+tf-bootstrap:
+	@python3 scripts/terraform_cli.py bootstrap
+
+iam-doc: check-compose
+	$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) infra-tools python -m scripts.iam_doc
+
+infra-check: check-compose
+	$(DOCKER_COMPOSE) run --rm --no-deps actionlint .github/workflows/infra.yml
+	$(DOCKER_COMPOSE) run --rm --no-deps terraform fmt -check -recursive
+	@for layer in bootstrap main; do \
+		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer init -backend=false -lockfile=readonly && \
+		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer validate && \
+		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer test && \
+		$(DOCKER_COMPOSE) run --rm --no-deps tflint --chdir=$$layer --config=/workspace/infra/terraform/.tflint.hcl || exit $$?; \
+	done
+	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools sh -c \
+		'python -m scripts.check_terraform_policy && python -m scripts.iam_doc --check'
+
+test-infra: check-compose
+	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools python -m pytest tests/test_terraform.py -q
