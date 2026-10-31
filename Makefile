@@ -521,11 +521,11 @@ iam-doc: check-compose
 
 infra-check: check-compose
 	$(DOCKER_COMPOSE) run --rm --no-deps actionlint .github/workflows/infra.yml
-	$(DOCKER_COMPOSE) run --rm --no-deps terraform fmt -check -recursive
+	$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform fmt -check -recursive
 	@for layer in bootstrap main; do \
-		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer init -backend=false -lockfile=readonly && \
-		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer validate && \
-		$(DOCKER_COMPOSE) run --rm --no-deps terraform -chdir=$$layer test && \
+		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer init -backend=false -lockfile=readonly && \
+		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer validate && \
+		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer test && \
 		$(DOCKER_COMPOSE) run --rm --no-deps tflint --chdir=$$layer --config=/workspace/infra/terraform/.tflint.hcl || exit $$?; \
 	done
 	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools sh -c \
