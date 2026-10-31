@@ -18,12 +18,22 @@ run "workload_plan" {
   }
   assert {
     condition = (
-      length(google_secret_manager_secret_iam_member.grants) == 4 &&
+      length(google_secret_manager_secret_iam_member.grants) == 6 &&
       length(google_cloud_run_v2_service_iam_member.grants) == 0 &&
       length(google_cloud_run_v2_job_iam_member.grants) == 0 &&
       length(google_storage_bucket_iam_member.grants) == 0
     )
     error_message = "Only the declared per-secret accessors may exist; later milestones add the rest."
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_job.housekeeping.name == "forseti-housekeeping" &&
+      google_cloud_run_v2_job.housekeeping.template[0].task_count == 1 &&
+      google_cloud_run_v2_job.housekeeping.template[0].template[0].max_retries == 0 &&
+      google_cloud_run_v2_job.housekeeping.template[0].template[0].timeout == "900s" &&
+      startswith(google_cloud_run_v2_job.housekeeping.template[0].template[0].service_account, "forseti-housekeeping@")
+    )
+    error_message = "The housekeeping job must run as forseti-housekeeping with one task, no retries and a 900 s timeout."
   }
   assert {
     condition = (

@@ -18,10 +18,10 @@ from app.settings import get_settings
 from app.db import models  # noqa: F401
 
 config = context.config
-fileConfig(config.config_file_name)
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 settings = get_settings()
-database_url = normalize_database_url(settings.DATABASE_URL)
+database_url = normalize_database_url(config.attributes.get("database_url") or settings.DATABASE_URL)
 config.set_main_option(
     "sqlalchemy.url",
     database_url.render_as_string(hide_password=False).replace("%", "%%"),

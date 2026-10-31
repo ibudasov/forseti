@@ -6,7 +6,6 @@ from scripts.cloud_scorecard.model import Check, Cost, Outcome
 
 PLANNED = (
     ("GCP-3", "database", "#125", Cost.FREE),
-    ("GCP-3b", "database roles and owner-secret isolation", "#132", Cost.FREE),
     ("GCP-4", "API deployment", "#126", Cost.FREE),
     ("GCP-5", "refresh job and reports bucket", "#127", Cost.FREE),
     ("GCP-6", "observability", "#128", Cost.FREE),

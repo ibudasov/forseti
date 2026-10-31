@@ -60,6 +60,8 @@
     {"kind": "secret", "resource": "forseti-database-url", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
     {"kind": "secret", "resource": "forseti-database-url", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"},
     {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
-    {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"}
+    {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-owner-database-url", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-app-db-password", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"}
   ]
 }

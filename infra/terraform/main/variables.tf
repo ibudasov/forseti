@@ -18,3 +18,9 @@ variable "credentials_version" {
   type        = number
   default     = 1
 }
+
+variable "housekeeping_bootstrap_image" {
+  description = "Placeholder image for the first creation of the housekeeping job; CD replaces it with the API image."
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/job:latest"
+}
