@@ -54,6 +54,20 @@ services:
     volumes:
       - .:/workspace
 
+  cloudsql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.15.2
+    profiles: ["tools"]
+    network_mode: host
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/adc.json:ro
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /adc.json
+
+  cloud-psql:
+    image: pgvector/pgvector:pg15
+    profiles: ["tools"]
+    network_mode: host
+
   actionlint:
     image: rhysd/actionlint:1.7.12
     profiles: ["tools"]

@@ -143,3 +143,71 @@ the shared pool with `SELECT 1`; in cloud mode its only fields are `app: ok` and
 `db: ok|unreachable`. Failures are logged server-side; local mode retains connection
 diagnostics. The response remains HTTP 200 for compatibility, so readiness monitors
 must inspect `db`. Liveness must not depend on database availability.
+
+## Cloud SQL
+
+Terraform (`infra/terraform/main/sql.tf`, `secrets.tf`) manages the `forseti-pg`
+instance: PostgreSQL 15 (same major version as the local `pgvector/pgvector:pg15`
+image), `ENTERPRISE` edition, `db-f1-micro`, zonal, 10 GB `PD_SSD` with
+autoresize up to 50 GB, daily backups (7 retained), point-in-time recovery off,
+maintenance on Sundays at 03:00 UTC, and deletion protection on.
+
+### Connection model
+
+The instance has a public IP with **no authorized networks** and
+`ssl_mode = ENCRYPTED_ONLY`. It is reachable only through Cloud SQL connectors
+and the Auth Proxy, which authorize through IAM (`roles/cloudsql.client`). No VPC
+or Private Service Access is needed. Cloud Run mounts the unix socket at
+`/cloudsql/<connection_name>`.
+
+Owner access from a workstation (after `make gcloud-login`):
+
+```bash
+make cloudsql-proxy   # terminal 1: proxy on localhost:5433
+make cloud-db-shell   # terminal 2: psql as forseti_owner, password read from Secret Manager
+```
+
+### Roles and secrets
+
+| Role | Created by | Purpose |
+| --- | --- | --- |
+| `forseti_owner` | Terraform (Cloud SQL API, so it joins `cloudsqlsuperuser`) | Owns the schema; used only by housekeeping (GCP-3b) and owner sessions |
+| `forseti_app` | Housekeeping job with SQL (GCP-3b); Terraform does **not** create it | Runtime role with data read/write privileges only |
+
+| Secret | Content | Accessors |
+| --- | --- | --- |
+| `forseti-database-url` | `forseti_app` URL over the unix socket | `forseti-api`, `forseti-jobs` |
+| `forseti-owner-database-url` | `forseti_owner` URL | None until GCP-3b grants `forseti-housekeeping` |
+| `forseti-app-db-password` | `forseti_app` password | None until GCP-3b grants `forseti-housekeeping` |
+| `forseti-alpha-vantage-api-key` | Added by the owner | `forseti-api`, `forseti-jobs` |
+
+Add the Alpha Vantage key once:
+
+```bash
+printf '%s' "$KEY" | gcloud secrets versions add forseti-alpha-vantage-api-key --data-file=-
+```
+
+Passwords are generated with `ephemeral "random_password"` and sent through
+write-only arguments (`password_wo`, `secret_data_wo`), so neither state nor
+plans contain them. Bump `credentials_version` to rotate all of them together
+(housekeeping then re-syncs `forseti_app`). Passwords have no special characters
+and are also `urlencode()`d in the URLs.
+
+### Sizing
+
+`db-f1-micro` allows about 25 connections; the budget above (18, with pool 3 +
+overflow 2 per API instance) keeps usage at or below 20 and leaves headroom for
+Cloud SQL's own connections.
+
+### Backup and restore
+
+```bash
+gcloud sql backups create --instance=forseti-pg
+gcloud sql backups list --instance=forseti-pg
+gcloud sql backups restore BACKUP_ID --restore-instance=forseti-pg
+```
+
+### Cost
+
+About $9–12/month all-in. Shared-core tiers have no SLA; that is acceptable for
+a private dev environment.

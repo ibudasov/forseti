@@ -56,5 +56,10 @@
     {"member": "forseti-tf-plan", "role": "storage.objectViewer", "prefix": "main/"},
     {"member": "forseti-tf-apply", "role": "storage.objectAdmin", "prefix": "main/"}
   ],
-  "resource_grants": []
+  "resource_grants": [
+    {"kind": "secret", "resource": "forseti-database-url", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-database-url", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
+    {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"}
+  ]
 }

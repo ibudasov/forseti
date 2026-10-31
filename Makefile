@@ -5,7 +5,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose reports-dir preflight-dir help migrate migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline
+.PHONY: lock check-compose reports-dir preflight-dir help migrate migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -52,6 +52,8 @@ help:
 	@echo "  make gcloud-login    # Sign in to gcloud and create application-default credentials"
 	@echo "  make cloud-logout    # Revoke Google and stored GitHub credentials"
 	@echo "  make gh-login        # Sign in as the GitHub owner for Terraform bootstrap"
+	@echo "  make cloudsql-proxy  # Run the Cloud SQL Auth Proxy on localhost:5433"
+	@echo "  make cloud-db-shell  # psql as forseti_owner through the running proxy"
 	@echo "  make tf-bootstrap    # Owner-only identity/bootstrap apply and remote-state migration"
 	@echo "  make tf-fmt          # Format Terraform configuration"
 	@echo "  make tf-validate dir=bootstrap|main # Validate Terraform without cloud access"
@@ -493,6 +495,15 @@ scorecard-baseline: check-compose
 		app python -m scripts.scorecard \
 			--fixture tests/fixtures/scorecard/universe.json \
 			--json > docs/scorecard-baseline.json
+
+CLOUD_SQL_INSTANCE ?= forseti-505116:europe-west4:forseti-pg
+
+cloudsql-proxy: check-compose
+	$(DOCKER_COMPOSE) run --rm --no-deps cloudsql-proxy --address 127.0.0.1 --port 5433 $(CLOUD_SQL_INSTANCE)
+
+cloud-db-shell: check-compose
+	@PGPASSWORD="$$(gcloud secrets versions access latest --secret=forseti-owner-database-url --project=forseti-505116 | sed -E 's|^[^:]+://[^:]+:([^@]+)@.*|\1|')" \
+		$(DOCKER_COMPOSE) run --rm --no-deps -e PGPASSWORD cloud-psql psql -h 127.0.0.1 -p 5433 -U forseti_owner -d forseti
 
 .PHONY: gh-login tf-fmt tf-validate tf-init tf-plan tf-bootstrap iam-doc infra-check test-infra
 
