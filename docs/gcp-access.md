@@ -201,8 +201,8 @@ Re-dispatch after every change; a comment is evidence for its recorded SHA,
 not necessarily the current PR head.
 
 Pushes changing workloads on `main`, or a manual `apply`, wait for approval
-in `gcp-infra`, then plan and apply **the same saved plan**. Delete/replacement
-actions are rejected unless a manual apply explicitly sets `allow_destroy`.
+in `gcp-infra`, then plan and apply **the same saved plan**, including plans
+that delete or replace resources.
 Apply concurrency is `terraform-main`, with cancellation disabled.
 Saved plans and error captures remain runner-local and are removed on exit.
 No plan artifacts are uploaded. The nightly drift check fails on any
