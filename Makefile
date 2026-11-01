@@ -5,7 +5,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose reports-dir preflight-dir help migrate housekeeping migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
+.PHONY: lock check-compose reports-dir preflight-dir help migrate housekeeping migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze cloud-proxy cloud-analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -26,6 +26,8 @@ help:
 	@echo "  make ingest-rag       # Run RAG document ingestion (use ticker=SYMBOL for single ticker)"
 	@echo "  make rag-coverage     # Show RAG coverage (use ticker=NVDA [live=1])"
 	@echo "  make analyze          # Analyze one ticker (use ticker=NVDA [mode=agentic|linear])"
+	@echo "  make cloud-proxy      # Proxy the private Cloud Run API to localhost:8080"
+	@echo "  make cloud-analyze    # Analyze one ticker through the Cloud Run proxy (use ticker=NVDA)"
 	@echo "  make fundamental-context # Build one immutable fundamental-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make technical-context # Build one immutable technical-agent context (use ticker=NVDA [as_of=2026-09-08])"
 	@echo "  make critique-context # Build one immutable critique context (use ticker=NVDA [as_of=2026-09-08])"
@@ -165,6 +167,19 @@ analyze: check-compose
 		exit 1; \
 	fi
 	@curl -s -X POST "http://127.0.0.1:8000/analyze?include_trace=true$(if $(mode),&pipeline=$(mode),)" \
+		-H 'content-type: application/json' \
+		-d '{"ticker":"$(ticker)"}' | python3 -m json.tool
+
+cloud-proxy:
+	gcloud run services proxy forseti-api --region europe-west4 --project forseti-505116 --port 8080
+
+cloud-analyze:
+	@if [ -z "$(ticker)" ]; then \
+		echo "Error: ticker is required. Run 'make cloud-analyze ticker=NVDA'"; \
+		exit 1; \
+	fi
+	@curl --silent --show-error --fail \
+		-X POST "http://127.0.0.1:8080/analyze?include_trace=true" \
 		-H 'content-type: application/json' \
 		-d '{"ticker":"$(ticker)"}' | python3 -m json.tool
 
@@ -524,12 +539,12 @@ iam-doc: check-compose
 	$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) infra-tools python -m scripts.iam_doc
 
 infra-check: check-compose
-	$(DOCKER_COMPOSE) run --rm --no-deps actionlint .github/workflows/infra.yml .github/workflows/ops.yml
+	$(DOCKER_COMPOSE) run --rm --no-deps actionlint .github/workflows/infra.yml .github/workflows/ops.yml .github/workflows/deploy.yml
 	$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform fmt -check -recursive
 	@for layer in bootstrap main; do \
-		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer init -backend=false -lockfile=readonly && \
-		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer validate && \
-		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) terraform -chdir=$$layer test && \
+		$(DOCKER_COMPOSE) run --rm --no-deps --user $(HOST_USER) \
+			-e TERRAFORM_LAYER=$$layer --entrypoint sh terraform -c \
+			'set -e; export TF_DATA_DIR=/tmp/terraform-infra-check; terraform -chdir="$$TERRAFORM_LAYER" init -backend=false -lockfile=readonly && terraform -chdir="$$TERRAFORM_LAYER" validate && terraform -chdir="$$TERRAFORM_LAYER" test' && \
 		$(DOCKER_COMPOSE) run --rm --no-deps tflint --chdir=$$layer --config=/workspace/infra/terraform/.tflint.hcl || exit $$?; \
 	done
 	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools sh -c \

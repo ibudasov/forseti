@@ -19,11 +19,57 @@ run "workload_plan" {
   assert {
     condition = (
       length(google_secret_manager_secret_iam_member.grants) == 6 &&
-      length(google_cloud_run_v2_service_iam_member.grants) == 0 &&
+      length(google_cloud_run_v2_service_iam_member.grants) == 3 &&
       length(google_cloud_run_v2_job_iam_member.grants) == 0 &&
       length(google_storage_bucket_iam_member.grants) == 0
     )
-    error_message = "Only the declared per-secret accessors may exist; later milestones add the rest."
+    error_message = "Secret accessors and the declared private API invokers must be the only resource grants."
+  }
+  assert {
+    condition = toset([
+      for grant in local.resource_grants :
+      grant.member
+      if grant.kind == "service" && grant.resource == "forseti-api" && grant.role == "run.invoker"
+    ]) == toset(["owner", "forseti-deployer", "forseti-verifier"])
+    error_message = "Only the owner, deployer and verifier may invoke the private API."
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_service.api.name == "forseti-api" &&
+      google_cloud_run_v2_service.api.location == "europe-west4" &&
+      google_cloud_run_v2_service.api.template[0].max_instance_request_concurrency == 4 &&
+      google_cloud_run_v2_service.api.template[0].timeout == "300s" &&
+      google_cloud_run_v2_service.api.template[0].service_account == "forseti-api@forseti-505116.iam.gserviceaccount.com" &&
+      google_cloud_run_v2_service.api.template[0].scaling[0].min_instance_count == 0 &&
+      google_cloud_run_v2_service.api.template[0].scaling[0].max_instance_count == 2 &&
+      google_cloud_run_v2_service.api.template[0].containers[0].resources[0].limits["cpu"] == "1" &&
+      google_cloud_run_v2_service.api.template[0].containers[0].resources[0].limits["memory"] == "1Gi" &&
+      google_cloud_run_v2_service.api.template[0].containers[0].resources[0].cpu_idle &&
+      google_cloud_run_v2_service.api.template[0].containers[0].resources[0].startup_cpu_boost
+    )
+    error_message = "The API must use its dedicated identity, request-based 1-vCPU sizing and bounded scaling."
+  }
+  assert {
+    condition = (
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "DATABASE_URL" && value.value_source[0].secret_key_ref[0].secret == "forseti-database-url"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "ALPHA_VANTAGE_API_KEY" && value.value_source[0].secret_key_ref[0].secret == "forseti-alpha-vantage-api-key"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "FUNDAMENTAL_AGENT_MODE" && value.value == "enforced"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "TECHNICAL_AGENT_MODE" && value.value == "enforced"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "enforced"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "SYNTHESIZER_CONTRACT" && value.value == "typed"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "ALLOW_PIPELINE_OVERRIDE" && value.value == "false"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "DEBUG_LLM_IO" && value.value == "false"], true)
+    )
+    error_message = "The API must use secret references and secure, enforced agent runtime settings."
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_service.api.template[0].containers[0].startup_probe[0].http_get[0].path == "/livez" &&
+      google_cloud_run_v2_service.api.template[0].containers[0].liveness_probe[0].http_get[0].path == "/livez" &&
+      length(google_cloud_run_v2_service.api.template[0].volumes[0].cloud_sql_instance[0].instances) == 1 &&
+      google_cloud_run_v2_service.api.template[0].containers[0].volume_mounts[0].mount_path == "/cloudsql"
+    )
+    error_message = "The API probes must use /livez and Cloud SQL must be mounted at /cloudsql."
   }
   assert {
     condition = (

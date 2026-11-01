@@ -1,0 +1,183 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [Build-n-test]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: forseti-cloud-run-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy API
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: gcp-dev
+    timeout-minutes: 30
+    steps:
+      - name: Validate deployment source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            [ "$REF" = refs/heads/main ] || { echo "::error::Manual deployments must run from main."; exit 1; }
+            exit 0
+          fi
+          if [ "$RUN_CONCLUSION" != success ] || [ "$RUN_EVENT" != push ] ||
+             [ "$RUN_BRANCH" != main ] || [ "$RUN_REPOSITORY" != "$REPOSITORY" ]; then
+            echo "::error::Only a successful Build-n-test push from this repository's main branch can deploy."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify workload resources and capture rollback revision
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          ARTIFACT_REPO: ${{ vars.GCP_ARTIFACT_REPO }}
+        run: |
+          set -euo pipefail
+          if ! gcloud run jobs describe forseti-housekeeping \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json >/dev/null; then
+            echo "::error::forseti-housekeeping does not exist; apply the approved gcp-infra plan before deploying."
+            exit 1
+          fi
+          if ! gcloud run services describe forseti-api \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json > "$RUNNER_TEMP/forseti-api.json"; then
+            echo "::error::forseti-api does not exist; apply the approved gcp-infra plan before deploying."
+            exit 1
+          fi
+          service_url="$(jq -r '.status.url // .uri // empty' "$RUNNER_TEMP/forseti-api.json")"
+          previous_revision="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName // empty] | first // empty' "$RUNNER_TEMP/forseti-api.json")"
+          if [ -z "$service_url" ] || [ -z "$previous_revision" ]; then
+            echo "::error::forseti-api has no URL or 100% serving revision to use for a safe rollback."
+            exit 1
+          fi
+          source_sha="$DISPATCH_SHA"
+          if [ "$EVENT_NAME" = workflow_run ]; then source_sha="$RUN_SHA"; fi
+          image="${ARTIFACT_REPO}/forseti:${source_sha}"
+          {
+            echo "service_url=$service_url"
+            echo "previous_revision=$previous_revision"
+            echo "image=$image"
+            echo "revision_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build and push API image
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker build --build-arg INSTALL_DEV=false --tag "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Run housekeeping before deployment
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs update forseti-housekeeping \
+            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          gcloud run jobs execute forseti-housekeeping \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --wait
+
+      - name: Deploy API image
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          gcloud run deploy forseti-api \
+            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+
+      - name: Smoke test private service
+        id: smoke
+        env:
+          SERVICE_URL: ${{ steps.source.outputs.service_url }}
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL" --include-email)"
+          live_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $token" "$SERVICE_URL/livez")"
+          [ "$live_status" = 200 ] || { echo "::error::Authenticated /livez returned HTTP $live_status."; exit 1; }
+
+          health="$(curl --silent --show-error --fail \
+            --header "Authorization: Bearer $token" "$SERVICE_URL/healthz")"
+          if ! jq -e '.app == "ok" and .db == "ok"' <<< "$health" >/dev/null; then
+            echo "::error::Authenticated /healthz did not report app and database healthy."
+            exit 1
+          fi
+
+          ticker_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $token" "$SERVICE_URL/ticker/NVDA")"
+          if ! [[ "$ticker_status" =~ ^[1-4][0-9][0-9]$ ]]; then
+            echo "::error::Authenticated GET /ticker/NVDA returned HTTP $ticker_status."
+            exit 1
+          fi
+
+      - name: Roll traffic back after failed smoke test
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          PREVIOUS_REVISION: ${{ steps.source.outputs.previous_revision }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic forseti-api \
+            --to-revisions "$PREVIOUS_REVISION=100" \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+
+      - name: Record deployed revision
+        if: success()
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          revision="$(gcloud run services describe forseti-api \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" \
+            --format='value(status.latestReadyRevisionName)')"
+          [ -n "$revision" ] || { echo "::error::Cloud Run returned no ready revision name."; exit 1; }
+          echo "Deployed revision: \`$revision\`" >> "$GITHUB_STEP_SUMMARY"
