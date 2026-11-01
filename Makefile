@@ -117,6 +117,7 @@ test: check-compose
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/infra:/app/infra:ro" \
 		-v "$$PWD/docs:/app/docs:ro" \
+		-v "$$PWD/.github:/app/.github:ro" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		app python -m pytest tests --cov=app --cov=agents --cov-report=term-missing --cov-fail-under=70 \
 			-W "ignore:SelectableGroups dict interface is deprecated. Use select.:DeprecationWarning" \
@@ -551,4 +552,5 @@ infra-check: check-compose
 		'python -m scripts.check_terraform_policy && python -m scripts.iam_doc --check'
 
 test-infra: check-compose
-	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools python -m pytest tests/test_terraform.py -q
+	$(DOCKER_COMPOSE) run --rm --no-deps -v "$$PWD/.github:/app/.github:ro" \
+		infra-tools python -m pytest tests/test_terraform.py -q

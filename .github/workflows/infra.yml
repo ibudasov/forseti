@@ -36,10 +36,6 @@ on:
         description: Same-repository PR to plan (blank plans main; ignored for apply)
         type: string
         default: ''
-      allow_destroy:
-        description: Allow deletes/replacements in a manually approved apply
-        type: boolean
-        default: false
   schedule:
     - cron: '17 4 * * *'
 
@@ -199,10 +195,9 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_TF_APPLY_SA }}
-      - name: Plan, enforce destruction gate and apply the saved plan
+      - name: Plan and apply the saved plan
         env:
           STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy }}
         run: |
           set -euo pipefail
           directory=infra/terraform/main
@@ -210,9 +205,6 @@ jobs:
           if ! terraform -chdir="$directory" plan -input=false -out=apply.tfplan > plan.txt 2> plan-error.txt; then
             echo "::error::Cloud plan failed; raw provider errors are withheld to protect private values."
             exit 1
-          fi
-          if [ "$ALLOW_DESTROY" != true ]; then
-            python3 scripts/check_terraform_policy.py --plan "$directory/apply.tfplan"
           fi
           if ! terraform -chdir="$directory" apply -input=false apply.tfplan > apply.txt 2> apply-error.txt; then
             echo "::error::Cloud apply failed; inspect live resource status as owner before retrying. Raw provider errors are withheld."

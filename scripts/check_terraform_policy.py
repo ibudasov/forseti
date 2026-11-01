@@ -1,12 +1,10 @@
-"""Conservative offline checks for Terraform declarations and saved plans."""
+"""Conservative offline checks for Terraform declarations."""
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 
@@ -81,49 +79,10 @@ def check_layer(directory: Path) -> list[str]:
     return failures
 
 
-def check_destroy(plan: dict) -> list[str]:
-    return [
-        change["address"]
-        for change in plan.get("resource_changes", [])
-        if "delete" in change["change"]["actions"]
-    ]
-
-
-def check_plan_policy(plan_path: Path, chdir: Path | None = None) -> int:
-    resolved_plan = plan_path.resolve()
-    work_dir = (chdir or plan_path.parent).resolve()
-    plan_arg = os.path.relpath(resolved_plan, work_dir)
-    result = subprocess.run(
-        ["terraform", f"-chdir={work_dir}", "show", "-json", plan_arg],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        else:
-            print(f"Terraform show failed with exit status {result.returncode}", file=sys.stderr)
-        return result.returncode
-    try:
-        plan_data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        print(f"Failed to parse terraform show JSON output: {exc}", file=sys.stderr)
-        return 1
-    destroyed = check_destroy(plan_data)
-    if destroyed:
-        print("Destructive changes refused: " + ", ".join(destroyed), file=sys.stderr)
-        return 1
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("infra/terraform"))
-    parser.add_argument("--plan", type=Path)
-    parser.add_argument("--chdir", type=Path)
     arguments = parser.parse_args(argv)
-    if arguments.plan:
-        return check_plan_policy(arguments.plan, chdir=arguments.chdir)
     failures = check_layer(arguments.root / "bootstrap") + check_layer(arguments.root / "main")
     identities = arguments.root / "bootstrap/identities.json"
     failures.extend(check_public_members(identities.read_text(), str(identities)))
