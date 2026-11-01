@@ -41,7 +41,7 @@
       "purpose": "Deploy application images from main",
       "project_roles": ["run.developer", "artifactregistry.writer"],
       "act_as": ["forseti-api", "forseti-jobs", "forseti-housekeeping"],
-      "workflow": {"file": "deploy.yml", "environment": "gcp-dev", "events": ["push", "workflow_dispatch"]}
+      "workflow": {"file": "deploy.yml", "environment": "gcp-dev", "events": ["workflow_run", "workflow_dispatch"]}
     },
     "forseti-verifier": {
       "purpose": "Read-only live operational verification; no secret values or table data",
@@ -62,6 +62,9 @@
     {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-api", "role": "secretmanager.secretAccessor"},
     {"kind": "secret", "resource": "forseti-alpha-vantage-api-key", "member": "forseti-jobs", "role": "secretmanager.secretAccessor"},
     {"kind": "secret", "resource": "forseti-owner-database-url", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"},
-    {"kind": "secret", "resource": "forseti-app-db-password", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"}
+    {"kind": "secret", "resource": "forseti-app-db-password", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"},
+    {"kind": "service", "resource": "forseti-api", "member": "owner", "role": "run.invoker"},
+    {"kind": "service", "resource": "forseti-api", "member": "forseti-deployer", "role": "run.invoker"},
+    {"kind": "service", "resource": "forseti-api", "member": "forseti-verifier", "role": "run.invoker"}
   ]
 }

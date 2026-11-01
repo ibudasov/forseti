@@ -48,6 +48,14 @@ run "foundation_plan" {
     error_message = "Federation must match immutable GitHub subjects for both environment and branch workflows."
   }
   assert {
+    condition = (
+      local.federated_accounts["forseti-deployer"].workflow.file == "deploy.yml" &&
+      local.federated_accounts["forseti-deployer"].workflow.environment == "gcp-dev" &&
+      toset(local.federated_accounts["forseti-deployer"].workflow.events) == toset(["workflow_run", "workflow_dispatch"])
+    )
+    error_message = "Only deploy.yml workflow runs and main-branch manual dispatches may impersonate forseti-deployer."
+  }
+  assert {
     condition = alltrue([
       for grant in google_project_iam_member.storage_except_state :
       strcontains(grant.condition[0].expression, "!resource.name.startsWith('projects/_/buckets/forseti-505116-tfstate')")

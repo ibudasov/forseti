@@ -177,6 +177,10 @@ Only `forseti-deployer` (deploy pipeline) and the owner can run it:
 gcloud run jobs execute forseti-housekeeping --region europe-west4 --wait
 ```
 
+Migrations run before a new API revision is deployed. Keep schema changes backward
+compatible with the currently serving revision: expand the schema first, deploy code
+that works with both schemas, then contract obsolete schema in a later release.
+
 ### Rotating the `forseti_app` password
 
 1. Bump `credentials_version` in Terraform so new secret versions are written (`*_wo_version`).

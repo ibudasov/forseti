@@ -59,6 +59,9 @@ both layers, this generated documentation, and future live IAM verification
 | secret | forseti-alpha-vantage-api-key | forseti-jobs | secretmanager.secretAccessor |
 | secret | forseti-owner-database-url | forseti-housekeeping | secretmanager.secretAccessor |
 | secret | forseti-app-db-password | forseti-housekeeping | secretmanager.secretAccessor |
+| service | forseti-api | owner | run.invoker |
+| service | forseti-api | forseti-deployer | run.invoker |
+| service | forseti-api | forseti-verifier | run.invoker |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,

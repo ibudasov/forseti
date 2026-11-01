@@ -7,9 +7,11 @@ locals {
     "forseti-app-db-password"       = google_secret_manager_secret.app_db_password.id
     "forseti-alpha-vantage-api-key" = google_secret_manager_secret.alpha_vantage_api_key.id
   }
-  service_resources = {}
-  job_resources     = {}
-  bucket_resources  = {}
+  service_resources = {
+    "forseti-api" = google_cloud_run_v2_service.api.name
+  }
+  job_resources    = {}
+  bucket_resources = {}
   resource_grants = {
     for grant in local.identities.resource_grants :
     "${grant.kind}/${grant.resource}/${grant.member}/${grant.role}" => grant

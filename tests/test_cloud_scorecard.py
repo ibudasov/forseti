@@ -7,7 +7,7 @@ from typing import Any, Dict, Sequence, Tuple
 
 import pytest
 
-from scripts.cloud_scorecard import gcp2, gcp3b
+from scripts.cloud_scorecard import gcp2, gcp3b, gcp4
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -51,6 +51,7 @@ PROVIDER = ("iam", "workload-identity-pools", "providers", "describe")
 REPOSITORY = ("artifacts", "repositories", "describe")
 SECRET_POLICY = ("secrets", "get-iam-policy")
 JOBS = ("run", "jobs")
+API_SERVICE = ("run", "services", "describe", "forseti-api")
 DEPLOYER = "serviceAccount:forseti-deployer@forseti-test.iam.gserviceaccount.com"
 HOUSEKEEPING = "serviceAccount:forseti-housekeeping@forseti-test.iam.gserviceaccount.com"
 DRIFT = ("repos/example/repo/actions/workflows/infra.yml/runs",)
@@ -267,6 +268,99 @@ class TestJobRunners:
         assert gcp3b.check_job_runners(environment({JOBS: None})).status is Status.PENDING
 
 
+def api_service() -> dict:
+    environment = {
+        "APP_ENV": "cloud",
+        "PIPELINE_MODE": "agentic",
+        "GOOGLE_GENAI_USE_VERTEXAI": "TRUE",
+        "FUNDAMENTAL_AGENT_MODE": "enforced",
+        "TECHNICAL_AGENT_MODE": "enforced",
+        "CRITIC_MODE": "enforced",
+        "SYNTHESIZER_CONTRACT": "typed",
+        "ALLOW_PIPELINE_OVERRIDE": "false",
+        "DEBUG_LLM_IO": "false",
+        "RAG_FAIL_LOUD": "true",
+        "DB_POOL_SIZE": "3",
+        "DB_MAX_OVERFLOW": "2",
+        "GOOGLE_CLOUD_PROJECT": PROJECT,
+        "VERTEX_AI_PROJECT": PROJECT,
+        "GOOGLE_CLOUD_LOCATION": "europe-west4",
+        "VERTEX_AI_LOCATION": "europe-west4",
+        "GEMINI_MODEL": "gemini-test",
+        "EMBEDDING_MODEL": "embedding-test",
+        "EDGAR_USER_AGENT": "Forseti/test",
+    }
+    return {
+        "status": {
+            "url": "https://forseti-api.example.invalid",
+            "latestReadyRevisionName": "forseti-api-00002",
+            "traffic": [{"revisionName": "forseti-api-00002", "percent": 100}],
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "serviceAccountName": "forseti-api@forseti-test.iam.gserviceaccount.com",
+                    "containers": [{
+                        "env": [{"name": name, "value": value} for name, value in environment.items()],
+                    }],
+                },
+            },
+        },
+    }
+
+
+class TestApiRuntime:
+    def test_passes_with_enforced_agents_and_latest_revision_serving(self):
+        assert gcp4.check_runtime_configuration(environment({API_SERVICE: api_service()})).status is Status.PASS
+
+    def test_fails_when_runtime_settings_or_traffic_drift(self):
+        service = api_service()
+        variables = service["spec"]["template"]["spec"]["containers"][0]["env"]
+        fundamental_mode = next(variable for variable in variables if variable["name"] == "FUNDAMENTAL_AGENT_MODE")
+        fundamental_mode["value"] = "shadow"
+        service["status"]["traffic"][0]["percent"] = 90
+
+        outcome = gcp4.check_runtime_configuration(environment({API_SERVICE: service}))
+
+        assert outcome.status is Status.FAIL
+        assert "FUNDAMENTAL_AGENT_MODE" in outcome.detail
+        assert "100% latest-revision traffic" in outcome.detail
+
+    def test_is_pending_before_api_service_exists(self):
+        assert gcp4.check_runtime_configuration(environment({API_SERVICE: None})).status is Status.PENDING
+
+    def test_private_access_requires_authenticated_healthy_endpoints(self, monkeypatch):
+        requests = []
+
+        def http_get(url, identity_token=None):
+            requests.append((url, identity_token))
+            if identity_token is None:
+                return 403, ""
+            if url.endswith("/livez"):
+                return 200, '{"app":"ok"}'
+            return 200, '{"app":"ok","db":"ok"}'
+
+        monkeypatch.setattr(gcp4, "_http_get", http_get)
+        monkeypatch.setattr(gcp4, "_identity_token", lambda _audience: "test-token")
+
+        outcome = gcp4.check_private_api_access(environment({API_SERVICE: api_service()}))
+
+        assert outcome.status is Status.PASS
+        assert requests == [
+            ("https://forseti-api.example.invalid/livez", None),
+            ("https://forseti-api.example.invalid/livez", "test-token"),
+            ("https://forseti-api.example.invalid/healthz", "test-token"),
+        ]
+
+    def test_private_access_fails_if_anonymous_request_is_allowed(self, monkeypatch):
+        monkeypatch.setattr(gcp4, "_http_get", lambda _url, _token=None: (200, '{"app":"ok"}'))
+
+        outcome = gcp4.check_private_api_access(environment({API_SERVICE: api_service()}))
+
+        assert outcome.status is Status.FAIL
+        assert "expected 403" in outcome.detail
+
+
 class TestRunner:
     def test_paid_checks_are_skipped_unless_requested(self):
         check = Check("paid.example", "Exit criteria", "Paid", Cost.PAID, lambda _: Outcome.passed("ran"))
@@ -313,7 +407,7 @@ class TestMarkdown:
         env = environment({
             SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
             KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
-            JOBS: None,
+            JOBS: None, API_SERVICE: None,
         }, {("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
             fixture("drift_success")})
         reports = run_checks(ALL_CHECKS, env, include_paid)
@@ -331,7 +425,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 4 · ❌ 2 · ⏳ 8 · ➖ 1" in markdown
+        assert "✅ 4 · ❌ 2 · ⏳ 9 · ➖ 1" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)
