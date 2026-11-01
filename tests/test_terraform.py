@@ -260,6 +260,122 @@ def test_destroy_guard_rejects_deletes_and_replacements():
     assert policy.check_destroy({"resource_changes": []}) == []
 
 
+def test_check_plan_policy_executes_terraform_in_plan_directory(tmp_path, monkeypatch):
+    plan_file = tmp_path / "main" / "apply.tfplan"
+    plan_file.parent.mkdir()
+    plan_file.write_text("dummy")
+
+    recorded_cmd = []
+
+    def fake_run(cmd, capture_output=True, text=True):
+        recorded_cmd.extend(cmd)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"resource_changes": [
+                {"address": "google_cloud_run_v2_job.housekeeping", "change": {"actions": ["create"]}}
+            ]}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert policy.check_plan_policy(plan_file) == 0
+    assert recorded_cmd == [
+        "terraform",
+        f"-chdir={plan_file.parent.resolve()}",
+        "show",
+        "-json",
+        "apply.tfplan",
+    ]
+
+
+def test_check_plan_policy_custom_chdir(tmp_path, monkeypatch):
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    plan_file = plan_dir / "apply.tfplan"
+    plan_file.write_text("dummy")
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+
+    recorded_cmd = []
+
+    def fake_run(cmd, capture_output=True, text=True):
+        recorded_cmd.extend(cmd)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"resource_changes": []}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert policy.check_plan_policy(plan_file, chdir=work_dir) == 0
+    assert recorded_cmd == [
+        "terraform",
+        f"-chdir={work_dir.resolve()}",
+        "show",
+        "-json",
+        os.path.relpath(plan_file.resolve(), work_dir.resolve()),
+    ]
+
+
+def test_check_plan_policy_reports_destructive_changes(tmp_path, monkeypatch, capsys):
+    plan_file = tmp_path / "main" / "apply.tfplan"
+    plan_file.parent.mkdir()
+    plan_file.write_text("dummy")
+
+    def fake_run(cmd, capture_output=True, text=True):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"resource_changes": [
+                {"address": "google_storage_bucket.old", "change": {"actions": ["delete"]}}
+            ]}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert policy.check_plan_policy(plan_file) == 1
+    captured = capsys.readouterr()
+    assert "Destructive changes refused: google_storage_bucket.old" in captured.err
+
+
+def test_check_plan_policy_propagates_terraform_show_failure(tmp_path, monkeypatch, capsys):
+    plan_file = tmp_path / "main" / "apply.tfplan"
+    plan_file.parent.mkdir()
+    plan_file.write_text("dummy")
+
+    def fake_run(cmd, capture_output=True, text=True):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="",
+            stderr="Failed to load plugin schemas\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert policy.check_plan_policy(plan_file) == 1
+    captured = capsys.readouterr()
+    assert "Failed to load plugin schemas" in captured.err
+
+
+def test_main_with_plan_flag(tmp_path, monkeypatch):
+    plan_file = tmp_path / "main" / "apply.tfplan"
+    plan_file.parent.mkdir()
+    plan_file.write_text("dummy")
+
+    def fake_run(cmd, capture_output=True, text=True):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"resource_changes": []}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert policy.main(["--plan", str(plan_file)]) == 0
+
+
 def test_document_generation_preserves_prose_and_detects_manifest_changes():
     manifest = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
     document = (ROOT / "docs/gcp-access.md").read_text()
