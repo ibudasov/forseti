@@ -4,8 +4,9 @@ Check relevant instructions in the folder `./.github/instructions/*.*`
 
 ## Cloud access
 
-- Never run `gcloud` or `terraform apply` against the project, and never ask for credentials.
-- To check the cloud, read the scorecard comment on ibudasov/forseti#121. An assistant acting with the owner's GitHub account can post `/verify`.
+- Read-only `gcloud` diagnostics are allowed through an existing owner-authorized session: list/describe resources and read relevant Cloud Logging entries. Prefer a least-privilege read-only identity. Never change cloud resources, IAM, secrets, or authentication configuration, run `terraform apply`, or ask for credentials.
+- Start cloud checks with the scorecard comment on ibudasov/forseti#121; use read-only diagnostics when it lacks the necessary detail. An assistant acting with the owner's GitHub account can post `/verify`.
+- Never print tokens, read secret values or application table data, or publish raw private logs. Redact credentials, personal data, and private infrastructure identifiers from diagnostic summaries and PRs.
 - Tick a Validation box only with a link to evidence: a CI run, a PR plan comment or the scorecard.
 - Every new cloud resource comes with its scorecard checks (`scripts/cloud_scorecard/`) and its `identities.json` entries.
 - Details: `docs/gcp-access.md`.

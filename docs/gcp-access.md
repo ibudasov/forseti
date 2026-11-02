@@ -1,9 +1,32 @@
 # GCP access and Terraform operations
 
-Coding agents change code through PRs. They never receive personal cloud
-credentials or service-account keys. Offline PR checks validate configuration;
-the owner bootstraps identities, merges reviewed workloads, then approves the
-`gcp-infra` apply. Cloud access uses short-lived GitHub OIDC credentials.
+Coding agents change code through PRs. They may perform read-only `gcloud`
+diagnostics through an existing owner-authorized session, preferably using a
+least-privilege read-only identity. They never ask for credentials or
+service-account keys, or change authentication configuration. Offline PR
+checks validate configuration; the owner bootstraps identities, merges reviewed
+workloads, then approves the `gcp-infra` apply. CI cloud access uses short-lived
+GitHub OIDC credentials.
+
+## Read-only agent diagnostics
+
+Start with the scorecard on #121. When it lacks the detail needed to diagnose
+a failure, agents may list/describe resources and read relevant Cloud Logging
+entries with `gcloud`, using authentication already configured by the owner.
+This permission is for interactive diagnosis only: tests and PR-triggered CI
+must remain offline.
+
+Agents must not change cloud resources, IAM, secrets or authentication
+configuration, run `terraform apply`, print access/identity tokens, read secret
+values or application table data, or request credentials. If no authorized
+session exists, use the scorecard and GitHub workflow evidence or ask for a
+redacted error excerpt; do not initiate login or impersonation setup.
+
+Private log entries may contain credentials, personal data and infrastructure
+identifiers. Query only the entries needed for the failure, do not publish raw
+logs, and redact sensitive details from diagnostic summaries, commits, issues
+and PRs. Cloud writes still go through reviewed PRs and the existing owner
+approval gates.
 
 ## Layers and state
 
@@ -211,9 +234,10 @@ than changing the console by hand.
 
 ## Scorecard and ops commands
 
-Agents hold no cloud credentials, so `.github/workflows/ops.yml` checks the
-cloud for them. It authenticates as `forseti-verifier` (read-only; no secret
-values or table data) and edits **one** comment on issue #121, found by the
+For routine verification and agents without an authorized local session,
+`.github/workflows/ops.yml` checks the cloud. It authenticates as
+`forseti-verifier` (read-only; no secret values or table data) and edits **one**
+comment on issue #121, found by the
 hidden marker `<!-- forseti-scorecard -->`. The same Markdown goes to the job
 summary. Everything is redacted first: no URLs, emails, project numbers or
 long identifiers are printed or posted, because the repository is public.
@@ -237,9 +261,10 @@ resource ships its checks, its group's `later_groups.py` placeholder is
 replaced, and its grants are added to `identities.json` (the verifier needs
 `run.invoker` on resources it calls).
 
-Agents read the scorecard comment instead of running `gcloud`. An assistant
-acting with the owner's GitHub account can post `/verify`. Tick a Validation
-box only with a link to evidence: a CI run, a PR plan comment or the scorecard.
+Agents start with the scorecard comment and may use the read-only diagnostics
+described above when more detail is needed. An assistant acting with the
+owner's GitHub account can post `/verify`. Tick a Validation box only with a
+link to evidence: a CI run, a PR plan comment or the scorecard.
 
 Changing the workflow events in `identities.json` requires the owner to run
 `make tf-bootstrap` so the federation condition admits them.
