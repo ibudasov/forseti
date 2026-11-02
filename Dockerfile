@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 ARG INSTALL_DEV=true
 ARG PIP_TRUSTED_HOSTS=""
 WORKDIR /build
@@ -16,7 +16,7 @@ RUN set -eu; \
     for host in $PIP_TRUSTED_HOSTS; do set -- "$@" --trusted-host "$host"; done; \
     pip wheel --no-cache-dir --require-hashes "$@" --wheel-dir=/wheels -r "$lock"
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
