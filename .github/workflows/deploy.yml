@@ -132,13 +132,26 @@ jobs:
           gcloud run deploy forseti-api \
             --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
 
+      - name: Generate Cloud Run identity token
+        id: smoke_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.source.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
       - name: Smoke test private service
         id: smoke
         env:
           SERVICE_URL: ${{ steps.source.outputs.service_url }}
+          ID_TOKEN: ${{ steps.smoke_auth.outputs.id_token }}
         run: |
           set -euo pipefail
-          token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL" --include-email)"
+          token="$ID_TOKEN"
           live_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $token" "$SERVICE_URL/livez")"
           [ "$live_status" = 200 ] || { echo "::error::Authenticated /livez returned HTTP $live_status."; exit 1; }
