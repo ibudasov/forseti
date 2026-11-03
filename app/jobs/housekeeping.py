@@ -111,15 +111,20 @@ def migrate_schema(context: HousekeepingContext) -> StepResult:
 
 
 def _role_exists(cursor, role: str) -> bool:
-    return _fetch_one(cursor, "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)) is not None
+    existing = _fetch_one(cursor, "SELECT rolsuper FROM pg_roles WHERE rolname = %s", (role,))
+    if existing and existing[0]:
+        raise ValueError(f"application role must not be a superuser: {role}")
+    return existing is not None
 
 
 def _upsert_login_role(cursor, role: str, password: str, exists: bool) -> None:
-    verb = "ALTER" if exists else "CREATE"
+    # Cloud SQL owners cannot set NOSUPERUSER on ALTER ROLE, even when already false.
+    statement = (
+        "ALTER ROLE {} LOGIN NOCREATEDB NOCREATEROLE PASSWORD {}"
+        if exists else "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}"
+    )
     cursor.execute(
-        sql.SQL("{} ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}").format(
-            sql.SQL(verb), sql.Identifier(role), sql.Literal(password)
-        )
+        sql.SQL(statement).format(sql.Identifier(role), sql.Literal(password))
     )
 
 
