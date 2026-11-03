@@ -1,0 +1,79 @@
+"""Execute deployment shell steps offline against a deterministic gcloud stub."""
+import os
+from pathlib import Path
+import subprocess
+
+import pytest
+import yaml
+
+
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/deploy.yml"
+
+
+@pytest.fixture
+def steps():
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]["deploy"]["steps"]
+
+
+@pytest.fixture
+def cloud_environment(tmp_path):
+    executable = tmp_path / "gcloud"
+    executable.write_text(
+        '#!/bin/bash\n'
+        'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [ "$2" = deploy ]; then printf "%s\\n" "$DEPLOYED_REVISION"; fi\n'
+        'if [ "$3" = describe ]; then printf "%s\\n" "$TRAFFIC"; fi\n'
+    )
+    executable.chmod(0o755)
+    return {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "COMMAND_LOG": str(tmp_path / "commands"),
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "IMAGE": "offline-image",
+        "GCP_PROJECT_ID": "offline-project",
+        "GCP_REGION": "offline-region",
+        "DEPLOYED_REVISION": "api-new",
+        "REVISION": "api-new",
+        "PREVIOUS_REVISION": "api-old",
+        "TRAFFIC": "api-new\t100",
+    }
+
+
+def run_step(steps, name, environment):
+    step = next(step for step in steps if step.get("name") == name)
+    return subprocess.run(["bash", "-c", step["run"]], env=environment, capture_output=True, text=True)
+
+
+def test_deploy_routes_to_captured_revision_before_smoke(steps, cloud_environment):
+    environment = cloud_environment
+    assert run_step(steps, "Deploy API image", environment).returncode == 0
+    assert Path(environment["GITHUB_OUTPUT"]).read_text() == "revision=api-new\n"
+    assert run_step(steps, "Route traffic to deployed revision", environment).returncode == 0
+    commands = Path(environment["COMMAND_LOG"]).read_text()
+    assert "--no-traffic" in commands
+    assert "--to-revisions api-new=100" in commands
+    names = [step.get("name") for step in steps]
+    assert names.index("Route traffic to deployed revision") < names.index("Smoke test private service")
+
+
+@pytest.mark.parametrize("traffic", ["api-old\t100", "api-new\t50", "api-new;api-old\t50;50", ""])
+def test_wrong_or_split_traffic_fails_validation(steps, cloud_environment, traffic):
+    result = run_step(steps, "Route traffic to deployed revision", {**cloud_environment, "TRAFFIC": traffic})
+    assert result.returncode != 0
+    assert "did not assign 100% traffic" in result.stdout
+
+
+def test_empty_deployed_revision_fails_before_routing(steps, cloud_environment):
+    result = run_step(steps, "Deploy API image", {**cloud_environment, "DEPLOYED_REVISION": ""})
+    assert result.returncode != 0
+    assert "no deployed revision" in result.stdout
+    assert not Path(cloud_environment["GITHUB_OUTPUT"]).exists()
+
+
+def test_rollback_covers_all_post_deploy_failures_and_restores_old_revision(steps, cloud_environment):
+    step = next(step for step in steps if step.get("name") == "Roll traffic back after failed deployment validation")
+    assert step["if"] == "failure() && steps.deploy.outcome == 'success'"
+    result = run_step(steps, step["name"], cloud_environment)
+    assert result.returncode == 0
+    assert "--to-revisions api-old=100" in Path(cloud_environment["COMMAND_LOG"]).read_text()

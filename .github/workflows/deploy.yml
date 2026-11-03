@@ -123,14 +123,36 @@ jobs:
             --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --wait
 
       - name: Deploy API image
+        id: deploy
         env:
           IMAGE: ${{ steps.source.outputs.image }}
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
           set -euo pipefail
-          gcloud run deploy forseti-api \
-            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          revision="$(gcloud run deploy forseti-api --no-traffic \
+            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet \
+            --format='value(status.latestCreatedRevisionName)')"
+          [ -n "$revision" ] || { echo "::error::Cloud Run returned no deployed revision."; exit 1; }
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Route traffic to deployed revision
+        env:
+          REVISION: ${{ steps.deploy.outputs.revision }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic forseti-api \
+            --to-revisions "$REVISION=100" \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          traffic="$(gcloud run services describe forseti-api \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" \
+            --format='value(status.traffic.revisionName,status.traffic.percent)')"
+          if [ "$traffic" != "$REVISION"$'\t100' ]; then
+            echo "::error::Cloud Run did not assign 100% traffic exclusively to the deployed revision."
+            exit 1
+          fi
 
       - name: Generate Cloud Run identity token
         id: smoke_auth
@@ -170,8 +192,8 @@ jobs:
             exit 1
           fi
 
-      - name: Roll traffic back after failed smoke test
-        if: failure() && steps.smoke.outcome == 'failure'
+      - name: Roll traffic back after failed deployment validation
+        if: failure() && steps.deploy.outcome == 'success'
         env:
           PREVIOUS_REVISION: ${{ steps.source.outputs.previous_revision }}
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -185,12 +207,7 @@ jobs:
       - name: Record deployed revision
         if: success()
         env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
+          REVISION: ${{ steps.deploy.outputs.revision }}
         run: |
           set -euo pipefail
-          revision="$(gcloud run services describe forseti-api \
-            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" \
-            --format='value(status.latestReadyRevisionName)')"
-          [ -n "$revision" ] || { echo "::error::Cloud Run returned no ready revision name."; exit 1; }
-          echo "Deployed revision: \`$revision\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployed revision: \`$REVISION\`" >> "$GITHUB_STEP_SUMMARY"
