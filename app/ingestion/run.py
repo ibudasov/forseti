@@ -82,7 +82,9 @@ def _write_coverage_report() -> None:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    from app.observability.logging import configure_logging
+
+    configure_logging()
     args = _build_parser().parse_args()
     handlers = _source_handlers()
     if args.source == "fundamentals-backfill" and getattr(args, "refetch_fundamentals", False):

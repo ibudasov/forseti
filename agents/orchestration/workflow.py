@@ -1685,8 +1685,19 @@ class AgenticAnalysisWorkflow:
         )
 
     def _persist_trace(self, trace: AnalysisTrace) -> None:
+        from app.observability.tracing import current_trace_id
+
+        trace.trace_id = current_trace_id() or trace.trace_id
+        if trace.trace_id is not None:
+            from opentelemetry import trace as otel_trace
+
+            active_span = otel_trace.get_current_span()
+            if active_span.is_recording():
+                active_span.set_attribute("forseti.run_id", trace.run_id)
+                active_span.set_attribute("ticker", trace.ticker)
         run = AgentRun(
             run_id=trace.run_id,
+            trace_id=trace.trace_id,
             ticker=trace.ticker,
             created_at=datetime.now(timezone.utc),
             as_of_date=trace.as_of_date,
@@ -1743,6 +1754,7 @@ def load_trace(run_id: str, engine=None) -> Optional[AnalysisTrace]:
     final_decision = str(run.final_decision) if run.final_decision is not None else None
     return AnalysisTrace(
         run_id=run.run_id,
+        trace_id=run.trace_id,
         ticker=run.ticker,
         as_of_date=resolve_agent_run_as_of_date(run),
         as_of_date_source=run.as_of_date_source,
