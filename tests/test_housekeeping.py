@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+from psycopg2 import sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ProgrammingError
@@ -29,11 +31,13 @@ APP_PASSWORD = "app-password-for-tests"
 DATABASE_NAME = "housekeeping_test"
 DRY_RUN_DATABASE_NAME = "housekeeping_dry_run_test"
 DRY_RUN_ROLE = "forseti_app_dry_run_test"
+RESTRICTED_OWNER_ROLE = "forseti_owner_restricted_test"
+RESTRICTED_APP_ROLE = "forseti_app_restricted_test"
 
 
 @contextmanager
-def _server_url():
-    configured_url = os.getenv("TEST_DATABASE_URL")
+def _server_url(database_url: str | None = None):
+    configured_url = database_url or os.getenv("TEST_DATABASE_URL")
     if configured_url:
         yield configured_url
         return
@@ -42,8 +46,8 @@ def _server_url():
 
 
 @contextmanager
-def _disposable_database(name: str, owned_role: str | None = None):
-    with _server_url() as server_url:
+def _disposable_database(name: str, owned_role: str | None = None, database_url: str | None = None):
+    with _server_url(database_url) as server_url:
         server = make_url(server_url)
         maintenance = create_engine(server.set(database="postgres"), isolation_level="AUTOCOMMIT")
         with maintenance.connect() as connection:
@@ -130,6 +134,82 @@ def test_second_run_changes_nothing(housekeeping_context, first_run, owner_engin
 
     assert not any(result.changed for result in results)
     assert _snapshot(owner_engine) == before
+
+
+@pytest.fixture
+def restricted_owner_context():
+    with _server_url() as server_url:
+        server_url = make_url(server_url).set(database="postgres").render_as_string(hide_password=False)
+        with housekeeping._autocommit_cursor(server_url) as cursor:
+            cursor.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER CREATEROLE PASSWORD {}").format(
+                    sql.Identifier(RESTRICTED_OWNER_ROLE), sql.Literal(APP_PASSWORD)
+                )
+            )
+        try:
+            with _disposable_database(
+                "housekeeping_restricted_test", owned_role=RESTRICTED_APP_ROLE, database_url=server_url
+            ) as url:
+                with housekeeping._autocommit_cursor(url) as cursor:
+                    cursor.execute(sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                        sql.Identifier("housekeeping_restricted_test"), sql.Identifier(RESTRICTED_OWNER_ROLE)
+                    ))
+                    cursor.execute(sql.SQL("ALTER SCHEMA public OWNER TO {}").format(
+                        sql.Identifier(RESTRICTED_OWNER_ROLE)
+                    ))
+                owner_url = make_url(url).set(username=RESTRICTED_OWNER_ROLE, password=APP_PASSWORD)
+                yield HousekeepingContext(
+                    owner_url.render_as_string(hide_password=False),
+                    RESTRICTED_APP_ROLE, APP_PASSWORD, password_required=True,
+                )
+        finally:
+            with housekeeping._autocommit_cursor(server_url) as cursor:
+                cursor.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(RESTRICTED_OWNER_ROLE)))
+
+
+def test_non_superuser_owner_creates_and_resynchronizes_application_role(restricted_owner_context):
+    context = restricted_owner_context
+    with housekeeping._autocommit_cursor(context.database_url) as cursor:
+        cursor.execute("CREATE TABLE role_sync_test (id serial PRIMARY KEY, label text)")
+
+    created = housekeeping.ensure_roles(context)
+    with housekeeping._autocommit_cursor(context.database_url) as cursor:
+        cursor.execute(sql.SQL("ALTER ROLE {} CREATEDB CREATEROLE").format(sql.Identifier(context.app_role)))
+
+    rotated = replace(context, app_password="rotated-app-password-for-tests")
+    updated = housekeeping.ensure_roles(rotated)
+    with housekeeping._autocommit_cursor(context.database_url) as cursor:
+        cursor.execute(
+            "SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin FROM pg_roles WHERE rolname = %s",
+            (context.app_role,),
+        )
+        assert cursor.fetchone() == (False, False, False, True)
+
+    app_url = make_url(context.database_url).set(username=context.app_role, password=rotated.app_password)
+    with housekeeping._autocommit_cursor(app_url.render_as_string(hide_password=False)) as cursor:
+        cursor.execute("INSERT INTO role_sync_test (label) VALUES ('synced') RETURNING label")
+        assert cursor.fetchone() == ("synced",)
+    assert created.changed is True
+    assert updated.changed is False
+    assert housekeeping.ensure_roles(rotated).changed is False
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_superuser_application_role_is_rejected_without_changing_it(owner_url, dry_run):
+    role = "forseti_superuser_rejection_test"
+    context = HousekeepingContext(owner_url, role, APP_PASSWORD, password_required=True, dry_run=dry_run)
+
+    with housekeeping._autocommit_cursor(owner_url) as cursor:
+        cursor.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+        cursor.execute(sql.SQL("CREATE ROLE {} SUPERUSER").format(sql.Identifier(role)))
+        try:
+            with pytest.raises(ValueError, match="application role must not be a superuser"):
+                housekeeping.ensure_roles(context)
+            cursor.execute("SELECT rolsuper, rolcanlogin FROM pg_roles WHERE rolname = %s", (role,))
+            assert cursor.fetchone() == (True, False)
+        finally:
+            cursor.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+            cursor.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
 
 
 def test_dry_run_reports_pending_work_without_applying_it():
