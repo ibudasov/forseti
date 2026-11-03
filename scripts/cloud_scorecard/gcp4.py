@@ -155,24 +155,24 @@ def check_private_api_access(env: Environment) -> Outcome:
     if not service_url:
         return Outcome.pending(f"Cloud Run service {SERVICE_NAME} has no URL yet")
 
-    anonymous_status, _ = _http_get(f"{service_url}/livez")
+    anonymous_status, _ = _http_get(f"{service_url}/live")
     if anonymous_status != 403:
-        return Outcome.failed(f"anonymous /livez request returned HTTP {anonymous_status}, expected 403")
+        return Outcome.failed(f"anonymous /live request returned HTTP {anonymous_status}, expected 403")
 
     token = _identity_token(service_url)
-    live_status, _ = _http_get(f"{service_url}/livez", token)
+    live_status, _ = _http_get(f"{service_url}/live", token)
     if live_status != 200:
-        return Outcome.failed(f"authenticated /livez request returned HTTP {live_status}")
+        return Outcome.failed(f"authenticated /live request returned HTTP {live_status}")
 
-    health_status, health_body = _http_get(f"{service_url}/healthz", token)
+    health_status, health_body = _http_get(f"{service_url}/health", token)
     if health_status != 200:
-        return Outcome.failed(f"authenticated /healthz request returned HTTP {health_status}")
+        return Outcome.failed(f"authenticated /health request returned HTTP {health_status}")
     try:
         health = json.loads(health_body)
     except json.JSONDecodeError:
-        return Outcome.failed("authenticated /healthz response was not valid JSON")
+        return Outcome.failed("authenticated /health response was not valid JSON")
     if health.get("app") != "ok" or health.get("db") != "ok":
-        return Outcome.failed("authenticated /healthz did not report app and database healthy")
+        return Outcome.failed("authenticated /health did not report app and database healthy")
     return Outcome.passed("anonymous requests are denied; authenticated liveness and database checks pass")
 
 

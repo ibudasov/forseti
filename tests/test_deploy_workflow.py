@@ -77,3 +77,39 @@ def test_rollback_covers_all_post_deploy_failures_and_restores_old_revision(step
     result = run_step(steps, step["name"], cloud_environment)
     assert result.returncode == 0
     assert "--to-revisions api-old=100" in Path(cloud_environment["COMMAND_LOG"]).read_text()
+
+
+@pytest.mark.parametrize("database_status", ["ok", "unreachable"])
+def test_smoke_uses_non_reserved_paths_and_checks_database(steps, cloud_environment, database_status):
+    directory = Path(cloud_environment["COMMAND_LOG"]).parent
+    curl = directory / "curl"
+    curl.write_text(
+        '#!/bin/bash\n'
+        'printf "%s\\n" "${@: -1}" >> "$COMMAND_LOG"\n'
+        'case "${@: -1}" in\n'
+        '  */live|*/ticker/NVDA) printf 200 ;;\n'
+        '  */health) printf \'{"app":"ok","db":"%s"}\' "$DATABASE_STATUS" ;;\n'
+        '  *) exit 22 ;;\n'
+        'esac\n'
+    )
+    curl.chmod(0o755)
+    jq = directory / "jq"
+    jq.write_text(
+        '#!/usr/bin/env python3\n'
+        'import json, sys\n'
+        'assert sys.argv[1:] == ["-e", \'.app == "ok" and .db == "ok"\']\n'
+        'body = json.load(sys.stdin)\n'
+        'sys.exit(0 if body == {"app": "ok", "db": "ok"} else 1)\n'
+    )
+    jq.chmod(0o755)
+    result = run_step(steps, "Smoke test private service", {
+        **cloud_environment, "SERVICE_URL": "https://offline.invalid", "ID_TOKEN": "offline-token",
+        "DATABASE_STATUS": database_status,
+    })
+    assert result.returncode == (0 if database_status == "ok" else 1)
+    requests = Path(cloud_environment["COMMAND_LOG"]).read_text().splitlines()
+    assert requests[:2] == ["https://offline.invalid/live", "https://offline.invalid/health"]
+    if database_status == "ok":
+        assert requests[2] == "https://offline.invalid/ticker/NVDA"
+    else:
+        assert "did not report app and database healthy" in result.stdout

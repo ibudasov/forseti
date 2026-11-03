@@ -127,23 +127,25 @@ def test_sqlite_engine_remains_supported(engine_cache):
         assert connection.exec_driver_sql("SELECT 1").scalar() == 1
 
 
-def test_livez_has_no_database_dependency(monkeypatch):
+@pytest.mark.parametrize("path", ["/live", "/livez"])
+def test_livez_has_no_database_dependency(monkeypatch, path):
     engine = Mock(side_effect=AssertionError("liveness must not access DB"))
     monkeypatch.setattr(main, "get_engine", engine)
-    response = TestClient(main.app).get("/livez")
+    response = TestClient(main.app).get(path)
     assert response.status_code == 200
     assert response.json() == {"app": "ok"}
     engine.assert_not_called()
 
 
 @pytest.mark.parametrize("reachable", [True, False])
-def test_cloud_health_redacts_details(monkeypatch, cloud_settings, caplog, reachable):
+@pytest.mark.parametrize("path", ["/health", "/healthz"])
+def test_cloud_health_redacts_details(monkeypatch, cloud_settings, caplog, reachable, path):
     monkeypatch.setattr(main, "get_settings", lambda: cloud_settings)
     engine = MagicMock()
     if not reachable:
         engine.connect.side_effect = RuntimeError("private-host: secret failure")
     monkeypatch.setattr(main, "get_engine", lambda _: engine)
-    response = TestClient(main.app).get("/healthz")
+    response = TestClient(main.app).get(path)
     assert response.status_code == 200
     assert response.json() == {"app": "ok", "db": "ok" if reachable else "unreachable"}
     if reachable:

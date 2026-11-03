@@ -175,13 +175,13 @@ jobs:
           set -euo pipefail
           token="$ID_TOKEN"
           live_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --header "Authorization: Bearer $token" "$SERVICE_URL/livez")"
-          [ "$live_status" = 200 ] || { echo "::error::Authenticated /livez returned HTTP $live_status."; exit 1; }
+            --header "Authorization: Bearer $token" "$SERVICE_URL/live")"
+          [ "$live_status" = 200 ] || { echo "::error::Authenticated /live returned HTTP $live_status."; exit 1; }
 
           health="$(curl --silent --show-error --fail \
-            --header "Authorization: Bearer $token" "$SERVICE_URL/healthz")"
+            --header "Authorization: Bearer $token" "$SERVICE_URL/health")"
           if ! jq -e '.app == "ok" and .db == "ok"' <<< "$health" >/dev/null; then
-            echo "::error::Authenticated /healthz did not report app and database healthy."
+            echo "::error::Authenticated /health did not report app and database healthy."
             exit 1
           fi
 
