@@ -76,6 +76,7 @@ def read_root():
 
 
 @app.get("/healthz")
+@app.get("/health")
 def healthz():
     """Health endpoint that checks application and DB connectivity."""
     db_url = os.getenv("DATABASE_URL") or get_settings().DATABASE_URL
@@ -86,6 +87,7 @@ def healthz():
 
 
 @app.get("/livez")
+@app.get("/live")
 def livez():
     """Liveness and startup probe independent of the database."""
     return {"app": "ok"}

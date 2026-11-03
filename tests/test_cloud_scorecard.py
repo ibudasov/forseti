@@ -336,7 +336,7 @@ class TestApiRuntime:
             requests.append((url, identity_token))
             if identity_token is None:
                 return 403, ""
-            if url.endswith("/livez"):
+            if url.endswith("/live"):
                 return 200, '{"app":"ok"}'
             return 200, '{"app":"ok","db":"ok"}'
 
@@ -347,9 +347,9 @@ class TestApiRuntime:
 
         assert outcome.status is Status.PASS
         assert requests == [
-            ("https://forseti-api.example.invalid/livez", None),
-            ("https://forseti-api.example.invalid/livez", "test-token"),
-            ("https://forseti-api.example.invalid/healthz", "test-token"),
+            ("https://forseti-api.example.invalid/live", None),
+            ("https://forseti-api.example.invalid/live", "test-token"),
+            ("https://forseti-api.example.invalid/health", "test-token"),
         ]
 
     def test_private_access_fails_if_anonymous_request_is_allowed(self, monkeypatch):
