@@ -13,6 +13,17 @@ variable "owner_email" {
   sensitive = true
 }
 
+variable "daily_llm_cost_threshold_usd" {
+  description = "Alert when the sum of daily recommendation model costs exceeds this USD amount."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.daily_llm_cost_threshold_usd >= 0
+    error_message = "daily_llm_cost_threshold_usd must be non-negative."
+  }
+}
+
 variable "credentials_version" {
   description = "Bump to rotate the database passwords; all write-only credentials rotate together."
   type        = number

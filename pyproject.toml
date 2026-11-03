@@ -26,7 +26,13 @@ dependencies = [
   "google-cloud-aiplatform>=2.7.0",
   "google-genai>=2.34.0",
   "google-adk>=1.0.0,<3.0.0",
-  "exchange-calendars>=4.5.0,<5.0.0"
+  "exchange-calendars>=4.5.0,<5.0.0",
+  "opentelemetry-sdk>=1.44.0",
+  "opentelemetry-exporter-gcp-trace>=1.15.0",
+  "opentelemetry-propagator-gcp>=1.15.0",
+  "opentelemetry-instrumentation-fastapi>=0.65b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
+  "opentelemetry-instrumentation-requests>=0.65b0"
 ]
 
 [project.optional-dependencies]
