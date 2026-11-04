@@ -65,6 +65,7 @@
     {"kind": "secret", "resource": "forseti-app-db-password", "member": "forseti-housekeeping", "role": "secretmanager.secretAccessor"},
     {"kind": "service", "resource": "forseti-api", "member": "owner", "role": "run.invoker"},
     {"kind": "service", "resource": "forseti-api", "member": "forseti-deployer", "role": "run.invoker"},
-    {"kind": "service", "resource": "forseti-api", "member": "forseti-verifier", "role": "run.invoker"}
+    {"kind": "service", "resource": "forseti-api", "member": "forseti-verifier", "role": "run.invoker"},
+    {"kind": "job", "resource": "forseti-trust-check", "member": "forseti-verifier", "role": "run.invoker"}
   ]
 }

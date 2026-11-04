@@ -122,6 +122,15 @@ jobs:
           gcloud run jobs execute forseti-housekeeping \
             --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --wait
 
+      - name: Point the trust-check job at the new image
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          gcloud run jobs update forseti-trust-check \
+            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+
       - name: Deploy API image
         id: deploy
         env:

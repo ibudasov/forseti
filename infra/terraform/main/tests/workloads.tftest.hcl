@@ -20,7 +20,7 @@ run "workload_plan" {
     condition = (
       length(google_secret_manager_secret_iam_member.grants) == 6 &&
       length(google_cloud_run_v2_service_iam_member.grants) == 3 &&
-      length(google_cloud_run_v2_job_iam_member.grants) == 0 &&
+      length(google_cloud_run_v2_job_iam_member.grants) == 1 &&
       length(google_storage_bucket_iam_member.grants) == 0
     )
     error_message = "Secret accessors and the declared private API invokers must be the only resource grants."
@@ -32,6 +32,14 @@ run "workload_plan" {
       if grant.kind == "service" && grant.resource == "forseti-api" && grant.role == "run.invoker"
     ]) == toset(["owner", "forseti-deployer", "forseti-verifier"])
     error_message = "Only the owner, deployer and verifier may invoke the private API."
+  }
+  assert {
+    condition = toset([
+      for grant in local.resource_grants :
+      grant.member
+      if grant.kind == "job" && grant.resource == "forseti-trust-check" && grant.role == "run.invoker"
+    ]) == toset(["forseti-verifier"])
+    error_message = "Only the verifier may invoke the trust-check job."
   }
   assert {
     condition = (
@@ -80,6 +88,16 @@ run "workload_plan" {
       startswith(google_cloud_run_v2_job.housekeeping.template[0].template[0].service_account, "forseti-housekeeping@")
     )
     error_message = "The housekeeping job must run as forseti-housekeeping with one task, no retries and a 900 s timeout."
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_job.trust_check.name == "forseti-trust-check" &&
+      google_cloud_run_v2_job.trust_check.template[0].template[0].max_retries == 0 &&
+      startswith(google_cloud_run_v2_job.trust_check.template[0].template[0].service_account, "forseti-jobs@") &&
+      !contains([for value in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].env : value.name], "CONFIRM_COST") &&
+      contains([for value in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "enforced"], true)
+    )
+    error_message = "The trust-check job must run as forseti-jobs with enforced agents and must not pre-approve its own cost."
   }
   assert {
     condition = (

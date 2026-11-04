@@ -10,7 +10,9 @@ locals {
   service_resources = {
     "forseti-api" = google_cloud_run_v2_service.api.name
   }
-  job_resources    = {}
+  job_resources = {
+    "forseti-trust-check" = google_cloud_run_v2_job.trust_check.name
+  }
   bucket_resources = {}
   resource_grants = {
     for grant in local.identities.resource_grants :

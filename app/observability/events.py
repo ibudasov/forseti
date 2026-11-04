@@ -70,6 +70,11 @@ def _agent_effects(trace: AnalysisTrace | None) -> dict[str, dict[str, Any]]:
     return result
 
 
+def downgraded_agents(trace: AnalysisTrace | None) -> list[str]:
+    effects = _agent_effects(trace)
+    return sorted(agent for agent, effect in effects.items() if effect["downgraded"])
+
+
 def _persisted_cost_usd(trace: AnalysisTrace | None) -> float | None:
     if trace is None or trace.estimated_cost_usd is None:
         return None

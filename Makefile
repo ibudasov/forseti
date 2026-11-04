@@ -472,7 +472,7 @@ down: check-compose
 lint: check-compose
 	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
 	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/scripts:/app/scripts" app python -m flake8 scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/cloud_scorecard --max-complexity=10 --max-line-length=127
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/scripts:/app/scripts" app python -m flake8 scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/cloud_scorecard --max-complexity=10 --max-line-length=127
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
@@ -480,7 +480,7 @@ typecheck: check-compose
 		app python -m mypy --explicit-package-bases --follow-imports=skip app agents
 	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools python -m mypy \
 		--explicit-package-bases --follow-imports=skip \
-		scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/cloud_scorecard
+		scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/cloud_scorecard
 
 check: lint typecheck
 

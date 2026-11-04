@@ -7,6 +7,8 @@ on:
       - 'scripts/terraform_cli.py'
       - 'scripts/check_terraform_policy.py'
       - 'scripts/iam_doc.py'
+      - 'scripts/doc_coverage.py'
+      - 'docs/architecture-gcp.md'
       - 'tests/test_terraform.py'
       - 'docs/gcp-access.md'
       - 'Makefile'
@@ -259,3 +261,32 @@ jobs:
       - name: Remove runner-local captures
         if: always()
         run: rm -f drift.txt drift-error.txt
+
+  doc-coverage:
+    name: Documentation coverage
+    needs: checks
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_PLAN_SA }}
+      - name: Require the architecture document to mention every deployed resource
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/terraform/main init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
+          terraform -chdir=infra/terraform/main state list | python3 -m scripts.doc_coverage docs/architecture-gcp.md
