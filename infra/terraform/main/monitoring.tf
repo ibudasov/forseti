@@ -315,16 +315,14 @@ resource "google_monitoring_alert_policy" "daily_llm_cost" {
 
   conditions {
     display_name = "Daily recommendation cost"
-    condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/forseti/analysis_cost_usd\" AND resource.type=\"cloud_run_revision\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = var.daily_llm_cost_threshold_usd
-      duration        = "0s"
-      aggregations {
-        alignment_period     = "86400s"
-        per_series_aligner   = "ALIGN_SUM"
-        cross_series_reducer = "REDUCE_SUM"
-      }
+    condition_monitoring_query_language {
+      query    = <<-EOT
+        fetch logging.googleapis.com/user/forseti/analysis_cost_usd
+        | filter resource.type == 'cloud_run_revision'
+        | group_by 1d, [], [daily_cost_usd: sum(value.distribution.mean * value.distribution.count)]
+        | condition daily_cost_usd > ${var.daily_llm_cost_threshold_usd}
+      EOT
+      duration = "0s"
       trigger {
         count = 1
       }
