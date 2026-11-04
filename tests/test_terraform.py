@@ -260,19 +260,58 @@ def test_apply_workflow_applies_saved_plan_without_destroy_gate():
 
 def test_custom_metric_alerts_wait_for_their_logging_metrics():
     monitoring = (ROOT / "infra/terraform/main/monitoring.tf").read_text()
-    expected_dependencies = {
-        "refresh_failed": "daily_refresh_status",
-        "refresh_missing": "daily_refresh_status",
-        "daily_llm_cost": "analysis_cost_usd",
-        "unpriced_run": "analysis_count",
+    expected_filters = {
+        "refresh_failed": (
+            "daily_refresh_status",
+            "cloud_run_job",
+            r'metric.label.status=\"failed\"',
+        ),
+        "refresh_missing": (
+            "daily_refresh_status",
+            "cloud_run_job",
+            r'metric.label.status=\"success\"',
+        ),
+        "daily_llm_cost": ("analysis_cost_usd", "cloud_run_revision", None),
+        "unpriced_run": (
+            "analysis_count",
+            "cloud_run_revision",
+            r'metric.label.cost_status!=\"priced\"',
+        ),
     }
 
-    for alert_policy, metric in expected_dependencies.items():
+    for alert_policy, (metric, resource_type, label_filter) in expected_filters.items():
         declaration = (
             f'resource "google_monitoring_alert_policy" "{alert_policy}" {{\n'
             f"  depends_on = [google_logging_metric.{metric}]"
         )
         assert declaration in monitoring
+        alert_start = monitoring.index(declaration)
+        next_alert_start = monitoring.find(
+            '\nresource "google_monitoring_alert_policy"',
+            alert_start + len(declaration),
+        )
+        alert = monitoring[alert_start:next_alert_start if next_alert_start != -1 else None]
+        assert (
+            f'metric.type=\\"logging.googleapis.com/user/forseti/{metric}\\"'
+            in alert
+        )
+        assert f'resource.type=\\"{resource_type}\\"' in alert
+        if label_filter is not None:
+            assert label_filter in alert
+
+    refresh_missing_start = monitoring.index(
+        'resource "google_monitoring_alert_policy" "refresh_missing" {'
+    )
+    next_alert_start = monitoring.find(
+        '\nresource "google_monitoring_alert_policy"',
+        refresh_missing_start + 1,
+    )
+    refresh_missing = monitoring[
+        refresh_missing_start:next_alert_start if next_alert_start != -1 else None
+    ]
+    assert 'display_name = "No successful refresh in 23h30m"' in refresh_missing
+    assert 'duration = "84600s"' in refresh_missing
+    assert "93600s" not in refresh_missing
 
 
 def test_document_generation_preserves_prose_and_detects_manifest_changes():

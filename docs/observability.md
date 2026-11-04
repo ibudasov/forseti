@@ -47,9 +47,10 @@ distinguishes success from failure.
 The email alert channel notifies the configured owner for refresh failures or
 missing refreshes, API 5xx responses, Cloud SQL disk/connections thresholds,
 daily LLM cost over the configured USD threshold, and runs without priced
-model usage. The 26-hour absence condition evaluates continuously; GCP-5 must
-provide a non-trading-day success heartbeat if refreshes do not run on weekends
-to avoid a weekend absence alert.
+model usage. The missing-refresh alert uses a 23h30m absence window, the maximum
+supported by Cloud Monitoring. GCP-5 must emit a refresh-status heartbeat at
+least once within each 23h30m window, including on non-trading days when no
+refresh work is scheduled, to avoid a weekend absence alert.
 
 For detailed persisted step semantics and SQL checks, see
 [`agent-trace.md`](agent-trace.md).
