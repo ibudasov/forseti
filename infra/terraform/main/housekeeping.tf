@@ -27,10 +27,6 @@ resource "google_cloud_run_v2_job" "housekeeping" {
           value = "cloud"
         }
         env {
-          name  = "LOG_FORMAT"
-          value = "json"
-        }
-        env {
           name  = "APP_DB_ROLE"
           value = "forseti_app"
         }

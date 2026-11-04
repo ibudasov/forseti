@@ -231,11 +231,7 @@ def _parse_arguments(argv: Optional[Sequence[str]]) -> argparse.Namespace:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    from app.observability.logging import configure_logging
-    from app.observability.tracing import configure_tracing
-
-    configure_logging()
-    configure_tracing()
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
     arguments = _parse_arguments(argv)
     context = context_from_settings(get_settings(), arguments.dry_run, arguments.reindex)
     run_housekeeping(context, arguments.step)
