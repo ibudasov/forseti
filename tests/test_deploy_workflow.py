@@ -3,11 +3,14 @@ import os
 from pathlib import Path
 import subprocess
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 import pytest
 import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/deploy.yml"
+ROOT = WORKFLOW.parents[2]
 
 
 @pytest.fixture
@@ -43,6 +46,16 @@ def cloud_environment(tmp_path):
 def run_step(steps, name, environment):
     step = next(step for step in steps if step.get("name") == name)
     return subprocess.run(["bash", "-c", step["run"]], env=environment, capture_output=True, text=True)
+
+
+def test_deploy_housekeeping_revision_remains_available_to_alembic():
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+
+    revision = ScriptDirectory.from_config(config).get_revision("0015_agent_run_trace_id")
+
+    assert revision is not None
+    assert revision.down_revision == "0014_agent_run_cost"
 
 
 def test_deploy_routes_to_captured_revision_before_smoke(steps, cloud_environment):

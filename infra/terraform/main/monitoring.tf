@@ -187,6 +187,8 @@ resource "google_monitoring_dashboard" "forseti" {
 }
 
 resource "google_monitoring_alert_policy" "refresh_failed" {
+  depends_on = [google_logging_metric.daily_refresh_status]
+
   display_name          = "Forseti daily refresh failed"
   combiner              = "OR"
   enabled               = true
@@ -211,6 +213,8 @@ resource "google_monitoring_alert_policy" "refresh_failed" {
 }
 
 resource "google_monitoring_alert_policy" "refresh_missing" {
+  depends_on = [google_logging_metric.daily_refresh_status]
+
   display_name          = "Forseti daily refresh missing"
   combiner              = "OR"
   enabled               = true
@@ -302,6 +306,8 @@ resource "google_monitoring_alert_policy" "sql_connections" {
 }
 
 resource "google_monitoring_alert_policy" "daily_llm_cost" {
+  depends_on = [google_logging_metric.analysis_cost_usd]
+
   display_name          = "Forseti daily LLM cost exceeds threshold"
   combiner              = "OR"
   enabled               = true
@@ -327,6 +333,8 @@ resource "google_monitoring_alert_policy" "daily_llm_cost" {
 }
 
 resource "google_monitoring_alert_policy" "unpriced_run" {
+  depends_on = [google_logging_metric.analysis_count]
+
   display_name          = "Forseti analysis has unpriced model usage"
   combiner              = "OR"
   enabled               = true
