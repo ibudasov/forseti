@@ -197,7 +197,7 @@ resource "google_monitoring_alert_policy" "refresh_failed" {
   conditions {
     display_name = "Refresh status is failed"
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND metric.label.status=\"failed\""
+      filter          = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND resource.type=\"cloud_run_job\" AND metric.label.status=\"failed\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -221,10 +221,10 @@ resource "google_monitoring_alert_policy" "refresh_missing" {
   notification_channels = [google_monitoring_notification_channel.owner_email.name]
 
   conditions {
-    display_name = "No successful refresh in 26 hours"
+    display_name = "No successful refresh in 23h30m"
     condition_absent {
-      filter   = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND metric.label.status=\"success\""
-      duration = "93600s"
+      filter   = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND resource.type=\"cloud_run_job\" AND metric.label.status=\"success\""
+      duration = "84600s"
       aggregations {
         alignment_period   = "300s"
         per_series_aligner = "ALIGN_SUM"
@@ -316,7 +316,7 @@ resource "google_monitoring_alert_policy" "daily_llm_cost" {
   conditions {
     display_name = "Daily recommendation cost"
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/forseti/analysis_cost_usd\""
+      filter          = "metric.type=\"logging.googleapis.com/user/forseti/analysis_cost_usd\" AND resource.type=\"cloud_run_revision\""
       comparison      = "COMPARISON_GT"
       threshold_value = var.daily_llm_cost_threshold_usd
       duration        = "0s"
@@ -343,7 +343,7 @@ resource "google_monitoring_alert_policy" "unpriced_run" {
   conditions {
     display_name = "Analysis cost status is not priced"
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\" AND metric.label.cost_status!=\"priced\""
+      filter          = "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\" AND resource.type=\"cloud_run_revision\" AND metric.label.cost_status!=\"priced\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
