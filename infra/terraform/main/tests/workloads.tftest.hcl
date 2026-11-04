@@ -95,3 +95,27 @@ run "workload_plan" {
     error_message = "Cloud SQL must be the cheapest zonal tier, encrypted-only, with no authorized networks."
   }
 }
+
+run "daily_cost_threshold" {
+  command = plan
+
+  variables {
+    daily_llm_cost_threshold_usd = 7.5
+  }
+
+  assert {
+    condition = (
+      google_monitoring_alert_policy.daily_llm_cost.enabled &&
+      length(google_monitoring_alert_policy.daily_llm_cost.notification_channels) == 1 &&
+      trimspace(google_monitoring_alert_policy.daily_llm_cost.conditions[0].condition_monitoring_query_language[0].query) == trimspace(<<-EOT
+        fetch cloud_run_revision
+        | metric 'logging.googleapis.com/user/forseti/analysis_cost_usd'
+        | group_by [], sliding(1d), [daily_cost_usd: sum(sum_from(value.analysis_cost_usd))]
+        | every 1m
+        | condition val() > 7.5
+      EOT
+      )
+    )
+    error_message = "The cost policy must render the API-validated rolling-total query with the configured threshold and notification channel."
+  }
+}
