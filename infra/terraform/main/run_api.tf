@@ -1,22 +1,27 @@
 locals {
   api_service_account = "forseti-api@${var.project_id}.iam.gserviceaccount.com"
   api_environment = merge({
-    APP_ENV                   = "cloud"
-    PIPELINE_MODE             = "agentic"
-    SYNTHESIZER_CONTRACT      = "typed"
-    ALLOW_PIPELINE_OVERRIDE   = "false"
-    DEBUG_LLM_IO              = "false"
-    RAG_FAIL_LOUD             = "true"
-    GOOGLE_GENAI_USE_VERTEXAI = "TRUE"
-    GOOGLE_CLOUD_PROJECT      = var.project_id
-    VERTEX_AI_PROJECT         = var.project_id
-    GOOGLE_CLOUD_LOCATION     = var.region
-    VERTEX_AI_LOCATION        = var.region
-    GEMINI_MODEL              = var.gemini_model
-    EMBEDDING_MODEL           = var.embedding_model
-    EDGAR_USER_AGENT          = var.edgar_user_agent
-    DB_POOL_SIZE              = "3"
-    DB_MAX_OVERFLOW           = "2"
+    APP_ENV                                            = "cloud"
+    LOG_FORMAT                                         = "json"
+    OTEL_TRACES_EXPORTER                               = "gcp"
+    OTEL_SERVICE_NAME                                  = "forseti-api"
+    ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS               = "false"
+    OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "NO_CONTENT"
+    PIPELINE_MODE                                      = "agentic"
+    SYNTHESIZER_CONTRACT                               = "typed"
+    ALLOW_PIPELINE_OVERRIDE                            = "false"
+    DEBUG_LLM_IO                                       = "false"
+    RAG_FAIL_LOUD                                      = "true"
+    GOOGLE_GENAI_USE_VERTEXAI                          = "TRUE"
+    GOOGLE_CLOUD_PROJECT                               = var.project_id
+    VERTEX_AI_PROJECT                                  = var.project_id
+    GOOGLE_CLOUD_LOCATION                              = var.region
+    VERTEX_AI_LOCATION                                 = var.region
+    GEMINI_MODEL                                       = var.gemini_model
+    EMBEDDING_MODEL                                    = var.embedding_model
+    EDGAR_USER_AGENT                                   = var.edgar_user_agent
+    DB_POOL_SIZE                                       = "3"
+    DB_MAX_OVERFLOW                                    = "2"
   }, var.agent_modes)
 }
 

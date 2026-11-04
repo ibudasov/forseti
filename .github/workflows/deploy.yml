@@ -173,20 +173,19 @@ jobs:
           ID_TOKEN: ${{ steps.smoke_auth.outputs.id_token }}
         run: |
           set -euo pipefail
-          token="$ID_TOKEN"
           live_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --header "Authorization: Bearer $token" "$SERVICE_URL/live")"
+            --header "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/live")"
           [ "$live_status" = 200 ] || { echo "::error::Authenticated /live returned HTTP $live_status."; exit 1; }
 
           health="$(curl --silent --show-error --fail \
-            --header "Authorization: Bearer $token" "$SERVICE_URL/health")"
+            --header "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/health")"
           if ! jq -e '.app == "ok" and .db == "ok"' <<< "$health" >/dev/null; then
             echo "::error::Authenticated /health did not report app and database healthy."
             exit 1
           fi
 
           ticker_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --header "Authorization: Bearer $token" "$SERVICE_URL/ticker/NVDA")"
+            --header "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/ticker/NVDA")"
           if ! [[ "$ticker_status" =~ ^[1-4][0-9][0-9]$ ]]; then
             echo "::error::Authenticated GET /ticker/NVDA returned HTTP $ticker_status."
             exit 1

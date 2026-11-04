@@ -258,6 +258,23 @@ def test_apply_workflow_applies_saved_plan_without_destroy_gate():
     assert "allow_destroy" not in workflow
 
 
+def test_custom_metric_alerts_wait_for_their_logging_metrics():
+    monitoring = (ROOT / "infra/terraform/main/monitoring.tf").read_text()
+    expected_dependencies = {
+        "refresh_failed": "daily_refresh_status",
+        "refresh_missing": "daily_refresh_status",
+        "daily_llm_cost": "analysis_cost_usd",
+        "unpriced_run": "analysis_count",
+    }
+
+    for alert_policy, metric in expected_dependencies.items():
+        declaration = (
+            f'resource "google_monitoring_alert_policy" "{alert_policy}" {{\n'
+            f"  depends_on = [google_logging_metric.{metric}]"
+        )
+        assert declaration in monitoring
+
+
 def test_document_generation_preserves_prose_and_detects_manifest_changes():
     manifest = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
     document = (ROOT / "docs/gcp-access.md").read_text()

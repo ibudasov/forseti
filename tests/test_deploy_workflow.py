@@ -3,11 +3,14 @@ import os
 from pathlib import Path
 import subprocess
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 import pytest
 import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/deploy.yml"
+ROOT = WORKFLOW.parents[2]
 
 
 @pytest.fixture
@@ -43,6 +46,16 @@ def cloud_environment(tmp_path):
 def run_step(steps, name, environment):
     step = next(step for step in steps if step.get("name") == name)
     return subprocess.run(["bash", "-c", step["run"]], env=environment, capture_output=True, text=True)
+
+
+def test_deploy_housekeeping_revision_remains_available_to_alembic():
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+
+    revision = ScriptDirectory.from_config(config).get_revision("0015_agent_run_trace_id")
+
+    assert revision is not None
+    assert revision.down_revision == "0014_agent_run_cost"
 
 
 def test_deploy_routes_to_captured_revision_before_smoke(steps, cloud_environment):
@@ -85,8 +98,19 @@ def test_smoke_uses_non_reserved_paths_and_checks_database(steps, cloud_environm
     curl = directory / "curl"
     curl.write_text(
         '#!/bin/bash\n'
-        'printf "%s\\n" "${@: -1}" >> "$COMMAND_LOG"\n'
-        'case "${@: -1}" in\n'
+        'authorization=""\n'
+        'url=""\n'
+        'while (($#)); do\n'
+        '  if [ "$1" = "--header" ]; then authorization="$2"; shift 2; continue; fi\n'
+        '  url="$1"\n'
+        '  shift\n'
+        'done\n'
+        'if [ "$authorization" != "Authorization: Bearer offline-token" ]; then\n'
+        '  echo "unexpected authorization header: $authorization" >&2\n'
+        '  exit 22\n'
+        'fi\n'
+        'printf "%s %s\\n" "$authorization" "$url" >> "$COMMAND_LOG"\n'
+        'case "$url" in\n'
         '  */live|*/ticker/NVDA) printf 200 ;;\n'
         '  */health) printf \'{"app":"ok","db":"%s"}\' "$DATABASE_STATUS" ;;\n'
         '  *) exit 22 ;;\n'
@@ -108,8 +132,13 @@ def test_smoke_uses_non_reserved_paths_and_checks_database(steps, cloud_environm
     })
     assert result.returncode == (0 if database_status == "ok" else 1)
     requests = Path(cloud_environment["COMMAND_LOG"]).read_text().splitlines()
-    assert requests[:2] == ["https://offline.invalid/live", "https://offline.invalid/health"]
+    authorization_header = "Authorization: Bearer offline-token"
+    expected_requests = [
+        f"{authorization_header} https://offline.invalid/live",
+        f"{authorization_header} https://offline.invalid/health",
+    ]
     if database_status == "ok":
-        assert requests[2] == "https://offline.invalid/ticker/NVDA"
+        expected_requests.append(f"{authorization_header} https://offline.invalid/ticker/NVDA")
     else:
         assert "did not report app and database healthy" in result.stdout
+    assert requests == expected_requests
