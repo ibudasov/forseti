@@ -338,7 +338,7 @@ def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
     cost_alert = monitoring[cost_alert_start:next_alert_start]
 
     assert 'value_type  = "DISTRIBUTION"' in cost_metric
-    assert 'unit        = "USD"' in cost_metric
+    assert 'unit        = "{USD}"' in cost_metric
     assert "condition_monitoring_query_language {" in cost_alert
     assert "condition_threshold {" not in cost_alert
     assert "fetch cloud_run_revision" in cost_alert
@@ -353,6 +353,21 @@ def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
         "| condition val() > ${var.daily_llm_cost_threshold_usd}"
         in cost_alert
     )
+
+
+def test_dashboard_datasets_use_the_monitoring_time_series_query_schema():
+    dashboard = json.loads(
+        (ROOT / "infra/terraform/dashboards/forseti.json").read_text()
+    )
+    for widget in dashboard["gridLayout"]["widgets"]:
+        for dataset in widget["xyChart"]["dataSets"]:
+            query = dataset["timeSeriesQuery"]
+            assert set(query) in (
+                {"timeSeriesFilter"},
+                {"timeSeriesFilterRatio"},
+            )
+            assert "timeSeriesFilter" not in dataset
+            assert "timeSeriesFilterRatio" not in dataset
 
 
 def test_document_generation_preserves_prose_and_detects_manifest_changes():

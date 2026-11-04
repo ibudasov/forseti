@@ -105,6 +105,7 @@ run "daily_cost_threshold" {
 
   assert {
     condition = (
+      google_logging_metric.analysis_cost_usd.metric_descriptor[0].unit == "{USD}" &&
       google_monitoring_alert_policy.daily_llm_cost.enabled &&
       length(google_monitoring_alert_policy.daily_llm_cost.notification_channels) == 1 &&
       trimspace(google_monitoring_alert_policy.daily_llm_cost.conditions[0].condition_monitoring_query_language[0].query) == trimspace(<<-EOT

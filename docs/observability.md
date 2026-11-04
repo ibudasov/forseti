@@ -56,7 +56,8 @@ The daily LLM cost alert keeps the `analysis_cost_usd` distribution metric and
 uses MQL's `sum_from()` to extract each distribution's total cost. It sums those
 costs across all Cloud Run revisions over a rolling 24-hour window, evaluated
 every minute, and triggers when the total exceeds the configured USD threshold.
-The window does not reset at UTC midnight.
+The window does not reset at UTC midnight. The metric unit is the UCUM annotation
+`{USD}`; a bare `USD` is rejected by Monitoring's MQL alert validation.
 
 For detailed persisted step semantics and SQL checks, see
 [`agent-trace.md`](agent-trace.md).
