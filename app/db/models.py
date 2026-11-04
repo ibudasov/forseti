@@ -286,6 +286,10 @@ class AgentRun(SQLModel, table=True):
     __table_args__ = (sa.Index("ix_agent_runs_ticker_as_of_date", "ticker", "as_of_date"),)
 
     run_id: str = Field(sa_column=Column(sa.String(length=36), primary_key=True))
+    trace_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(sa.String(length=32), nullable=True),
+    )
     ticker: str = Field(sa_column=Column(sa.String(length=16), nullable=False, index=True))
     created_at: datetime = Field(
         default_factory=_utc_now,
