@@ -317,10 +317,11 @@ resource "google_monitoring_alert_policy" "daily_llm_cost" {
     display_name = "Daily recommendation cost"
     condition_monitoring_query_language {
       query    = <<-EOT
-        fetch logging.googleapis.com/user/forseti/analysis_cost_usd
-        | filter resource.type == 'cloud_run_revision'
-        | group_by 1d, [], [daily_cost_usd: sum(value.distribution.mean * value.distribution.count)]
-        | condition daily_cost_usd > ${var.daily_llm_cost_threshold_usd}
+        fetch cloud_run_revision
+        | metric 'logging.googleapis.com/user/forseti/analysis_cost_usd'
+        | group_by [], sliding(1d), [daily_cost_usd: sum(sum_from(value.analysis_cost_usd))]
+        | every 1m
+        | condition val() > ${var.daily_llm_cost_threshold_usd}
       EOT
       duration = "0s"
       trigger {

@@ -53,10 +53,10 @@ least once within each 23h30m window, including on non-trading days when no
 refresh work is scheduled, to avoid a weekend absence alert.
 
 The daily LLM cost alert keeps the `analysis_cost_usd` distribution metric and
-uses MQL to sum each distribution's mean multiplied by its count across all
-Cloud Run revisions. Its `1d` grouping is UTC-calendar-day aligned, not a
-rolling 24-hour window; the alert triggers when that day's total exceeds the
-configured USD threshold.
+uses MQL's `sum_from()` to extract each distribution's total cost. It sums those
+costs across all Cloud Run revisions over a rolling 24-hour window, evaluated
+every minute, and triggers when the total exceeds the configured USD threshold.
+The window does not reset at UTC midnight.
 
 For detailed persisted step semantics and SQL checks, see
 [`agent-trace.md`](agent-trace.md).

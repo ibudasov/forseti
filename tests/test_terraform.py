@@ -1,7 +1,6 @@
 """Cloud-free policy, owner-authentication and state-migration regression tests."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -293,8 +292,8 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
         )
         alert = monitoring[alert_start:next_alert_start if next_alert_start != -1 else None]
         if alert_policy == "daily_llm_cost":
-            assert f"fetch logging.googleapis.com/user/forseti/{metric}" in alert
-            assert f"resource.type == '{resource_type}'" in alert
+            assert f"fetch {resource_type}" in alert
+            assert f"| metric 'logging.googleapis.com/user/forseti/{metric}'" in alert
         else:
             assert (
                 f'metric.type=\\"logging.googleapis.com/user/forseti/{metric}\\"'
@@ -319,7 +318,7 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
     assert "93600s" not in refresh_missing
 
 
-def test_daily_llm_cost_alert_sums_distribution_totals_by_utc_day():
+def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
     monitoring = (ROOT / "infra/terraform/main/monitoring.tf").read_text()
     cost_metric_start = monitoring.index(
         'resource "google_logging_metric" "analysis_cost_usd" {'
@@ -342,44 +341,18 @@ def test_daily_llm_cost_alert_sums_distribution_totals_by_utc_day():
     assert 'unit        = "USD"' in cost_metric
     assert "condition_monitoring_query_language {" in cost_alert
     assert "condition_threshold {" not in cost_alert
-    assert "fetch logging.googleapis.com/user/forseti/analysis_cost_usd" in cost_alert
-    assert "| filter resource.type == 'cloud_run_revision'" in cost_alert
+    assert "fetch cloud_run_revision" in cost_alert
+    assert "| metric 'logging.googleapis.com/user/forseti/analysis_cost_usd'" in cost_alert
     assert (
-        "| group_by 1d, [], "
-        "[daily_cost_usd: sum(value.distribution.mean * value.distribution.count)]"
+        "| group_by [], sliding(1d), "
+        "[daily_cost_usd: sum(sum_from(value.analysis_cost_usd))]"
         in cost_alert
     )
+    assert "| every 1m" in cost_alert
     assert (
-        "| condition daily_cost_usd > ${var.daily_llm_cost_threshold_usd}"
+        "| condition val() > ${var.daily_llm_cost_threshold_usd}"
         in cost_alert
     )
-
-    distributions = [
-        ("2026-01-01T23:59:59+00:00", "revision-a", 4.9, 1),
-        ("2026-01-02T00:00:00+00:00", "revision-a", 1.2, 2),
-        ("2026-01-02T03:00:00+00:00", "revision-a", 1.8, 1),
-        ("2026-01-02T20:00:00+00:00", "revision-b", 2.1, 1),
-        ("2026-01-02T23:59:59+00:00", "revision-b", 0.4, 1),
-        ("2026-01-03T00:00:00+00:00", "revision-a", 1.3, 1),
-    ]
-    revision_totals = {}
-    daily_totals = {}
-    for timestamp, revision, mean, count in distributions:
-        utc_day = datetime.fromisoformat(timestamp).astimezone(timezone.utc).date()
-        revision_key = (utc_day, revision)
-        revision_totals[revision_key] = revision_totals.get(revision_key, 0) + mean * count
-        daily_totals[utc_day] = daily_totals.get(utc_day, 0) + mean * count
-
-    previous_day = datetime(2026, 1, 1, tzinfo=timezone.utc).date()
-    alert_day = datetime(2026, 1, 2, tzinfo=timezone.utc).date()
-    next_day = datetime(2026, 1, 3, tzinfo=timezone.utc).date()
-    assert revision_totals[(alert_day, "revision-a")] == pytest.approx(4.2)
-    assert revision_totals[(alert_day, "revision-b")] == pytest.approx(2.5)
-    assert all(total < 5 for (day, _revision), total in revision_totals.items() if day == alert_day)
-    assert daily_totals[alert_day] == pytest.approx(6.7)
-    assert daily_totals[alert_day] > 5
-    assert daily_totals[previous_day] == pytest.approx(4.9)
-    assert daily_totals[next_day] == pytest.approx(1.3)
 
 
 def test_document_generation_preserves_prose_and_detects_manifest_changes():
