@@ -1,9 +1,6 @@
 # Agent trace semantics
 
 `POST /analyze?include_trace=true` and `GET /runs/{run_id}` return an `AnalysisTrace` that records what actually happened during the run.
-When Cloud Trace export is enabled, `AnalysisTrace.trace_id` is the OpenTelemetry
-trace identifier that links the persisted run to its request span. It is nullable
-for runs created without an active tracing provider.
 
 ## Step statuses
 

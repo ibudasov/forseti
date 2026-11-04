@@ -25,14 +25,6 @@ from app.services.universe_diagnostics import build_universe_diagnostics
 from app.services.ticker_profile import build_ticker_profile
 from app.services.cost_model import check_pricing_coverage
 from app.settings import get_settings, validate_runtime_settings
-from app.observability.events import log_analysis_completed
-from app.observability.logging import configure_logging
-from app.observability.tracing import (
-    analysis_span,
-    configure_tracing,
-    shutdown_tracing,
-    set_analysis_span_attributes,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +32,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        configure_logging()
         validate_runtime_settings(get_settings())
         check_pricing_coverage(get_settings())
         yield
     finally:
-        shutdown_tracing()
         dispose_engines()
 
 
 app = FastAPI(title="Forseti API", lifespan=lifespan)
-configure_tracing(app)
 
 
 def _parse_database_url(url: str) -> Optional[dict]:
@@ -130,41 +119,20 @@ def analyze(
     try:
         from agents.config import load_agent_config
 
-        agent_config = load_agent_config()
-        pipeline_mode = pipeline or agent_config.pipeline_mode
         selected_pipeline = select_pipeline(
             pipeline,
-            agent_config,
+            load_agent_config(),
             override_allowed=override_allowed,
             engine=engine,
         )
-        with analysis_span():
-            response = selected_pipeline.analyze(request)
-            warning = override_warning(pipeline)
-            if warning is not None:
-                response.warnings.append(warning)
-                log_pipeline_override(request.ticker, pipeline)
-            settings = get_settings()
-            agent_modes = {
-                "fundamental": settings.FUNDAMENTAL_AGENT_MODE,
-                "technical": settings.TECHNICAL_AGENT_MODE,
-                "critic": settings.CRITIC_MODE,
-            }
-            set_analysis_span_attributes(
-                response=response,
-                pipeline=pipeline_mode,
-                fundamental_mode=agent_modes["fundamental"],
-                technical_mode=agent_modes["technical"],
-                critic_mode=agent_modes["critic"],
-            )
-            log_analysis_completed(
-                response,
-                pipeline=pipeline_mode,
-                agent_modes=agent_modes,
-            )
-            if not include_trace:
-                response.trace = None
-            return response
+        response = selected_pipeline.analyze(request)
+        warning = override_warning(pipeline)
+        if warning is not None:
+            response.warnings.append(warning)
+            log_pipeline_override(request.ticker, pipeline)
+        if not include_trace:
+            response.trace = None
+        return response
     except PipelineOverrideNotAllowedError as exc:
         raise HTTPException(status_code=403, detail="pipeline_override_disabled") from exc
     except GoogleWorkflowError as exc:

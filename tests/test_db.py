@@ -66,7 +66,6 @@ def test_agent_run_persists_and_loads_critic_effect_losslessly(db_engine):
     workflow = AgenticAnalysisWorkflow(load_agent_config(Settings(_env_file=None)), engine=db_engine)
     trace = AnalysisTrace(
         run_id="critic-roundtrip",
-        trace_id="a" * 32,
         ticker="NVDA",
         final_decision="no_trade",
         token_usage={"total_token_count": 3},
@@ -110,7 +109,6 @@ def test_agent_run_persists_and_loads_critic_effect_losslessly(db_engine):
 
     loaded = load_trace(trace.run_id, engine=db_engine)
     assert loaded is not None
-    assert loaded.trace_id == trace.trace_id
     assert loaded.critic_effect == trace.critic_effect
 
 

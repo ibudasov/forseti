@@ -7,7 +7,7 @@ from typing import Any, Dict, Sequence, Tuple
 
 import pytest
 
-from scripts.cloud_scorecard import gcp2, gcp3b, gcp4, gcp6
+from scripts.cloud_scorecard import gcp2, gcp3b, gcp4
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -271,12 +271,7 @@ class TestJobRunners:
 def api_service() -> dict:
     environment = {
         "APP_ENV": "cloud",
-        "LOG_FORMAT": "json",
         "PIPELINE_MODE": "agentic",
-        "OTEL_TRACES_EXPORTER": "gcp",
-        "OTEL_SERVICE_NAME": "forseti-api",
-        "ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS": "false",
-        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "NO_CONTENT",
         "GOOGLE_GENAI_USE_VERTEXAI": "TRUE",
         "FUNDAMENTAL_AGENT_MODE": "enforced",
         "TECHNICAL_AGENT_MODE": "enforced",
@@ -366,54 +361,6 @@ class TestApiRuntime:
         assert "expected 403" in outcome.detail
 
 
-class TestObservability:
-    def test_requires_all_log_metrics_enabled(self):
-        metrics = [{"name": name, "disabled": False} for name in sorted(gcp6.EXPECTED_METRICS)]
-
-        assert gcp6.check_log_metrics(environment({("logging", "metrics", "list"): metrics})).status is Status.PASS
-
-    def test_fails_when_a_log_metric_is_disabled(self):
-        metrics = [{"name": name, "disabled": False} for name in sorted(gcp6.EXPECTED_METRICS)]
-        metrics[0]["disabled"] = True
-
-        outcome = gcp6.check_log_metrics(environment({("logging", "metrics", "list"): metrics}))
-
-        assert outcome.status is Status.FAIL
-
-    def test_requires_dashboard_and_alerts(self):
-        dashboards = [{"displayName": "Forseti"}]
-        policies = [{"displayName": name, "enabled": {"value": True}} for name in gcp6.EXPECTED_ALERTS]
-
-        env = environment({
-            ("monitoring", "dashboards", "list"): dashboards,
-            ("monitoring", "policies", "list"): policies,
-        })
-
-        assert gcp6.check_dashboard(env).status is Status.PASS
-        assert gcp6.check_alert_policies(env).status is Status.PASS
-
-    def test_requires_enabled_email_notification_channel(self):
-        channels = [{
-            "type": "email",
-            "displayName": "Forseti owner email",
-            "enabled": True,
-            "labels": {"email_address": "owner@example.invalid"},
-        }]
-
-        assert gcp6.check_email_channel(environment({("monitoring", "channels", "list"): channels})).status is Status.PASS
-
-    def test_requires_recent_traced_analysis_and_no_5xx(self):
-        routes = {
-            ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
-            ("logging", "read", gcp6.API_5XX_FILTER): [],
-        }
-
-        env = environment(routes)
-
-        assert gcp6.check_recent_analysis_traces(env).status is Status.PASS
-        assert gcp6.check_no_recent_api_5xx(env).status is Status.PASS
-
-
 class TestRunner:
     def test_paid_checks_are_skipped_unless_requested(self):
         check = Check("paid.example", "Exit criteria", "Paid", Cost.PAID, lambda _: Outcome.passed("ran"))
@@ -461,23 +408,6 @@ class TestMarkdown:
             SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
             KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
             JOBS: None, API_SERVICE: None,
-            ("logging", "metrics", "list"): [
-                {"name": name, "disabled": False} for name in sorted(gcp6.EXPECTED_METRICS)
-            ],
-            ("monitoring", "dashboards", "list"): [{"displayName": "Forseti"}],
-            ("monitoring", "policies", "list"): [
-                {"displayName": name, "enabled": {"value": True}} for name in gcp6.EXPECTED_ALERTS
-            ],
-            ("monitoring", "channels", "list"): [
-                {
-                    "type": "email",
-                    "displayName": "Forseti owner email",
-                    "enabled": True,
-                    "labels": {"email_address": "owner@example.invalid"},
-                }
-            ],
-            ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
-            ("logging", "read", gcp6.API_5XX_FILTER): [],
         }, {("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
             fixture("drift_success")})
         reports = run_checks(ALL_CHECKS, env, include_paid)
@@ -495,7 +425,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 10 · ❌ 2 · ⏳ 8 · ➖ 1" in markdown
+        assert "✅ 4 · ❌ 2 · ⏳ 9 · ➖ 1" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)

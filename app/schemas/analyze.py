@@ -58,7 +58,6 @@ class TraceStep(BaseModel):
 
 class AnalysisTrace(BaseModel):
     run_id: str
-    trace_id: Optional[str] = None
     ticker: str
     as_of_date: Optional[date] = None
     as_of_date_source: Optional[Literal["request", "created_at_backfill"]] = None
