@@ -63,7 +63,7 @@ resource "google_logging_metric" "analysis_cost_usd" {
   metric_descriptor {
     metric_kind = "DELTA"
     value_type  = "DISTRIBUTION"
-    unit        = "USD"
+    unit        = "{USD}"
   }
 
   value_extractor = "EXTRACT(jsonPayload.cost_usd)"

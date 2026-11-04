@@ -8,12 +8,14 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/request_count\" AND resource.type=\"cloud_run_revision\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_RATE",
-                  "crossSeriesReducer": "REDUCE_SUM"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_count\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_RATE",
+                    "crossSeriesReducer": "REDUCE_SUM"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -29,24 +31,28 @@
           "dataSets": [
             {
               "legendTemplate": "p50",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_PERCENTILE_50",
-                  "crossSeriesReducer": "REDUCE_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_PERCENTILE_50",
+                    "crossSeriesReducer": "REDUCE_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
             },
             {
               "legendTemplate": "p95",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_PERCENTILE_95",
-                  "crossSeriesReducer": "REDUCE_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_PERCENTILE_95",
+                    "crossSeriesReducer": "REDUCE_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -61,12 +67,14 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/request_count\" AND metric.label.response_code_class=\"5xx\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_SUM",
-                  "crossSeriesReducer": "REDUCE_SUM"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_count\" AND metric.label.response_code_class=\"5xx\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM"
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
@@ -82,24 +90,28 @@
           "dataSets": [
             {
               "legendTemplate": "instances",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/container/instance_count\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_MEAN",
-                  "crossSeriesReducer": "REDUCE_SUM"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/container/instance_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_SUM"
+                  }
                 }
               },
               "plotType": "LINE"
             },
             {
               "legendTemplate": "memory utilization",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/container/memory/utilizations\"",
-                "aggregation": {
-                  "alignmentPeriod": "60s",
-                  "perSeriesAligner": "ALIGN_MEAN",
-                  "crossSeriesReducer": "REDUCE_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/container/memory/utilizations\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -115,33 +127,39 @@
           "dataSets": [
             {
               "legendTemplate": "CPU",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"cloudsql.googleapis.com/database/cpu/utilization\"",
-                "aggregation": {
-                  "alignmentPeriod": "300s",
-                  "perSeriesAligner": "ALIGN_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"cloudsql.googleapis.com/database/cpu/utilization\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
             },
             {
               "legendTemplate": "connections",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"cloudsql.googleapis.com/database/postgresql/num_backends\"",
-                "aggregation": {
-                  "alignmentPeriod": "300s",
-                  "perSeriesAligner": "ALIGN_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"cloudsql.googleapis.com/database/postgresql/num_backends\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
             },
             {
               "legendTemplate": "disk utilization",
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"cloudsql.googleapis.com/database/disk/utilization\"",
-                "aggregation": {
-                  "alignmentPeriod": "300s",
-                  "perSeriesAligner": "ALIGN_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"cloudsql.googleapis.com/database/disk/utilization\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -156,12 +174,14 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"run.googleapis.com/job/completed_execution_count\"",
-                "aggregation": {
-                  "alignmentPeriod": "3600s",
-                  "perSeriesAligner": "ALIGN_SUM",
-                  "crossSeriesReducer": "REDUCE_SUM"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/job/completed_execution_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM"
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
@@ -176,13 +196,17 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\"",
-                "aggregation": {
-                  "alignmentPeriod": "86400s",
-                  "perSeriesAligner": "ALIGN_SUM",
-                  "crossSeriesReducer": "REDUCE_SUM",
-                  "groupByFields": ["metric.label.decision"]
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": [
+                      "metric.label.decision"
+                    ]
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
@@ -197,12 +221,14 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_cost_usd\"",
-                "aggregation": {
-                  "alignmentPeriod": "86400s",
-                  "perSeriesAligner": "ALIGN_MEAN",
-                  "crossSeriesReducer": "REDUCE_MEAN"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_cost_usd\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_MEAN"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -217,21 +243,25 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_latency_ms\"",
-                "aggregation": {
-                  "alignmentPeriod": "3600s",
-                  "perSeriesAligner": "ALIGN_PERCENTILE_50"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_latency_ms\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_PERCENTILE_50"
+                  }
                 }
               },
               "plotType": "LINE"
             },
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_latency_ms\"",
-                "aggregation": {
-                  "alignmentPeriod": "3600s",
-                  "perSeriesAligner": "ALIGN_PERCENTILE_95"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_latency_ms\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_PERCENTILE_95"
+                  }
                 }
               },
               "plotType": "LINE"
@@ -246,13 +276,18 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/agent_degraded_count\"",
-                "aggregation": {
-                  "alignmentPeriod": "86400s",
-                  "perSeriesAligner": "ALIGN_SUM",
-                  "crossSeriesReducer": "REDUCE_SUM",
-                  "groupByFields": ["metric.label.agent", "metric.label.reason"]
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/agent_degraded_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": [
+                      "metric.label.agent",
+                      "metric.label.reason"
+                    ]
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
@@ -267,13 +302,17 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/agent_downgrade_count\"",
-                "aggregation": {
-                  "alignmentPeriod": "86400s",
-                  "perSeriesAligner": "ALIGN_SUM",
-                  "crossSeriesReducer": "REDUCE_SUM",
-                  "groupByFields": ["metric.label.agent"]
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/agent_downgrade_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": [
+                      "metric.label.agent"
+                    ]
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
@@ -288,21 +327,23 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilterRatio": {
-                "numerator": {
-                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_degraded_count\"",
-                  "aggregation": {
-                    "alignmentPeriod": "86400s",
-                    "perSeriesAligner": "ALIGN_SUM",
-                    "crossSeriesReducer": "REDUCE_SUM"
-                  }
-                },
-                "denominator": {
-                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\"",
-                  "aggregation": {
-                    "alignmentPeriod": "86400s",
-                    "perSeriesAligner": "ALIGN_SUM",
-                    "crossSeriesReducer": "REDUCE_SUM"
+              "timeSeriesQuery": {
+                "timeSeriesFilterRatio": {
+                  "numerator": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_degraded_count\"",
+                    "aggregation": {
+                      "alignmentPeriod": "86400s",
+                      "perSeriesAligner": "ALIGN_SUM",
+                      "crossSeriesReducer": "REDUCE_SUM"
+                    }
+                  },
+                  "denominator": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_count\"",
+                    "aggregation": {
+                      "alignmentPeriod": "86400s",
+                      "perSeriesAligner": "ALIGN_SUM",
+                      "crossSeriesReducer": "REDUCE_SUM"
+                    }
                   }
                 }
               },
@@ -318,11 +359,13 @@
         "xyChart": {
           "dataSets": [
             {
-              "timeSeriesFilter": {
-                "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_confidence\"",
-                "aggregation": {
-                  "alignmentPeriod": "86400s",
-                  "perSeriesAligner": "ALIGN_DELTA"
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/forseti/analysis_confidence\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_DELTA"
+                  }
                 }
               },
               "plotType": "STACKED_BAR"
