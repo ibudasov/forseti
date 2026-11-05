@@ -85,6 +85,7 @@ both layers, this generated documentation, and future live IAM verification
 | service | forseti-api | owner | run.invoker |
 | service | forseti-api | forseti-deployer | run.invoker |
 | service | forseti-api | forseti-verifier | run.invoker |
+| job | forseti-trust-check | forseti-verifier | run.invoker |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,

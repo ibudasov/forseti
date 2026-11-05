@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from scripts.cloud_scorecard import gcp2, gcp3b, gcp4, gcp6, later_groups
+from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3b, gcp4, gcp6, later_groups
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, CheckReport, Cost, Outcome
 
@@ -13,6 +13,7 @@ ALL_CHECKS: Sequence[Check] = (
     *gcp3b.CHECKS,
     *gcp4.CHECKS,
     *gcp6.CHECKS,
+    *exit_criteria.CHECKS,
     *later_groups.CHECKS,
 )
 

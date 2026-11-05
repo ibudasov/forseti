@@ -22,6 +22,16 @@ http://127.0.0.1:8000/docs
 
 - [Trust report](docs/trust-report.md)
 
+## Deployment
+
+Forseti runs privately on GCP (Cloud Run, Cloud SQL, Vertex AI).
+
+- [Architecture](docs/architecture-gcp.md)
+- [Runbook](docs/runbook.md) (deploy, rollback, kill switch, restore, tear-down)
+- [Demo script](docs/demo.md)
+- [Cloud trust check](docs/trust/cloud-go-live.md)
+- [Access and Terraform operations](docs/gcp-access.md)
+
 ## Screening endpoint
 
 `GET /screening` runs the existing deterministic analyzer across the active universe and returns a compact, read-only batch result sorted by actionability: trade first, then watchlist, then no-trade, then errors.

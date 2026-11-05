@@ -12,6 +12,7 @@ from typing import Any
 
 from agents.config import AGENTIC_PIPELINE_MODE, LINEAR_PIPELINE_MODE, load_agent_config
 from app.db.session import get_engine
+from app.observability.events import downgraded_agents
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
 from app.services.pipeline import AnalysisPipeline, select_pipeline
 from app.services.cost_model import format_cost_usd
@@ -41,6 +42,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    report, _ = execute_preflight(args)
+    if _has_unpriced_runs(report) and not args.allow_unpriced:
+        print("Error: report contains unpriced runs; update app/pricing/catalog.json or pass --allow-unpriced.")
+        return 1
+    return 0 if all(run["status"] == "passed" for run in report["runs"]) else 1
+
+
+def execute_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
+    """Run the live pre-flight, write both reports and return the report with its JSON path."""
     settings = get_settings()
     tickers = _requested_tickers(args.tickers, Path(args.matrix))
     engine = get_engine()
@@ -72,10 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     markdown_path.write_text(render_markdown(report), encoding="utf-8")
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {markdown_path}")
-    if _has_unpriced_runs(report) and not args.allow_unpriced:
-        print("Error: report contains unpriced runs; update app/pricing/catalog.json or pass --allow-unpriced.")
-        return 1
-    return 0 if all(run["status"] == "passed" for run in report["runs"]) else 1
+    return report, json_path
 
 
 def _has_unpriced_runs(report: dict[str, Any]) -> bool:
@@ -238,6 +245,7 @@ def _analysis_summary(
         "estimated_cost_usd": estimated_cost,
         "cost_status": "estimated" if estimated_cost is not None else "unpriced",
         "degraded_flags": _degraded_flags(trace),
+        "downgraded_agents": downgraded_agents(trace),
     }
 
 

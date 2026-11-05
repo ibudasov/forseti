@@ -7,7 +7,7 @@ from typing import Any, Dict, Sequence, Tuple
 
 import pytest
 
-from scripts.cloud_scorecard import gcp2, gcp3b, gcp4, gcp6
+from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3b, gcp4, gcp6
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -478,8 +478,12 @@ class TestMarkdown:
             ],
             ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
             ("logging", "read", gcp6.API_5XX_FILTER): [],
-        }, {("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
-            fixture("drift_success")})
+            ("logging", "read", exit_criteria._unexpected_writers_filter()): [],
+        }, {
+            ("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
+                fixture("drift_success"),
+            ("repos/example/repo/actions/runs/1/jobs",): {"jobs": []},
+        })
         reports = run_checks(ALL_CHECKS, env, include_paid)
         return render_markdown(reports, GROUPS, "abc1234", "forseti-api-00012-abc")
 
@@ -495,7 +499,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 10 · ❌ 2 · ⏳ 8 · ➖ 1" in markdown
+        assert "✅ 11 · ❌ 2 · ⏳ 10 · ➖ 2" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)
