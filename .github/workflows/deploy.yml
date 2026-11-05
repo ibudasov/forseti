@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   workflow_run:
-    workflows: [Build-n-test]
+    workflows: [Build-n-test, Infrastructure]
     branches: [main]
     types: [completed]
   workflow_dispatch: {}
@@ -16,43 +16,133 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy API
+  deployment-gate:
+    name: Wait for workload infrastructure
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository)
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.name == 'Build-n-test' ||
+      github.event.workflow_run.name == 'Infrastructure'))
     runs-on: ubuntu-latest
-    environment: gcp-dev
-    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      should_deploy: ${{ steps.gate.outputs.should_deploy }}
+      source_sha: ${{ steps.gate.outputs.source_sha }}
     steps:
-      - name: Validate deployment source
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Gate deployment on workload apply
+        id: gate
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           RUN_EVENT: ${{ github.event.workflow_run.event }}
           RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RUN_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_WORKFLOW: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
           REPOSITORY: ${{ github.repository }}
-          REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             [ "$REF" = refs/heads/main ] || { echo "::error::Manual deployments must run from main."; exit 1; }
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           if [ "$RUN_CONCLUSION" != success ] || [ "$RUN_EVENT" != push ] ||
              [ "$RUN_BRANCH" != main ] || [ "$RUN_REPOSITORY" != "$REPOSITORY" ]; then
-            echo "::error::Only a successful Build-n-test push from this repository's main branch can deploy."
+            echo "::error::Only successful pushes from this repository's main branch can deploy."
             exit 1
           fi
 
+          if [ "$RUN_WORKFLOW" = "Build-n-test" ]; then
+            previous_build_shas="$(gh api --paginate \
+              "repos/$REPOSITORY/actions/workflows/test.yml/runs?branch=main&event=push&per_page=100" \
+              --jq '.workflow_runs[].head_sha')"
+            previous_build_sha=""
+            while IFS= read -r candidate_sha; do
+              [ -n "$candidate_sha" ] || continue
+              [ "$candidate_sha" != "$SOURCE_SHA" ] || continue
+              if git merge-base --is-ancestor "$candidate_sha" "$SOURCE_SHA"; then
+                previous_build_sha="$candidate_sha"
+                break
+              fi
+            done <<< "$previous_build_shas"
+
+            if [ -z "$previous_build_sha" ]; then
+              echo "::notice::No earlier main build run is available as a safe infrastructure comparison point; use manual deployment after verifying infrastructure."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            changed_workloads="$(git diff --name-only "$previous_build_sha" "$SOURCE_SHA" -- \
+              infra/terraform/main/ infra/terraform/bootstrap/identities.json)"
+            if [ -n "$changed_workloads" ]; then
+              echo "::notice::Deferring deployment until the matching workload infrastructure apply succeeds."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          elif [ "$RUN_WORKFLOW" = "Infrastructure" ]; then
+            apply_conclusion="$(gh api \
+              "repos/$REPOSITORY/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs" \
+              --jq '.jobs[] | select(.name == "Approved workload apply") | .conclusion')"
+            if [ "$apply_conclusion" != success ]; then
+              echo "::notice::Deferring deployment because the matching approved workload apply did not succeed."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            build_conclusion="$(gh api --paginate \
+              "repos/$REPOSITORY/actions/workflows/test.yml/runs?head_sha=$SOURCE_SHA&event=push&per_page=100" \
+              --jq '.workflow_runs | map(select(.head_sha == env.SOURCE_SHA)) | sort_by(.run_number) | last | .conclusion // empty')"
+            if [ "$build_conclusion" != success ]; then
+              echo "::notice::Deferring deployment because Build-n-test has not succeeded for this commit."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "::error::Unsupported workflow run cannot deploy."
+            exit 1
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy API
+    needs: deployment-gate
+    if: needs.deployment-gate.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: gcp-dev
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.deployment-gate.outputs.source_sha }}
           persist-credentials: false
 
       - uses: google-github-actions/auth@v3
@@ -65,9 +155,7 @@ jobs:
       - name: Verify workload resources and capture rollback revision
         id: source
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-          DISPATCH_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ needs.deployment-gate.outputs.source_sha }}
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION }}
           ARTIFACT_REPO: ${{ vars.GCP_ARTIFACT_REPO }}
@@ -76,6 +164,11 @@ jobs:
           if ! gcloud run jobs describe forseti-housekeeping \
             --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json >/dev/null; then
             echo "::error::forseti-housekeeping does not exist; apply the approved gcp-infra plan before deploying."
+            exit 1
+          fi
+          if ! gcloud run jobs describe forseti-trust-check \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json >/dev/null; then
+            echo "::error::forseti-trust-check does not exist; apply the approved gcp-infra plan before deploying."
             exit 1
           fi
           if ! gcloud run services describe forseti-api \
@@ -89,14 +182,12 @@ jobs:
             echo "::error::forseti-api has no URL or 100% serving revision to use for a safe rollback."
             exit 1
           fi
-          source_sha="$DISPATCH_SHA"
-          if [ "$EVENT_NAME" = workflow_run ]; then source_sha="$RUN_SHA"; fi
-          image="${ARTIFACT_REPO}/forseti:${source_sha}"
+          image="${ARTIFACT_REPO}/forseti:${SOURCE_SHA}"
           {
             echo "service_url=$service_url"
             echo "previous_revision=$previous_revision"
             echo "image=$image"
-            echo "revision_sha=$source_sha"
+            echo "revision_sha=$SOURCE_SHA"
           } >> "$GITHUB_OUTPUT"
 
       - name: Configure Artifact Registry authentication
