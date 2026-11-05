@@ -19,6 +19,11 @@ def steps():
 
 
 @pytest.fixture
+def gate_steps():
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]["deployment-gate"]["steps"]
+
+
+@pytest.fixture
 def cloud_environment(tmp_path):
     executable = tmp_path / "gcloud"
     executable.write_text(
@@ -43,9 +48,235 @@ def cloud_environment(tmp_path):
     }
 
 
+@pytest.fixture
+def gate_environment(tmp_path):
+    executable_directory = tmp_path / "bin"
+    executable_directory.mkdir()
+    git = executable_directory / "git"
+    git.write_text(
+        '#!/bin/bash\n'
+        'printf "git %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [ "$1" = "merge-base" ]; then\n'
+        '  [ "$3" = "$PREVIOUS_BUILD_SHA" ]\n'
+        '  exit $?\n'
+        'fi\n'
+        'if [ "$1" = "diff" ]; then printf "%s" "$CHANGED_FILES"; fi\n'
+    )
+    git.chmod(0o755)
+    gh = executable_directory / "gh"
+    gh.write_text(
+        '#!/bin/bash\n'
+        'printf "gh %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$*" == *"actions/workflows/test.yml/runs?branch="* ]]; then\n'
+        '  printf "%s\\n" "$PREVIOUS_BUILD_SHAS"\n'
+        'elif [[ "$*" == *"actions/workflows/test.yml/runs?head_sha="* ]]; then\n'
+        '  printf "%s\\n" "$BUILD_CONCLUSION"\n'
+        'else\n'
+        '  printf "%s\\n" "$GH_RESPONSE"\n'
+        'fi\n'
+    )
+    gh.chmod(0o755)
+    return {
+        **os.environ,
+        "PATH": f"{executable_directory}:{os.environ['PATH']}",
+        "COMMAND_LOG": str(tmp_path / "commands"),
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "GITHUB_SHA": "dispatch-sha",
+        "EVENT_NAME": "workflow_run",
+        "REF": "refs/heads/main",
+        "RUN_CONCLUSION": "success",
+        "RUN_EVENT": "push",
+        "RUN_BRANCH": "main",
+        "RUN_REPOSITORY": "ibudasov/forseti",
+        "RUN_WORKFLOW": "Build-n-test",
+        "RUN_ID": "123",
+        "RUN_ATTEMPT": "1",
+        "SOURCE_SHA": "source-sha",
+        "REPOSITORY": "ibudasov/forseti",
+        "PREVIOUS_BUILD_SHA": "previous-sha",
+        "PREVIOUS_BUILD_SHAS": "previous-sha",
+        "BUILD_CONCLUSION": "success",
+        "CHANGED_FILES": "",
+        "GH_RESPONSE": "success",
+    }
+
+
 def run_step(steps, name, environment):
     step = next(step for step in steps if step.get("name") == name)
     return subprocess.run(["bash", "-c", step["run"]], env=environment, capture_output=True, text=True)
+
+
+def deployment_gate_outputs(environment):
+    return Path(environment["GITHUB_OUTPUT"]).read_text().splitlines()
+
+
+def test_app_only_build_deploys_after_successful_build(gate_steps, gate_environment):
+    result = run_step(gate_steps, "Gate deployment on workload apply", gate_environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(gate_environment) == [
+        "should_deploy=true",
+        "source_sha=source-sha",
+    ]
+    commands = Path(gate_environment["COMMAND_LOG"]).read_text()
+    assert "workflows/test.yml/runs?branch=main" in commands
+    assert "attempts/" not in commands
+
+
+def test_build_defers_deployment_when_workload_infrastructure_changes(gate_steps, gate_environment):
+    environment = {**gate_environment, "CHANGED_FILES": "infra/terraform/main/trust_check.tf"}
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+    assert "Deferring deployment" in result.stdout
+    commands = Path(environment["COMMAND_LOG"]).read_text()
+    assert "workflows/test.yml/runs?branch=main" in commands
+    assert "attempts/" not in commands
+
+
+def test_infrastructure_deployment_requires_matching_successful_apply(gate_steps, gate_environment):
+    environment = {
+        **gate_environment,
+        "RUN_WORKFLOW": "Infrastructure",
+        "CHANGED_FILES": "infra/terraform/main/trust_check.tf",
+    }
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=true",
+        "source_sha=source-sha",
+    ]
+    assert "workflows/test.yml/runs?head_sha=source-sha" in Path(environment["COMMAND_LOG"]).read_text()
+    assert "runs/123/attempts/1/jobs" in Path(environment["COMMAND_LOG"]).read_text()
+
+
+@pytest.mark.parametrize("apply_conclusion", ["failure", "skipped", ""])
+def test_failed_or_skipped_apply_never_deploys(gate_steps, gate_environment, apply_conclusion):
+    environment = {
+        **gate_environment,
+        "RUN_WORKFLOW": "Infrastructure",
+        "CHANGED_FILES": "infra/terraform/main/trust_check.tf",
+        "GH_RESPONSE": apply_conclusion,
+    }
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+
+
+def test_infrastructure_apply_is_not_used_when_it_was_skipped(gate_steps, gate_environment):
+    environment = {
+        **gate_environment,
+        "RUN_WORKFLOW": "Infrastructure",
+        "GH_RESPONSE": "skipped",
+    }
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+    assert "workflows/test.yml/runs?head_sha=" not in Path(environment["COMMAND_LOG"]).read_text()
+
+
+def test_infrastructure_deployment_waits_for_matching_build_success(gate_steps, gate_environment):
+    environment = {
+        **gate_environment,
+        "RUN_WORKFLOW": "Infrastructure",
+        "BUILD_CONCLUSION": "in_progress",
+    }
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+    assert "Build-n-test has not succeeded" in result.stdout
+
+
+def test_build_fails_closed_without_a_previous_main_build(gate_steps, gate_environment):
+    environment = {**gate_environment, "PREVIOUS_BUILD_SHAS": ""}
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+    assert "No earlier main build run" in result.stdout
+
+
+def test_manual_deploy_remains_limited_to_main(gate_steps, gate_environment):
+    environment = {
+        **gate_environment,
+        "EVENT_NAME": "workflow_dispatch",
+        "GITHUB_SHA": "manual-source-sha",
+    }
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=true",
+        "source_sha=manual-source-sha",
+    ]
+
+    environment = {**environment, "REF": "refs/heads/feature"}
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode != 0
+    assert "Manual deployments must run from main" in result.stdout
+
+
+def test_workflow_run_from_another_repository_is_rejected(gate_steps, gate_environment):
+    environment = {**gate_environment, "RUN_REPOSITORY": "fork/forseti"}
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode != 0
+    assert "Only successful pushes from this repository's main branch can deploy" in result.stdout
+
+
+def test_missing_trust_check_job_fails_deployment_preflight(steps, cloud_environment, tmp_path):
+    executable = tmp_path / "gcloud"
+    executable.write_text(
+        '#!/bin/bash\n'
+        'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$*" == *forseti-trust-check* ]]; then exit 1; fi\n'
+    )
+    executable.chmod(0o755)
+    environment = {
+        **cloud_environment,
+        "PATH": f"{tmp_path}:{cloud_environment['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "SOURCE_SHA": "source-sha",
+        "ARTIFACT_REPO": "offline-artifact-repo",
+    }
+
+    result = run_step(steps, "Verify workload resources and capture rollback revision", environment)
+
+    assert result.returncode != 0
+    assert "forseti-trust-check does not exist" in result.stdout
+    commands = Path(environment["COMMAND_LOG"]).read_text()
+    assert "run jobs describe forseti-housekeeping" in commands
+    assert "run jobs describe forseti-trust-check" in commands
+    assert "services describe forseti-api" not in commands
 
 
 def test_deploy_housekeeping_revision_remains_available_to_alembic():
