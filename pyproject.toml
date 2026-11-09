@@ -11,28 +11,28 @@ authors = [
 dependencies = [
   "fastapi>=0.109.0",
   "uvicorn[standard]>=0.23.0",
-  "pydantic>=2.14.2",
+  "pydantic>=2.14.3",
   "sqlmodel>=0.0.8",
-  "sqlalchemy>=2.1.6,<2.2",
+  "sqlalchemy>=2.1.8,<2.2",
   "alembic>=1.11.0",
   "python-dotenv>=1.0.0",
   "pydantic-settings>=2.16.2",
   "psycopg2-binary>=2.9.0",
   "pgvector>=0.3.0",
-  "yfinance>=0.2.0",
-  "pandas>=2.0.0",
+  "yfinance>=1.8.0",
+  "pandas>=3.1.1",
   "requests>=2.31.0",
   "httpx>=0.24.0",
   "google-cloud-aiplatform>=2.7.0",
   "google-genai>=2.34.0",
   "google-adk>=1.0.0,<3.0.0",
   "exchange-calendars>=4.5.0,<5.0.0",
-  "opentelemetry-sdk>=1.44.0",
+  "opentelemetry-sdk>=1.45.2",
   "opentelemetry-exporter-gcp-trace>=1.15.0",
   "opentelemetry-propagator-gcp>=1.15.0",
-  "opentelemetry-instrumentation-fastapi>=0.65b0",
-  "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
-  "opentelemetry-instrumentation-requests>=0.65b0"
+  "opentelemetry-instrumentation-fastapi>=0.66b2",
+  "opentelemetry-instrumentation-sqlalchemy>=0.66b2",
+  "opentelemetry-instrumentation-requests>=0.66b2"
 ]
 
 [project.optional-dependencies]
