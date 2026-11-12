@@ -355,6 +355,16 @@ def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
     )
 
 
+def test_dashboard_grid_columns_use_monitoring_int64_json_encoding():
+    dashboard = json.loads(
+        (ROOT / "infra/terraform/dashboards/forseti.json").read_text()
+    )
+    columns = dashboard["gridLayout"]["columns"]
+
+    assert isinstance(columns, str), "Monitoring returns int64 columns as a JSON string"
+    assert int(columns) > 0
+
+
 def test_dashboard_datasets_use_the_monitoring_time_series_query_schema():
     dashboard = json.loads(
         (ROOT / "infra/terraform/dashboards/forseti.json").read_text()

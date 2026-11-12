@@ -101,6 +101,19 @@ run "workload_plan" {
   }
   assert {
     condition = (
+      tolist([for volume in google_cloud_run_v2_job.trust_check.template[0].template[0].volumes : volume.name]) ==
+      sort([for volume in google_cloud_run_v2_job.trust_check.template[0].template[0].volumes : volume.name]) &&
+      [for mount in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].volume_mounts : mount.name] ==
+      [for volume in google_cloud_run_v2_job.trust_check.template[0].template[0].volumes : volume.name] &&
+      { for mount in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].volume_mounts : mount.name => mount.mount_path } ==
+      { artifacts = "/gcs", cloudsql = "/cloudsql" } &&
+      length(google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[0].gcs) == 1 &&
+      length(google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[1].cloud_sql_instance) == 1
+    )
+    error_message = "Trust-check volumes and mounts must retain their sources and paths in API-returned name order to avoid positional drift."
+  }
+  assert {
+    condition = (
       google_sql_database_instance.forseti_pg.database_version == "POSTGRES_15" &&
       google_sql_database_instance.forseti_pg.deletion_protection &&
       google_sql_database_instance.forseti_pg.settings[0].tier == "db-f1-micro" &&
