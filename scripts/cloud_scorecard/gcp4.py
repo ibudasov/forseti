@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -122,6 +123,11 @@ def check_runtime_configuration(env: Environment) -> Outcome:
 
 
 def _identity_token(audience: str) -> str:
+    # WIF external-account credentials cannot mint ID tokens. ops.yml mints one
+    # for this audience and passes it here; local owner credentials still use gcloud.
+    supplied = os.environ.get("SCORECARD_ID_TOKEN", "").strip()
+    if supplied:
+        return supplied
     try:
         result = subprocess.run(
             ["gcloud", "auth", "print-identity-token", f"--audiences={audience}"],
