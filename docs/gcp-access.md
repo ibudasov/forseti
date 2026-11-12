@@ -65,7 +65,7 @@ both layers, this generated documentation, and future live IAM verification
 | `forseti-tf-plan` | Read-only infrastructure plans and drift checks | viewer, iam.securityReviewer | None | infra.yml on main; no environment |
 | `forseti-tf-apply` | Approved infrastructure applies; no identity or billing administration | run.admin, cloudsql.admin, secretmanager.admin, artifactregistry.admin, cloudscheduler.admin, monitoring.editor, logging.configWriter, storage.admin (exclude_state_bucket) | forseti-api, forseti-jobs, forseti-housekeeping, forseti-scheduler | infra.yml on main; gcp-infra |
 | `forseti-deployer` | Deploy application images from main | run.developer, artifactregistry.writer | forseti-api, forseti-jobs, forseti-housekeeping | deploy.yml on main; gcp-dev |
-| `forseti-verifier` | Read-only live operational verification; no secret values or table data | run.viewer, cloudsql.viewer, secretmanager.viewer, iam.securityReviewer, iam.workloadIdentityPoolViewer, logging.viewer, monitoring.viewer, cloudtrace.user, cloudscheduler.viewer, artifactregistry.reader | None | ops.yml on main; no environment |
+| `forseti-verifier` | Read-only verification; may execute the trust job with CONFIRM_COST; no secret values or table data | run.viewer, cloudsql.viewer, secretmanager.viewer, iam.securityReviewer, iam.workloadIdentityPoolViewer, logging.viewer, monitoring.viewer, cloudtrace.user, cloudscheduler.viewer, artifactregistry.reader | None | ops.yml on main; no environment |
 
 | State identity | Role | Object prefix |
 |---|---|---|
@@ -85,7 +85,8 @@ both layers, this generated documentation, and future live IAM verification
 | service | forseti-api | owner | run.invoker |
 | service | forseti-api | forseti-deployer | run.invoker |
 | service | forseti-api | forseti-verifier | run.invoker |
-| job | forseti-trust-check | forseti-verifier | run.invoker |
+| job | forseti-trust-check | forseti-verifier | run.jobsExecutorWithOverrides |
+| bucket | forseti-505116-artifacts | forseti-jobs | storage.objectUser |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,
@@ -237,7 +238,8 @@ than changing the console by hand.
 
 For routine verification and agents without an authorized local session,
 `.github/workflows/ops.yml` checks the cloud. It authenticates as
-`forseti-verifier` (read-only; no secret values or table data) and edits **one**
+`forseti-verifier` (read-only project roles; no secret values or table data)
+and edits **one**
 comment on issue #121, found by the
 hidden marker `<!-- forseti-scorecard -->`. The same Markdown goes to the job
 summary. Everything is redacted first: no URLs, emails, project numbers or
@@ -254,13 +256,29 @@ job is skipped). The runner reacts 👀 on the command, then 🚀 on success or
 😕 on failure. Statuses: ✅ pass, ❌ exists but is wrong, ⏳ resource not
 created yet (milestone not started), ➖ skipped (paid check on `/verify`).
 
+The private API checks need an ID token. Workload Identity Federation writes
+external-account credentials, and `gcloud auth print-identity-token` cannot
+mint an ID token from those. Ops therefore resolves the service URL, masks it,
+and has `google-github-actions/auth` mint an ID token for `forseti-verifier`
+with that audience. The token is passed only to the check step as
+`SCORECARD_ID_TOKEN`. It is not printed. Local owner runs still fall back to
+`gcloud auth print-identity-token`. The token lasts one hour, which covers the
+trust-job poll plus the demo check.
+
+`roles/run.invoker` can execute a job but cannot pass `--update-env-vars`.
+`forseti-verifier` therefore holds `roles/run.jobsExecutorWithOverrides` on
+`forseti-trust-check` only, so `/verify full` can pass `CONFIRM_COST=yes`
+without putting that variable in the job definition. Job and bucket grants are
+applied by the main layer (`access.tf`), not by bootstrap.
+
 Checks live in `scripts/cloud_scorecard/` (not `scripts/scorecard/`, which is
 the product scorecard in `scripts/scorecard.py`). Each has an id, group, cost
 flag and a function returning a status plus a short detail. Unit tests replay
 recorded `gcloud` JSON from `tests/fixtures/cloud_scorecard/`. A new cloud
 resource ships its checks, its group's `later_groups.py` placeholder is
 replaced, and its grants are added to `identities.json` (the verifier needs
-`run.invoker` on resources it calls).
+`run.invoker` on services it calls, and `run.jobsExecutorWithOverrides` on a
+job it executes with overrides).
 
 Agents start with the scorecard comment and may use the read-only diagnostics
 described above when more detail is needed. An assistant acting with the

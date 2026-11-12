@@ -108,6 +108,14 @@ Open the billing report for the project, compare each line with the cost table
 in [`architecture-gcp.md`](architecture-gcp.md), check the daily LLM cost alert
 history and update the table.
 
+## Scorecard authentication
+
+`/verify` and `/verify full` on #121 must be the entire comment. Ops mints the
+verifier's Cloud Run ID token with the auth action and does not print the
+service URL or the token. A paid run also needs the main-layer apply that
+creates the artifacts bucket and grants `run.jobsExecutorWithOverrides` on
+`forseti-trust-check`. See [`docs/gcp-access.md`](gcp-access.md).
+
 ## Reproducibility drill (owner)
 
 1. From a fresh clone and following only this runbook, run the tear-down

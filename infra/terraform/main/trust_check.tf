@@ -1,8 +1,9 @@
 # On-demand trust check: the live linear/agentic pre-flight against Cloud SQL with
 # the production agent modes. It refuses to run unless CONFIRM_COST=yes is passed
 # at execution time (`/verify full` does this), so it can never spend model
-# budget by accident. Reports go to the artifacts bucket through a GCS volume;
-# the bucket and its objectAdmin grant for forseti-jobs arrive with GCP-5.
+# budget by accident. Reports go to the artifacts bucket through a GCS volume.
+# forseti-jobs has storage.objectUser on that bucket; the verifier may pass
+# CONFIRM_COST only because it holds run.jobsExecutorWithOverrides on this job.
 locals {
   jobs_service_account = "forseti-jobs@${var.project_id}.iam.gserviceaccount.com"
   trust_environment = merge(local.api_environment, {
