@@ -62,27 +62,28 @@ resource "google_cloud_run_v2_job" "trust_check" {
           }
         }
 
-        volume_mounts {
-          name       = "cloudsql"
-          mount_path = "/cloudsql"
-        }
+        # Match the API-returned name order for both mounts and volumes.
         volume_mounts {
           name       = "artifacts"
           mount_path = "/gcs"
         }
-      }
-
-      volumes {
-        name = "cloudsql"
-        cloud_sql_instance {
-          instances = [google_sql_database_instance.forseti_pg.connection_name]
+        volume_mounts {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
         }
       }
+
       volumes {
         name = "artifacts"
         gcs {
           bucket    = "${var.project_id}-artifacts"
           read_only = false
+        }
+      }
+      volumes {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [google_sql_database_instance.forseti_pg.connection_name]
         }
       }
     }
