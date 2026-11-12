@@ -455,9 +455,9 @@ fastapi==0.162.0 \
     # via
     #   forseti (pyproject.toml)
     #   google-adk
-google-adk==2.13.0 \
-    --hash=sha256:bc2389c9d41bfadd9f0c87d6bfd8d5c7eaf1c449e8906079600b8f3752ddaa88 \
-    --hash=sha256:bec4c4ee0aa3e63a2243c23365c5aef666ea539bc48c78dfbbf004dbddfc5f00
+google-adk==2.14.0 \
+    --hash=sha256:c6762050a8d1edac10f03730f99500733e862b729422dbd63187154dc470b7f0 \
+    --hash=sha256:f7d8c79bafc4f9215402219c9542db0bde702952448a09ffd51c5bd22b135b0e
     # via forseti (pyproject.toml)
 google-api-core==2.44.0 \
     --hash=sha256:5ab9a396965c1227d7dea4581e562b7018aa2bca96d2de0be5eb70dc9c8ab3a1 \
@@ -1139,10 +1139,6 @@ markupsafe==3.0.4 \
     --hash=sha256:fd9f8797427910198f95bced71ddfed61130d7e349213bfb8466c9c99e2c46a8 \
     --hash=sha256:fdb4ca07ab75ffadab4a8b135ad59cdbb3156b99310f3d565370da74a15d6bd3
     # via mako
-multitasking==0.0.13 \
-    --hash=sha256:d896b5df877c9ca5eeddbf0e5994124694d6cb535aba698fb23344c7025155a1 \
-    --hash=sha256:ec9243af140c67bfe52dc98d7173c294512735a88e8425c458b250db99dc2b48
-    # via yfinance
 numpy==2.5.4 \
     --hash=sha256:067374eb538c34c745436365cf7b0112595c1d326f21ce4ff340f61230239fbb \
     --hash=sha256:0b4724a19de67bea8cfc4970798efa78bcbbe2ac2613cfac16721a42d44de2a5 \
@@ -1994,9 +1990,9 @@ starlette==1.10.0 \
     # via
     #   fastapi
     #   google-adk
-tenacity==9.2.1 \
-    --hash=sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e \
-    --hash=sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839
+tenacity==9.1.4 \
+    --hash=sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55 \
+    --hash=sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a
     # via
     #   google-adk
     #   google-genai
