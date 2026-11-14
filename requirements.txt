@@ -12,9 +12,9 @@ alembic==1.20.1 \
     --hash=sha256:83490def1f723413db5096591f7609ac52544805be93849170088ed04f5a2e0b \
     --hash=sha256:9970712cfb81ea26c8658d378aaa5b8f6ff9146e5bb111d70497c164016cf598
     # via forseti (pyproject.toml)
-annotated-doc==0.0.5 \
-    --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101 \
-    --hash=sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb
+annotated-doc==0.0.6 \
+    --hash=sha256:361ca0950cc7082f53fa69e9328409f40a62c61e57e0a47e1825a08078a58a53 \
+    --hash=sha256:7969bb69912085b2285849c0dcac0b4b374fd180c13cf10a87f284ffcf347bbf
     # via fastapi
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
@@ -333,9 +333,9 @@ charset-normalizer==3.5.2 \
     --hash=sha256:fd1fbe0f116b6e55da77aca2c6ddcddcfac2186cbf78bdebf40fc156efca389d \
     --hash=sha256:fe9753dfee015c570d73df76f899f18444d41388bffcde097deba51c4fadbb9f
     # via requests
-click==8.5.0 \
-    --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360 \
-    --hash=sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34
+click==8.5.1 \
+    --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37 \
+    --hash=sha256:9bbfada76703fd1d784b83eea012e3e8c6a001a876543ef104fa56aaaeb072b4
     # via
     #   google-adk
     #   uvicorn
@@ -449,9 +449,9 @@ exchange-calendars==4.13.2 \
     --hash=sha256:a9459425dd64142cd54fbc639847403c7e0c33d60fbc326c94fc1d6bd127f002 \
     --hash=sha256:fc5a2ad0d61b5c3a6539a3061cd4cbb55c59f4a903455cec7926e4b798919996
     # via forseti (pyproject.toml)
-fastapi==0.162.0 \
-    --hash=sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c \
-    --hash=sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f
+fastapi==0.162.4 \
+    --hash=sha256:4abdb1ef367090678d8bc664631df432ae7a1bfe7709c37547d3606e667650e3 \
+    --hash=sha256:f093bc306d3958278d30ffd14f3834ca3d9b144fbb898ab5c9b652cf6e75f869
     # via
     #   forseti (pyproject.toml)
     #   google-adk
@@ -469,9 +469,9 @@ google-api-core==2.44.0 \
     #   google-cloud-resource-manager
     #   google-cloud-storage
     #   google-cloud-trace
-google-auth==2.62.1 \
-    --hash=sha256:015399a5abde39033c69404cc1c079e6d4c2de2993e164c9f4eac6e5376ad72b \
-    --hash=sha256:3c8e1ce2553784ae17fd220e6f88df3281d86ab98019278f436d06dffab17a9e
+google-auth==2.62.2 \
+    --hash=sha256:046c61a72d3a847d6df6417a7f0d5cf054e3b82bbcb54fb1e69d47880964049c \
+    --hash=sha256:e9bcdb0679b6a4369ac327c5c59f06d92f7b4cd2624e7100294c14632f55a36b
     # via
     #   google-adk
     #   google-api-core
@@ -482,9 +482,9 @@ google-auth==2.62.1 \
     #   google-cloud-storage
     #   google-cloud-trace
     #   google-genai
-google-cloud-aiplatform==2.7.0 \
-    --hash=sha256:156ede4a6c304119195dbdaedaba8c33872f6d80b6525482dccb95f76405bd31 \
-    --hash=sha256:af89c8b7ff8bfaa3361a4d88224a886e8d2a9f22853d4e3c5d047e46367b6008
+google-cloud-aiplatform==2.8.0 \
+    --hash=sha256:3f589660f54e0b4030630440d24733b0ec5c7a4e9ce799cc4f38c13736a60f6f \
+    --hash=sha256:db2e29fffbe725719b47b286f142cc75c6c7e7b3535202732422aefab7f3554f
     # via forseti (pyproject.toml)
 google-cloud-bigquery==3.47.0 \
     --hash=sha256:4e42781c3aa7acfc1d3a91ac4052aafcbc05288a4cc1796550f4f94cb9ee3aba \
@@ -1980,9 +1980,9 @@ sqlalchemy==2.1.8 \
     #   alembic
     #   forseti (pyproject.toml)
     #   sqlmodel
-sqlmodel==0.0.48 \
-    --hash=sha256:5582e87e845e23bb1179a7d8b11a4f5e441b4494528a41ee2fe1d129ffe91543 \
-    --hash=sha256:8d389bf735b03a17508e93e888c13a30ef1ddca22dd8e57add12317401e4112e
+sqlmodel==0.0.49 \
+    --hash=sha256:146ceb803610cc1d13bb2de7b78114cd3ad431aff4e10e19641f92dedd7dba5e \
+    --hash=sha256:d9b1ea3c4a303174c796cea8393b059bceccba910a8f0f872b4debe1fb802b2c
     # via forseti (pyproject.toml)
 starlette==1.10.0 \
     --hash=sha256:478c0ab3b4ced6e82719849c118fa406f0278a3499c1a898cd15cd31bdc38ce4 \
@@ -1990,9 +1990,9 @@ starlette==1.10.0 \
     # via
     #   fastapi
     #   google-adk
-tenacity==9.1.4 \
-    --hash=sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55 \
-    --hash=sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a
+tenacity==9.2.1 \
+    --hash=sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e \
+    --hash=sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839
     # via
     #   google-adk
     #   google-genai
