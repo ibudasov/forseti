@@ -44,7 +44,7 @@
       "workflow": {"file": "deploy.yml", "environment": "gcp-dev", "events": ["workflow_run", "workflow_dispatch"]}
     },
     "forseti-verifier": {
-      "purpose": "Read-only live operational verification; no secret values or table data",
+      "purpose": "Read-only verification; may execute the trust job with CONFIRM_COST; no secret values or table data",
       "project_roles": ["run.viewer", "cloudsql.viewer", "secretmanager.viewer", "iam.securityReviewer", "iam.workloadIdentityPoolViewer", "logging.viewer", "monitoring.viewer", "cloudtrace.user", "cloudscheduler.viewer", "artifactregistry.reader"],
       "act_as": [],
       "workflow": {"file": "ops.yml", "environment": null, "events": ["workflow_dispatch", "schedule", "workflow_run", "issue_comment"]}
@@ -66,6 +66,7 @@
     {"kind": "service", "resource": "forseti-api", "member": "owner", "role": "run.invoker"},
     {"kind": "service", "resource": "forseti-api", "member": "forseti-deployer", "role": "run.invoker"},
     {"kind": "service", "resource": "forseti-api", "member": "forseti-verifier", "role": "run.invoker"},
-    {"kind": "job", "resource": "forseti-trust-check", "member": "forseti-verifier", "role": "run.invoker"}
+    {"kind": "job", "resource": "forseti-trust-check", "member": "forseti-verifier", "role": "run.jobsExecutorWithOverrides"},
+    {"kind": "bucket", "resource": "forseti-505116-artifacts", "member": "forseti-jobs", "role": "storage.objectUser"}
   ]
 }
