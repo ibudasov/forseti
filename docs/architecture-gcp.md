@@ -65,7 +65,7 @@ copied here.
 | Application data, runs, traces, vectors | Cloud SQL | Encrypted-only connections, no authorized networks |
 | Database URL, Alpha Vantage key, owner DB URL, app DB password | Secret Manager | Mounted as env vars; only the named identities can read them |
 | Terraform state | `forseti-505116-tfstate` bucket | Never in git |
-| Trust and evaluation reports | `gs://forseti-505116-artifacts/reports/` | Written by `forseti-trust-check` |
+| Trust and evaluation reports | `gs://forseti-505116-artifacts/reports/` | Written by `forseti-trust-check`; `reports/` expires after 180 days |
 | Container images | Artifact Registry | Cleanup policies enforced |
 
 ## Deployed Terraform resources
@@ -80,7 +80,8 @@ Every resource in `infra/terraform/main` must be mentioned here; the nightly
 | `google_cloud_run_v2_job.trust_check` | On-demand cloud trust check |
 | `google_cloud_run_v2_service_iam_member.grants` | API invokers |
 | `google_cloud_run_v2_job_iam_member.grants` | Job invokers (verifier runs the trust check) |
-| `google_storage_bucket_iam_member.grants` | Bucket grants (empty until GCP-5) |
+| `google_storage_bucket.artifacts` | Private artifacts bucket for trust reports |
+| `google_storage_bucket_iam_member.grants` | Bucket object access for `forseti-jobs` |
 | `google_sql_database_instance.forseti_pg` | Postgres instance |
 | `google_sql_database.forseti` | Application database |
 | `google_sql_user.forseti_owner` | Owner database role used by housekeeping |

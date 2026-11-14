@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from scripts import demo_check
 from scripts.cloud_scorecard import gcp2, gcp4, gcp6
@@ -11,10 +11,14 @@ from scripts.cloud_scorecard.model import Check, Cost, Outcome, worst_outcome
 
 GROUP = "Exit criteria"
 TRUST_JOB = "forseti-trust-check"
+# ID tokens minted for /verify full last 1 hour. This poll runs before the demo
+# check reuses that token, so 1800s stays inside the token lifetime.
 TRUST_JOB_TIMEOUT_SECONDS = 1800
 TRUST_POLL_INTERVAL_SECONDS = 20
-PIPELINE_IDENTITIES = ("forseti-tf-apply", "forseti-deployer")
 GOOGLE_MANAGED_ACCOUNT = r"@(gcp-sa-[a-z0-9-]+\.iam|cloudservices|developer)\.gserviceaccount\.com$"
+MUTATING_METHOD = r"(?i)(create|insert|update|patch|delete|setIamPolicy|undelete|replace)"
+IGNORED_CONNECT_METHOD = "cloudsql.instances.connect"
+MUTATING_ROLE_MARKERS = ("admin", "developer", "editor", "writer")
 DOC_COVERAGE_JOB = "Documentation coverage"
 NIGHTLY_RUNS_PATH = (
     "repos/{repository}/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1"
@@ -81,21 +85,49 @@ def check_demo(env: Environment) -> Outcome:
     return Outcome.passed(f"every run persisted with a trace ({summary})")
 
 
-def _unexpected_writers_filter() -> str:
-    pipeline = "|".join(PIPELINE_IDENTITIES)
+def _role_can_mutate(role: str) -> bool:
+    normalized = role.lower()
+    return any(marker in normalized for marker in MUTATING_ROLE_MARKERS)
+
+
+def _resource_mutators(manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    """Pipeline identities allowed to change resources, from identities.json.
+
+    Runtime identities have no workflow and are never mutators, so a new
+    runtime account is treated the same way without a hardcoded exception.
+    Read-only workflow identities (planner, verifier) are not mutators either.
+    """
+    mutators = []
+    for name, account in manifest["service_accounts"].items():
+        if account.get("workflow") is None:
+            continue
+        roles = account.get("project_roles", [])
+        if any(_role_can_mutate(role) for role in roles):
+            mutators.append(name)
+    return tuple(sorted(mutators))
+
+
+def _unexpected_writers_filter(manifest: Mapping[str, Any]) -> str:
     principal = "protoPayload.authenticationInfo.principalEmail"
-    return (
-        'logName:"cloudaudit.googleapis.com%2Factivity" '
-        f'AND NOT {principal}=~"^({pipeline})@" '
-        f'AND NOT {principal}=~"{GOOGLE_MANAGED_ACCOUNT}"'
-    )
+    clauses = [
+        'logName:"cloudaudit.googleapis.com%2Factivity"',
+        f'protoPayload.methodName=~"{MUTATING_METHOD}"',
+        f'NOT protoPayload.methodName="{IGNORED_CONNECT_METHOD}"',
+    ]
+    mutators = _resource_mutators(manifest)
+    if mutators:
+        pipeline = "|".join(mutators)
+        clauses.append(f'NOT {principal}=~"^({pipeline})@"')
+    clauses.append(f'NOT {principal}=~"{GOOGLE_MANAGED_ACCOUNT}"')
+    return " AND ".join(clauses)
 
 
 def check_reproducible_deployment(env: Environment) -> Outcome:
     drift = gcp2.check_nightly_drift(env)
-    entries = env.gcloud(
-        ["logging", "read", _unexpected_writers_filter(), "--freshness=7d", "--limit=1", "--project", env.project]
-    ) or []
+    entries = env.gcloud([
+        "logging", "read", _unexpected_writers_filter(env.manifest),
+        "--freshness=7d", "--limit=1", "--project", env.project,
+    ]) or []
     if entries:
         return worst_outcome(
             [drift, Outcome.failed("admin-activity audit logs show a change from outside the pipeline identities")], ""

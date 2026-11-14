@@ -16,8 +16,12 @@ data instead of assuming it.
   execution time. The job definition deliberately does not contain it.
 - Reports (`<timestamp>.json`, `.md`, `.trust.md`) are written to
   `gs://forseti-505116-artifacts/reports/trust/` through the GCS volume
-  mounted at `/gcs` (the bucket arrives with GCP-5).
-- `forseti-verifier` holds `run.invoker` on the job (`identities.json`).
+  mounted at `/gcs`. The bucket is `google_storage_bucket.artifacts`;
+  `forseti-jobs` has `storage.objectUser` on it. `reports/` objects expire
+  after 180 days. Daily refresh is still GCP-5 and is not part of this job.
+- `forseti-verifier` holds `run.jobsExecutorWithOverrides` on the job
+  (`identities.json`). `run.invoker` cannot pass `--update-env-vars`, and
+  baking `CONFIRM_COST` into the job would weaken the cost gate.
   `/verify full` on #121 executes it as the paid scorecard check
   `exit.cloud-trust`. The owner can also run it by hand:
 
@@ -49,7 +53,9 @@ per analysis.
 ## Recorded result
 
 Fill this in from the `exit.cloud-trust` execution and link the `/verify full`
-run. The values below are intentionally empty until the owner has run it.
+run. The values below stay empty until that Ops run exists. This pre-flight
+does not invent rates, and #121 boxes stay unticked until the scorecard shows
+the check passing.
 
 | Measure | Cloud | Local baseline | Within criteria |
 |---|---|---|---|
