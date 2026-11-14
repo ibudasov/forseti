@@ -7,6 +7,11 @@ updates:
     groups:
       python-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # google-cloud-bigquery enforces python-dateutil<3.0.0; blocks upgrade to 4.x
+      # until googleapis/google-cloud-python#18948 is resolved upstream.
+      - dependency-name: "python-dateutil"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
