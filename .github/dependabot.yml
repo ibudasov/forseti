@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: google-genai
+        update-types: ["version-update:semver-major"]
     groups:
       python-minor-and-patch:
         update-types: ["minor", "patch"]
