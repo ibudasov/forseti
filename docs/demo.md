@@ -27,7 +27,10 @@ minutes. Run it from a Codespace where `make gcloud-login` has been done.
 ## Automated version
 
 `scripts/demo_check.py` runs steps 2 and 4 against the live service with an ID
-token for the calling identity (`forseti-verifier` in CI):
+token for the calling identity. In CI that token is minted for
+`forseti-verifier` by the Ops auth action (`SCORECARD_ID_TOKEN`); a local owner
+session still uses `gcloud auth print-identity-token`. The checked tickers are
+`NVDA`, `LMT` and `OKLO`:
 
 ```bash
 python -m scripts.demo_check --url "$SERVICE_URL" [--tickers NVDA,LMT,OKLO]

@@ -13,7 +13,9 @@ locals {
   job_resources = {
     "forseti-trust-check" = google_cloud_run_v2_job.trust_check.name
   }
-  bucket_resources = {}
+  bucket_resources = {
+    "${var.project_id}-artifacts" = google_storage_bucket.artifacts.name
+  }
   resource_grants = {
     for grant in local.identities.resource_grants :
     "${grant.kind}/${grant.resource}/${grant.member}/${grant.role}" => grant

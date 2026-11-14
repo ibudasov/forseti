@@ -21,9 +21,9 @@ run "workload_plan" {
       length(google_secret_manager_secret_iam_member.grants) == 6 &&
       length(google_cloud_run_v2_service_iam_member.grants) == 3 &&
       length(google_cloud_run_v2_job_iam_member.grants) == 1 &&
-      length(google_storage_bucket_iam_member.grants) == 0
+      length(google_storage_bucket_iam_member.grants) == 1
     )
-    error_message = "Secret accessors and the declared private API invokers must be the only resource grants."
+    error_message = "Secret accessors, private API invokers, the trust-job executor and the artifacts writer must be the only resource grants."
   }
   assert {
     condition = toset([
@@ -37,9 +37,9 @@ run "workload_plan" {
     condition = toset([
       for grant in local.resource_grants :
       grant.member
-      if grant.kind == "job" && grant.resource == "forseti-trust-check" && grant.role == "run.invoker"
+      if grant.kind == "job" && grant.resource == "forseti-trust-check" && grant.role == "run.jobsExecutorWithOverrides"
     ]) == toset(["forseti-verifier"])
-    error_message = "Only the verifier may invoke the trust-check job."
+    error_message = "Only the verifier may execute the trust-check job, and only with overrides so CONFIRM_COST stays out of the job."
   }
   assert {
     condition = (
@@ -108,9 +108,19 @@ run "workload_plan" {
       { for mount in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].volume_mounts : mount.name => mount.mount_path } ==
       { artifacts = "/gcs", cloudsql = "/cloudsql" } &&
       length(google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[0].gcs) == 1 &&
-      length(google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[1].cloud_sql_instance) == 1
+      google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[0].gcs[0].bucket == google_storage_bucket.artifacts.name &&
+      length(google_cloud_run_v2_job.trust_check.template[0].template[0].volumes[1].cloud_sql_instance) == 1 &&
+      google_storage_bucket.artifacts.name == "${var.project_id}-artifacts" &&
+      google_storage_bucket.artifacts.uniform_bucket_level_access &&
+      google_storage_bucket.artifacts.public_access_prevention == "enforced" &&
+      !google_storage_bucket.artifacts.force_destroy &&
+      google_storage_bucket.artifacts.soft_delete_policy[0].retention_duration_seconds == 604800 &&
+      length(google_storage_bucket.artifacts.lifecycle_rule) == 1 &&
+      one([for rule in google_storage_bucket.artifacts.lifecycle_rule : one(rule.condition).age]) == 180 &&
+      one([for rule in google_storage_bucket.artifacts.lifecycle_rule : one(rule.action).type]) == "Delete" &&
+      one(flatten([for rule in google_storage_bucket.artifacts.lifecycle_rule : one(rule.condition).matches_prefix])) == "reports/"
     )
-    error_message = "Trust-check volumes and mounts must retain their sources and paths in API-returned name order to avoid positional drift."
+    error_message = "Trust-check volumes must keep API-returned order and mount the private artifacts bucket."
   }
   assert {
     condition = (

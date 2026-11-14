@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, Sequence, Tuple
 
 import pytest
+import yaml
 
 from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3b, gcp4, gcp6
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
@@ -478,7 +480,7 @@ class TestMarkdown:
             ],
             ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
             ("logging", "read", gcp6.API_5XX_FILTER): [],
-            ("logging", "read", exit_criteria._unexpected_writers_filter()): [],
+            ("logging", "read", exit_criteria._unexpected_writers_filter(fixture("manifest"))): [],
         }, {
             ("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
                 fixture("drift_success"),
@@ -543,3 +545,87 @@ class TestRedaction:
 
         for leaked in ("https://", "a@b.co", "123456789012", "104857612345678901234"):
             assert leaked not in scrubbed
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OPS_WORKFLOW = ROOT / ".github/workflows/ops.yml"
+
+
+class TestIdentityToken:
+    def test_uses_the_action_minted_token_without_calling_gcloud(self, monkeypatch):
+        monkeypatch.setenv("SCORECARD_ID_TOKEN", "action-minted-token")
+
+        def fail_if_called(*_args, **_kwargs):
+            raise AssertionError("gcloud must not mint a token when SCORECARD_ID_TOKEN is set")
+
+        monkeypatch.setattr(subprocess, "run", fail_if_called)
+
+        assert gcp4._identity_token("https://forseti-api.example.invalid") == "action-minted-token"
+
+    def test_gcloud_fallback_failure_stays_generic(self, monkeypatch):
+        monkeypatch.delenv("SCORECARD_ID_TOKEN", raising=False)
+
+        def fail(*_args, **_kwargs):
+            raise subprocess.CalledProcessError(1, ["gcloud"], stderr="https://secret.example.invalid eyJtoken")
+
+        monkeypatch.setattr(subprocess, "run", fail)
+
+        with pytest.raises(CloudQueryError, match="gcloud could not create a service identity token") as error:
+            gcp4._identity_token("https://forseti-api.example.invalid")
+
+        assert "eyJtoken" not in str(error.value)
+        assert "example.invalid" not in str(error.value)
+
+
+class TestUnexpectedWriters:
+    def test_counts_only_mutating_methods_and_ignores_connect(self):
+        audit_filter = exit_criteria._unexpected_writers_filter(fixture("manifest"))
+
+        assert f'protoPayload.methodName=~"{exit_criteria.MUTATING_METHOD}"' in audit_filter
+        assert 'NOT protoPayload.methodName="cloudsql.instances.connect"' in audit_filter
+        assert "forseti-tf-apply" not in audit_filter
+
+    def test_runtime_identities_are_never_resource_mutators(self):
+        manifest = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
+        runtime = {
+            name for name, account in manifest["service_accounts"].items() if account["workflow"] is None
+        }
+
+        mutators = exit_criteria._resource_mutators(manifest)
+
+        assert runtime.isdisjoint(mutators)
+        assert set(mutators) == {"forseti-deployer", "forseti-tf-apply"}
+        assert "forseti-verifier" not in mutators
+        assert "forseti-tf-plan" not in mutators
+
+    def test_live_filter_allows_only_those_mutators(self):
+        manifest = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
+        audit_filter = exit_criteria._unexpected_writers_filter(manifest)
+
+        allowed = 'NOT protoPayload.authenticationInfo.principalEmail=~"^(forseti-deployer|forseti-tf-apply)@"'
+        assert allowed in audit_filter
+        for runtime in ("forseti-api", "forseti-jobs", "forseti-housekeeping", "forseti-scheduler"):
+            assert runtime not in audit_filter
+
+
+class TestOpsWorkflow:
+    def test_mints_a_masked_verifier_id_token_and_never_echoes_it(self):
+        workflow = yaml.safe_load(OPS_WORKFLOW.read_text())
+        job = workflow["jobs"]["scorecard"]
+        steps = job["steps"]
+        token_step = next(step for step in steps if step.get("id") == "verifier_id_token")
+        url_step = next(step for step in steps if step.get("id") == "service_url")
+        check_step = next(step for step in steps if step.get("name") == "Run checks")
+        rendered = OPS_WORKFLOW.read_text()
+
+        assert token_step["uses"].startswith("google-github-actions/auth@")
+        assert token_step["with"]["service_account"] == "${{ vars.GCP_VERIFIER_SA }}"
+        assert token_step["with"]["token_format"] == "id_token"
+        assert token_step["with"]["create_credentials_file"] is False
+        assert token_step["with"]["export_environment_variables"] is False
+        assert "::add-mask::$url" in url_step["run"]
+        assert url_step["run"].index("::add-mask::$url") < url_step["run"].index('echo "url=$url"')
+        assert check_step["env"]["SCORECARD_ID_TOKEN"] == "${{ steps.verifier_id_token.outputs.id_token }}"
+        assert "echo \"$SCORECARD_ID_TOKEN\"" not in rendered
+        assert "echo $SCORECARD_ID_TOKEN" not in rendered
+        assert "50" in str(job["timeout-minutes"])
