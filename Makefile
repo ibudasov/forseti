@@ -472,7 +472,7 @@ down: check-compose
 lint: check-compose
 	$(DOCKER_COMPOSE) run --rm --build -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --select=E9,F63,F7,F82 --show-source --statistics
 	$(DOCKER_COMPOSE) run --rm -v "$$PWD/tests:/app/tests" -v "$$PWD/scripts:/app/scripts" app python -m flake8 app agents tests scripts/eval_synthesizer.py scripts/live_preflight.py scripts/synthesize_draft.py --count --max-complexity=10 --max-line-length=127 --statistics
-	$(DOCKER_COMPOSE) run --rm -v "$$PWD/scripts:/app/scripts" app python -m flake8 scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/cloud_scorecard scripts/gh_dashboard.py --max-complexity=10 --max-line-length=127
+	$(DOCKER_COMPOSE) run --rm -v "$$PWD/scripts:/app/scripts" app python -m flake8 scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/terraform_drift_summary.py scripts/cloud_scorecard scripts/gh_dashboard.py --max-complexity=10 --max-line-length=127
 
 typecheck: check-compose
 	$(DOCKER_COMPOSE) run --rm --build \
@@ -480,7 +480,7 @@ typecheck: check-compose
 		app python -m mypy --explicit-package-bases --follow-imports=skip app agents
 	$(DOCKER_COMPOSE) run --rm --no-deps infra-tools python -m mypy \
 		--explicit-package-bases --follow-imports=skip \
-		scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/cloud_scorecard scripts/gh_dashboard.py
+		scripts/terraform_cli.py scripts/check_terraform_policy.py scripts/iam_doc.py scripts/doc_coverage.py scripts/demo_check.py scripts/cloud_trust_check.py scripts/terraform_drift_summary.py scripts/cloud_scorecard scripts/gh_dashboard.py
 
 check: lint typecheck
 
@@ -552,5 +552,5 @@ infra-check: check-compose
 		'python -m scripts.check_terraform_policy && python -m scripts.iam_doc --check'
 
 test-infra: check-compose
-	$(DOCKER_COMPOSE) run --rm --no-deps -v "$$PWD/.github:/app/.github:ro" \
+	$(DOCKER_COMPOSE) run --rm --no-deps -v "$$PWD/.github:/app/.github:ro" -v "$$PWD/scripts:/app/scripts:ro" \
 		infra-tools python -m pytest tests/test_terraform.py -q

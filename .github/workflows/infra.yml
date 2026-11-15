@@ -5,6 +5,7 @@ on:
     paths:
       - 'infra/**'
       - 'scripts/terraform_cli.py'
+      - 'scripts/terraform_drift_summary.py'
       - 'scripts/check_terraform_policy.py'
       - 'scripts/iam_doc.py'
       - 'scripts/doc_coverage.py'
@@ -21,6 +22,7 @@ on:
     paths:
       - 'infra/**'
       - 'scripts/terraform_cli.py'
+      - 'scripts/terraform_drift_summary.py'
       - 'scripts/check_terraform_policy.py'
       - 'scripts/iam_doc.py'
       - 'docs/gcp-access.md'
@@ -245,12 +247,15 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/main init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
           set +e
-          terraform -chdir=infra/terraform/main plan -input=false -lock=false -detailed-exitcode > drift.txt 2> drift-error.txt
+          terraform -chdir=infra/terraform/main plan -input=false -lock=false -detailed-exitcode -out=drift.tfplan > /dev/null 2> drift-error.txt
           status=$?
           set -e
           if [ "$status" -eq 2 ]; then
             echo "::error::Infrastructure drift detected; open a corrective PR."
-            echo "Infrastructure drift detected." >> "$GITHUB_STEP_SUMMARY"
+            if ! terraform -chdir=infra/terraform/main show -json drift.tfplan 2>drift-show-error.txt | python3 -m scripts.terraform_drift_summary >> "$GITHUB_STEP_SUMMARY"; then
+              echo "::error::Could not summarize drift; raw plan details are withheld."
+              exit 1
+            fi
             exit 1
           fi
           if [ "$status" -ne 0 ]; then
@@ -260,7 +265,7 @@ jobs:
           echo "No infrastructure drift." >> "$GITHUB_STEP_SUMMARY"
       - name: Remove runner-local captures
         if: always()
-        run: rm -f drift.txt drift-error.txt
+        run: rm -f drift-error.txt drift-show-error.txt infra/terraform/main/drift.tfplan
 
   doc-coverage:
     name: Documentation coverage

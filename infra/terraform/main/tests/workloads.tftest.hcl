@@ -43,6 +43,13 @@ run "workload_plan" {
   }
   assert {
     condition = (
+      google_cloud_run_v2_job_iam_binding.trust_check_invoker.role == "roles/run.invoker" &&
+      length(google_cloud_run_v2_job_iam_binding.trust_check_invoker.members) == 0
+    )
+    error_message = "The trust-check job must not grant the broader run.invoker role."
+  }
+  assert {
+    condition = (
       google_cloud_run_v2_service.api.name == "forseti-api" &&
       google_cloud_run_v2_service.api.location == "europe-west4" &&
       google_cloud_run_v2_service.api.template[0].max_instance_request_concurrency == 4 &&

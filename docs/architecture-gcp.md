@@ -80,6 +80,7 @@ Every resource in `infra/terraform/main` must be mentioned here; the nightly
 | `google_cloud_run_v2_job.trust_check` | On-demand cloud trust check |
 | `google_cloud_run_v2_service_iam_member.grants` | API invokers |
 | `google_cloud_run_v2_job_iam_member.grants` | Job invokers (verifier runs the trust check) |
+| `google_cloud_run_v2_job_iam_binding.trust_check_invoker` | Prevents the broader job invoker role |
 | `google_storage_bucket.artifacts` | Private artifacts bucket for trust reports |
 | `google_storage_bucket_iam_member.grants` | Bucket object access for `forseti-jobs` |
 | `google_sql_database_instance.forseti_pg` | Postgres instance |
