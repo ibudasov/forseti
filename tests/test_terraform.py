@@ -250,6 +250,13 @@ def test_policy_checks_json_resources_and_rejects_hidden_modules(tmp_path):
     assert policy.check_layer(directory)
 
 
+def test_cloud_sql_instance_keeps_terraform_and_api_deletion_protections():
+    sql_configuration = (ROOT / "infra/terraform/main/sql.tf").read_text()
+
+    assert "deletion_protection = true" in sql_configuration
+    assert "deletion_protection_enabled = true" in sql_configuration
+
+
 def test_apply_workflow_applies_saved_plan_without_destroy_gate():
     workflow = (ROOT / ".github/workflows/infra.yml").read_text()
 
