@@ -97,7 +97,7 @@ def check_database_users(env: Environment) -> Outcome:
         mismatch_count = int(not database_exists) + int(not users_match)
         return Outcome.failed(
             f"{mismatch_count} database or user settings differ; "
-            f"{len(databases)} databases and {len(users)} API-created users found"
+            f"database count={len(databases)}, API-created user count={len(users)}"
         )
     return Outcome.passed(f"1 database and {len(users)} API-created user match policy")
 
