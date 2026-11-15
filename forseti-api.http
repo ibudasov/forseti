@@ -1,0 +1,62 @@
+@baseUrl = http://localhost:8000
+@symbol = NVDA
+@runId = replace-with-run-id
+
+### Welcome
+GET {{baseUrl}}/
+
+### Health check
+GET {{baseUrl}}/healthz
+
+### Health check alias
+GET {{baseUrl}}/health
+
+### Liveness check
+GET {{baseUrl}}/livez
+
+### Liveness check alias
+GET {{baseUrl}}/live
+
+### Analyze a ticker
+# Optional query parameters: include_trace=true|false, pipeline=linear|agentic.
+# pipeline overrides may be disabled by the server.
+POST {{baseUrl}}/analyze?include_trace=true
+Content-Type: application/json
+
+{
+  "ticker": "{{symbol}}",
+  "account_size_eur": 10000,
+  "risk_percentage": 0.01,
+  "max_position_size_eur": 2000,
+  "as_of_date": "2026-11-15",
+  "notes": "Example analysis request"
+}
+
+### Screen the universe
+# Optional query parameter: verbose=true|false.
+GET {{baseUrl}}/screening?verbose=true
+
+### Universe diagnostics
+GET {{baseUrl}}/diagnostics/universe
+
+### Get a run trace
+# Set @runId to a run ID returned by /analyze?include_trace=true.
+GET {{baseUrl}}/runs/{{runId}}
+
+### Get a ticker profile
+GET {{baseUrl}}/ticker/{{symbol}}
+
+### Get ticker evidence
+GET {{baseUrl}}/ticker/{{symbol}}/evidence
+
+### OpenAPI schema
+GET {{baseUrl}}/openapi.json
+
+### Swagger UI
+GET {{baseUrl}}/docs
+
+### Swagger OAuth redirect
+GET {{baseUrl}}/docs/oauth2-redirect
+
+### ReDoc
+GET {{baseUrl}}/redoc
