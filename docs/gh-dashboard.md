@@ -62,8 +62,8 @@ First list waiting runs:
 
 ```sh
 gh api repos/ibudasov/forseti/actions/runs --method GET \
-  -f status=waiting -F per_page=100 --paginate --slurp \
-  --jq '.[] | .workflow_runs[] | {id, name, html_url}'
+  -f status=waiting -F per_page=100 --paginate \
+  --jq '.workflow_runs[] | {id, name, html_url}'
 ```
 
 For each run, check whether **you** can approve its pending environments:
@@ -81,8 +81,8 @@ Also list workflow-level action/approval candidates, such as fork workflows:
 
 ```sh
 gh api repos/ibudasov/forseti/actions/runs --method GET \
-  -f status=action_required -F per_page=100 --paginate --slurp \
-  --jq '.[] | .workflow_runs[] | {id, name, html_url}'
+  -f status=action_required -F per_page=100 --paginate \
+  --jq '.workflow_runs[] | {id, name, html_url}'
 ```
 
 GitHub does not provide the environment eligibility flag for these runs.
