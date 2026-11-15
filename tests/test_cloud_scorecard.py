@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3, gcp3b, gcp4, gcp6
-from scripts.cloud_scorecard.environment import CloudQueryError, Environment
+from scripts.cloud_scorecard.environment import CloudQueryError, Environment, query_gcloud
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
 from scripts.cloud_scorecard.registry import ALL_CHECKS, GROUPS, run_check, run_checks
@@ -30,8 +30,10 @@ class RecordedQueries:
 
     def __init__(self, routes: Dict[Tuple[str, ...], Any]) -> None:
         self.routes = routes
+        self.calls = []
 
     def __call__(self, arguments: Sequence[str]) -> Any:
+        self.calls.append(tuple(arguments))
         for prefix, response in self.routes.items():
             if tuple(arguments[: len(prefix)]) == prefix:
                 return response
@@ -52,6 +54,7 @@ KEYS = ("iam", "service-accounts", "keys", "list")
 PROVIDER = ("iam", "workload-identity-pools", "providers", "describe")
 REPOSITORY = ("artifacts", "repositories", "describe")
 SECRET_POLICY = ("secrets", "get-iam-policy")
+BUCKET_POLICY = ("storage", "buckets", "get-iam-policy")
 JOBS = ("run", "jobs")
 API_SERVICE = ("run", "services", "describe", "forseti-api")
 DEPLOYER = "serviceAccount:forseti-deployer@forseti-test.iam.gserviceaccount.com"
@@ -100,6 +103,41 @@ def secret_routes(missing=(), without_enabled_versions=()):
             versions = [] if secret in without_enabled_versions else [{"state": "ENABLED"}]
             routes[(*SECRET_VERSIONS, secret)] = versions
     return routes
+
+
+class TestGcloudQueryErrors:
+    def test_not_found_404_is_a_missing_resource(self, monkeypatch):
+        result = subprocess.CompletedProcess(
+            args=["gcloud"],
+            returncode=1,
+            stdout="",
+            stderr="ERROR: (gcloud.storage.buckets.get-iam-policy) [bucket] not found: 404.",
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: result)
+
+        assert query_gcloud(["storage", "buckets", "get-iam-policy", "gs://artifacts"]) is None
+
+    @pytest.mark.parametrize(
+        ("stderr", "expected_error"),
+        [
+            ("ERROR: PERMISSION_DENIED: private resource", "gcloud access denied"),
+            ("ERROR: private unexpected failure", "gcloud query failed"),
+        ],
+    )
+    def test_other_query_errors_remain_sanitized_failures(self, monkeypatch, stderr, expected_error):
+        result = subprocess.CompletedProcess(
+            args=["gcloud"],
+            returncode=1,
+            stdout="",
+            stderr=stderr,
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: result)
+
+        with pytest.raises(CloudQueryError) as error:
+            query_gcloud(["storage", "buckets", "get-iam-policy", "gs://artifacts"])
+
+        assert str(error.value) == expected_error
+        assert stderr not in str(error.value)
 
 
 class TestGcp3:
@@ -267,6 +305,22 @@ class TestResourceGrants:
         env = environment({SECRET_POLICY: None})
 
         assert gcp2.check_resource_grants(env).status is Status.PENDING
+
+    def test_checks_remaining_resources_after_a_bucket_is_missing(self):
+        env = environment({BUCKET_POLICY: None, SECRET_POLICY: fixture("secret_policy")})
+        env.manifest["resource_grants"].append(
+            {
+                "kind": "bucket",
+                "resource": "forseti-artifacts",
+                "member": "forseti-api",
+                "role": "storage.objectViewer",
+            }
+        )
+
+        outcome = gcp2.check_resource_grants(env)
+
+        assert outcome.status is Status.PENDING
+        assert any(query[: len(SECRET_POLICY)] == SECRET_POLICY for query in env.gcloud.calls)
 
 
 class TestServiceAccountKeys:
