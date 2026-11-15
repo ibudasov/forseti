@@ -5,7 +5,6 @@ from scripts.cloud_scorecard.environment import Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome
 
 PLANNED = (
-    ("GCP-3", "database", "#125", Cost.FREE),
     ("GCP-5", "refresh job and reports bucket", "#127", Cost.FREE),
 )
 

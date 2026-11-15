@@ -274,11 +274,15 @@ applied by the main layer (`access.tf`), not by bootstrap.
 Checks live in `scripts/cloud_scorecard/` (not `scripts/scorecard/`, which is
 the product scorecard in `scripts/scorecard.py`). Each has an id, group, cost
 flag and a function returning a status plus a short detail. Unit tests replay
-recorded `gcloud` JSON from `tests/fixtures/cloud_scorecard/`. A new cloud
-resource ships its checks, its group's `later_groups.py` placeholder is
-replaced, and its grants are added to `identities.json` (the verifier needs
-`run.invoker` on services it calls, and `run.jobsExecutorWithOverrides` on a
-job it executes with overrides).
+fake `gcloud` JSON from `tests/fixtures/cloud_scorecard/`. GCP-3 verifies the
+Cloud SQL instance, network, deletion protection and backups, database/user
+configuration, and the existence of enabled versions for its four secrets.
+It does not read secret values; accessor grants are covered by
+`gcp2.resource-grants`. GCP-5 remains planned until its refresh job and reports
+bucket are implemented. A new cloud resource ships its checks, its group's
+`later_groups.py` placeholder is replaced, and its grants are added to
+`identities.json` (the verifier needs `run.invoker` on services it calls, and
+`run.jobsExecutorWithOverrides` on a job it executes with overrides).
 
 Agents start with the scorecard comment and may use the read-only diagnostics
 described above when more detail is needed. An assistant acting with the

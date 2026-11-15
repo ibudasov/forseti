@@ -9,7 +9,7 @@ from typing import Any, Dict, Sequence, Tuple
 import pytest
 import yaml
 
-from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3b, gcp4, gcp6
+from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3, gcp3b, gcp4, gcp6
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -57,11 +57,161 @@ API_SERVICE = ("run", "services", "describe", "forseti-api")
 DEPLOYER = "serviceAccount:forseti-deployer@forseti-test.iam.gserviceaccount.com"
 HOUSEKEEPING = "serviceAccount:forseti-housekeeping@forseti-test.iam.gserviceaccount.com"
 DRIFT = ("repos/example/repo/actions/workflows/infra.yml/runs",)
+SQL_INSTANCE = ("sql", "instances", "describe", "forseti-pg")
+SQL_DATABASES = ("sql", "databases", "list")
+SQL_USERS = ("sql", "users", "list")
+SECRET_DESCRIBE = ("secrets", "describe")
+SECRET_VERSIONS = ("secrets", "versions", "list")
 
 
 def drift_environment(name: str) -> Environment:
     path = "repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1"
     return environment({}, {(path,): fixture(name)})
+
+
+def cloud_sql_instance() -> dict:
+    return {
+        "state": "RUNNABLE",
+        "region": "europe-west4",
+        "databaseVersion": "POSTGRES_15",
+        "deletionProtection": True,
+        "settings": {
+            "tier": "db-f1-micro",
+            "availabilityType": "ZONAL",
+            "edition": "ENTERPRISE",
+            "deletionProtectionEnabled": True,
+            "ipConfiguration": {"authorizedNetworks": [], "sslMode": "ENCRYPTED_ONLY"},
+            "backupConfiguration": {
+                "enabled": True,
+                "startTime": "02:00",
+                "pointInTimeRecoveryEnabled": False,
+                "backupRetentionSettings": {"retainedBackups": 7},
+            },
+        },
+    }
+
+
+def secret_routes(missing=(), without_enabled_versions=()):
+    routes = {}
+    for secret in gcp3.SECRETS:
+        description = None if secret in missing else {}
+        routes[(*SECRET_DESCRIBE, secret)] = description
+        if description is not None:
+            versions = [] if secret in without_enabled_versions else [{"state": "ENABLED"}]
+            routes[(*SECRET_VERSIONS, secret)] = versions
+    return routes
+
+
+class TestGcp3:
+    def test_instance_passes_and_reports_only_counts(self):
+        outcome = gcp3.check_instance(environment({SQL_INSTANCE: cloud_sql_instance()}))
+
+        assert outcome.status is Status.PASS
+        assert outcome.detail == "1 instance matches policy"
+
+    def test_instance_fails_on_mismatched_settings(self):
+        instance = cloud_sql_instance()
+        instance["settings"]["tier"] = "unexpected-tier"
+
+        outcome = gcp3.check_instance(environment({SQL_INSTANCE: instance}))
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "1 instance settings differ from policy"
+        assert "unexpected-tier" not in outcome.detail
+
+    def test_instance_is_pending_when_missing(self):
+        outcome = gcp3.check_instance(environment({SQL_INSTANCE: None}))
+
+        assert outcome.status is Status.PENDING
+
+    def test_network_passes_with_no_authorized_networks(self):
+        outcome = gcp3.check_network(environment({SQL_INSTANCE: cloud_sql_instance()}))
+
+        assert outcome.status is Status.PASS
+        assert outcome.detail == "2 network settings match policy"
+
+    def test_network_fails_for_authorized_networks_or_non_enforced_ssl(self):
+        instance = cloud_sql_instance()
+        instance["settings"]["ipConfiguration"].update(
+            authorizedNetworks=[{"value": "192.0.2.1"}], sslMode="ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+        )
+
+        outcome = gcp3.check_network(environment({SQL_INSTANCE: instance}))
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "2 network settings differ from policy"
+        assert "192.0.2.1" not in outcome.detail
+
+    def test_network_is_pending_when_instance_is_missing(self):
+        assert gcp3.check_network(environment({SQL_INSTANCE: None})).status is Status.PENDING
+
+    def test_protection_and_backups_pass(self):
+        outcome = gcp3.check_protection_backups(environment({SQL_INSTANCE: cloud_sql_instance()}))
+
+        assert outcome.status is Status.PASS
+        assert outcome.detail == "6 protection and backup settings match policy"
+
+    def test_protection_and_backups_fail_on_mismatched_settings(self):
+        instance = cloud_sql_instance()
+        instance["settings"]["backupConfiguration"]["enabled"] = False
+
+        outcome = gcp3.check_protection_backups(environment({SQL_INSTANCE: instance}))
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "1 protection or backup settings differ from policy"
+
+    def test_protection_and_backups_are_pending_when_instance_is_missing(self):
+        assert gcp3.check_protection_backups(environment({SQL_INSTANCE: None})).status is Status.PENDING
+
+    def test_database_and_api_created_users_pass(self):
+        env = environment({
+            SQL_DATABASES: [{"name": "forseti"}],
+            SQL_USERS: [{"name": "forseti_owner"}],
+        })
+
+        outcome = gcp3.check_database_users(env)
+
+        assert outcome.status is Status.PASS
+        assert outcome.detail == "1 database and 1 API-created user match policy"
+
+    def test_database_users_fail_if_database_is_missing_or_an_extra_user_exists(self):
+        env = environment({
+            SQL_DATABASES: [{"name": "other"}],
+            SQL_USERS: [{"name": "forseti_owner"}, {"name": "unexpected-user"}],
+        })
+
+        outcome = gcp3.check_database_users(env)
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "2 database or user settings differ; database count=1, API-created user count=2"
+        assert "unexpected-user" not in outcome.detail
+
+    def test_database_users_are_pending_when_queries_are_not_available(self):
+        outcome = gcp3.check_database_users(environment({SQL_DATABASES: None, SQL_USERS: []}))
+
+        assert outcome.status is Status.PENDING
+
+    def test_secrets_pass_when_each_has_an_enabled_version(self):
+        outcome = gcp3.check_secrets(environment(secret_routes()))
+
+        assert outcome.status is Status.PASS
+        assert outcome.detail == "4 secrets have enabled versions"
+
+    def test_secrets_fail_when_an_existing_secret_has_no_enabled_version(self):
+        missing_version_secret = gcp3.SECRETS[0]
+        outcome = gcp3.check_secrets(environment(secret_routes(without_enabled_versions=(missing_version_secret,))))
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "1 of 4 secrets have no enabled version"
+        assert missing_version_secret not in outcome.detail
+
+    def test_secrets_are_pending_when_not_all_secrets_exist(self):
+        missing_secret = gcp3.SECRETS[0]
+        outcome = gcp3.check_secrets(environment(secret_routes(missing=(missing_secret,))))
+
+        assert outcome.status is Status.PENDING
+        assert outcome.detail == "3 of 4 secrets are available"
+        assert missing_secret not in outcome.detail
 
 
 class TestIdentities:
@@ -501,7 +651,9 @@ class TestMarkdown:
         env = environment({
             SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
             KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
-            JOBS: None, API_SERVICE: None,
+            JOBS: None, API_SERVICE: None, SQL_INSTANCE: cloud_sql_instance(),
+            SQL_DATABASES: [{"name": "forseti"}], SQL_USERS: [{"name": "forseti_owner"}],
+            **secret_routes(),
             ("logging", "metrics", "list"): [
                 {"name": name, "disabled": False} for name in sorted(gcp6.EXPECTED_METRICS)
             ],
@@ -540,7 +692,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 11 · ❌ 2 · ⏳ 10 · ➖ 2" in markdown
+        assert "✅ 16 · ❌ 2 · ⏳ 9 · ➖ 2" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)
