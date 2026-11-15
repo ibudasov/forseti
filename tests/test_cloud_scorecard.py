@@ -77,7 +77,6 @@ def cloud_sql_instance() -> dict:
         "state": "RUNNABLE",
         "region": "europe-west4",
         "databaseVersion": "POSTGRES_15",
-        "deletionProtection": True,
         "settings": {
             "tier": "db-f1-micro",
             "availabilityType": "ZONAL",
@@ -187,7 +186,16 @@ class TestGcp3:
         outcome = gcp3.check_protection_backups(environment({SQL_INSTANCE: cloud_sql_instance()}))
 
         assert outcome.status is Status.PASS
-        assert outcome.detail == "6 protection and backup settings match policy"
+        assert outcome.detail == "5 protection and backup settings match policy"
+
+    def test_protection_and_backups_fail_when_api_deletion_protection_is_disabled(self):
+        instance = cloud_sql_instance()
+        instance["settings"]["deletionProtectionEnabled"] = False
+
+        outcome = gcp3.check_protection_backups(environment({SQL_INSTANCE: instance}))
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == "1 protection or backup settings differ from policy"
 
     def test_protection_and_backups_fail_on_mismatched_settings(self):
         instance = cloud_sql_instance()

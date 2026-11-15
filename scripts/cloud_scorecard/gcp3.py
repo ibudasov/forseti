@@ -68,7 +68,6 @@ def check_protection_backups(env: Environment) -> Outcome:
     backups = settings.get("backupConfiguration") or {}
     retention = backups.get("backupRetentionSettings") or {}
     mismatches = [
-        not instance.get("deletionProtection", False),
         not settings.get("deletionProtectionEnabled", False),
         not backups.get("enabled", False),
         backups.get("startTime") != "02:00",
@@ -77,7 +76,7 @@ def check_protection_backups(env: Environment) -> Outcome:
     ]
     if any(mismatches):
         return Outcome.failed(f"{sum(mismatches)} protection or backup settings differ from policy")
-    return Outcome.passed("6 protection and backup settings match policy")
+    return Outcome.passed("5 protection and backup settings match policy")
 
 
 def check_database_users(env: Environment) -> Outcome:
