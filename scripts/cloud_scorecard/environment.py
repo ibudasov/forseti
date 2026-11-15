@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 JsonQuery = Callable[[Sequence[str]], Any]
 
-NOT_FOUND_MARKERS = ("NOT_FOUND", "was not found", "does not exist", "HTTPError 404")
+NOT_FOUND_MARKERS = ("NOT_FOUND", "was not found", "does not exist", "HTTPError 404", "not found: 404")
 ACCESS_DENIED_MARKERS = ("PERMISSION_DENIED", "HTTPError 403")
 QUERY_TIMEOUT_SECONDS = 120
 
