@@ -36,6 +36,15 @@ usage a second time. Agent degradation and downgrade details are included in
 that event, with separate per-agent events for the corresponding log-based
 metrics.
 
+The `gcp6.email-channel` scorecard check lists notification channels with
+`gcloud beta monitoring channels list --project <project> --format=json` and
+requires the enabled `Forseti owner email` channel. The check never includes
+the configured email address in its result. `gcp6.recent-traces` checks the
+latest five `analysis_completed` logs from the last seven days: it is pending
+when there are no completions, fails if any sampled completion lacks a Cloud
+Trace identifier, and passes when all sampled completions have one. This keeps
+an idle owner-only `/analyze` endpoint from producing a trace-coverage failure.
+
 ## Metrics and alerts
 
 Log-based metric names use the `forseti/` prefix. `analysis_count` has decision,

@@ -401,18 +401,57 @@ class TestObservability:
             "enabled": True,
             "labels": {"email_address": "owner@example.invalid"},
         }]
+        query = ("beta", "monitoring", "channels", "list", "--project", PROJECT)
 
-        assert gcp6.check_email_channel(environment({("monitoring", "channels", "list"): channels})).status is Status.PASS
+        outcome = gcp6.check_email_channel(environment({query: channels}))
 
-    def test_requires_recent_traced_analysis_and_no_5xx(self):
-        routes = {
-            ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
-            ("logging", "read", gcp6.API_5XX_FILTER): [],
-        }
+        assert outcome.status is Status.PASS
+        assert "owner@example.invalid" not in outcome.detail
 
-        env = environment(routes)
+    def test_fails_when_email_notification_channel_is_disabled(self):
+        channels = [{
+            "type": "email",
+            "displayName": "Forseti owner email",
+            "enabled": False,
+            "labels": {"email_address": "owner@example.invalid"},
+        }]
+        query = ("beta", "monitoring", "channels", "list", "--project", PROJECT)
 
-        assert gcp6.check_recent_analysis_traces(env).status is Status.PASS
+        outcome = gcp6.check_email_channel(environment({query: channels}))
+
+        assert outcome.status is Status.FAIL
+        assert "owner@example.invalid" not in outcome.detail
+
+    def test_fails_when_email_notification_channel_is_missing(self):
+        query = ("beta", "monitoring", "channels", "list", "--project", PROJECT)
+
+        assert gcp6.check_email_channel(environment({query: []})).status is Status.FAIL
+
+    def test_recent_analysis_traces_are_pending_when_no_analysis_completed(self):
+        query = ("logging", "read", 'jsonPayload.event="analysis_completed"', "--freshness=7d", "--limit=5")
+
+        outcome = gcp6.check_recent_analysis_traces(environment({query: []}))
+
+        assert outcome.status is Status.PENDING
+        assert outcome.detail == "no /analyze calls in the last 7 days"
+
+    def test_recent_analysis_traces_fail_when_a_completion_has_no_trace(self):
+        query = ("logging", "read", 'jsonPayload.event="analysis_completed"', "--freshness=7d", "--limit=5")
+
+        outcome = gcp6.check_recent_analysis_traces(environment({query: [{"trace": "trace-id"}, {}]}))
+
+        assert outcome.status is Status.FAIL
+
+    def test_recent_analysis_traces_pass_when_all_completions_have_traces(self):
+        query = ("logging", "read", 'jsonPayload.event="analysis_completed"', "--freshness=7d", "--limit=5")
+
+        outcome = gcp6.check_recent_analysis_traces(environment({query: [{"trace": "trace-id"}]}))
+
+        assert outcome.status is Status.PASS
+
+    def test_requires_no_recent_api_5xx(self):
+        env = environment({("logging", "read", gcp6.API_5XX_FILTER): []})
+
         assert gcp6.check_no_recent_api_5xx(env).status is Status.PASS
 
 
@@ -470,7 +509,7 @@ class TestMarkdown:
             ("monitoring", "policies", "list"): [
                 {"displayName": name, "enabled": {"value": True}} for name in gcp6.EXPECTED_ALERTS
             ],
-            ("monitoring", "channels", "list"): [
+            ("beta", "monitoring", "channels", "list"): [
                 {
                     "type": "email",
                     "displayName": "Forseti owner email",
@@ -478,7 +517,7 @@ class TestMarkdown:
                     "labels": {"email_address": "owner@example.invalid"},
                 }
             ],
-            ("logging", "read", 'jsonPayload.event="analysis_completed" AND trace:*'): [{"trace": "trace-id"}],
+            ("logging", "read", 'jsonPayload.event="analysis_completed"'): [{"trace": "trace-id"}],
             ("logging", "read", gcp6.API_5XX_FILTER): [],
             ("logging", "read", exit_criteria._unexpected_writers_filter(fixture("manifest"))): [],
         }, {

@@ -78,7 +78,7 @@ def check_alert_policies(env: Environment) -> Outcome:
 
 
 def check_email_channel(env: Environment) -> Outcome:
-    channels = env.gcloud(["monitoring", "channels", "list", *_project_arguments(env)]) or []
+    channels = env.gcloud(["beta", "monitoring", "channels", "list", *_project_arguments(env)]) or []
     has_enabled_email = any(
         channel.get("type") == "email"
         and channel.get("displayName") == "Forseti owner email"
@@ -92,13 +92,15 @@ def check_email_channel(env: Environment) -> Outcome:
 
 
 def check_recent_analysis_traces(env: Environment) -> Outcome:
-    filter_text = 'jsonPayload.event="analysis_completed" AND trace:*'
+    filter_text = 'jsonPayload.event="analysis_completed"'
     entries = env.gcloud(
-        ["logging", "read", filter_text, "--freshness=7d", "--limit=1", *_project_arguments(env)]
+        ["logging", "read", filter_text, "--freshness=7d", "--limit=5", *_project_arguments(env)]
     ) or []
-    if entries:
-        return Outcome.passed("recent analysis-completed logs include a Cloud Trace identifier")
-    return Outcome.failed("no recent /analyze completion log has a trace identifier")
+    if not entries:
+        return Outcome.pending("no /analyze calls in the last 7 days")
+    if any(not entry.get("trace") for entry in entries):
+        return Outcome.failed("a recent analysis-completed log is missing a Cloud Trace identifier")
+    return Outcome.passed("recent analysis-completed logs include Cloud Trace identifiers")
 
 
 def check_no_recent_api_5xx(env: Environment) -> Outcome:
