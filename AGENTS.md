@@ -1,6 +1,6 @@
 # Agent Guidelines
 
-Check relevant instructions in the folder `./.github/instructions/*.*`
+Check relevant instructions in the folder `./.github/instructions/*.*` and refer to the project's wiki on GitHub for full context and domain knowledge.
 
 ## Cloud access
 
