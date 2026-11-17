@@ -281,8 +281,12 @@ Checks live in `scripts/cloud_scorecard/` (not `scripts/scorecard/`, which is
 the product scorecard in `scripts/scorecard.py`). Each has an id, group, cost
 flag and a function returning a status plus a short detail. Unit tests replay
 fake `gcloud` JSON from `tests/fixtures/cloud_scorecard/`. GCP-3 verifies the
-Cloud SQL instance, network, deletion protection and backups, database/user
-configuration, and the existence of enabled versions for its four secrets.
+Cloud SQL instance, network, deletion protection and backups, application
+database and user inventory (`gcp3.database-users` checks that the `forseti`
+database is present and that the returned user inventory matches the expected
+role categories: `forseti_owner`, `forseti_app`, and platform-default
+`postgres`, without inferring creation provenance or verifying SQL privilege
+boundaries), and the existence of enabled versions for its four secrets.
 It does not read secret values; accessor grants are covered by
 `gcp2.resource-grants`. GCP-5 remains planned until its refresh job and reports
 bucket are implemented. A new cloud resource ships its checks, its group's

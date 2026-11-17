@@ -160,6 +160,13 @@ password) with `APP_DB_PASSWORD`, quoted by the driver and never logged, then gr
 the privileges above and sets `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` so tables created
 by later migrations are covered automatically. Add `TRUNCATE` only if ingestion needs it.
 
+`gcloud sql users list` returns all PostgreSQL login roles in the instance
+(`forseti_owner`, `forseti_app`, and the platform-default `postgres` role).
+The `gcp3.database-users` scorecard check validates that returned user inventory
+against those three expected categories; it does not infer creation provenance
+or verify SQL privilege boundaries, which must be checked separately against
+`pg_roles` / `pg_has_role`.
+
 ### Housekeeping job
 
 `python -m app.jobs.housekeeping [--step all|extensions|migrate|roles|collation] [--dry-run] [--reindex]`

@@ -10,7 +10,14 @@ GROUP = "GCP-3"
 INSTANCE_NAME = "forseti-pg"
 DATABASE_NAME = "forseti"
 EXPECTED_REGION = "europe-west4"
-EXPECTED_DATABASE_USERS = {"forseti_owner"}
+OWNER_DATABASE_USER = "forseti_owner"
+RUNTIME_DATABASE_USER = "forseti_app"
+PLATFORM_DEFAULT_DATABASE_USER = "postgres"
+EXPECTED_DATABASE_USERS = {
+    OWNER_DATABASE_USER,
+    RUNTIME_DATABASE_USER,
+    PLATFORM_DEFAULT_DATABASE_USER,
+}
 SECRETS = (
     "forseti-database-url",
     "forseti-owner-database-url",
@@ -91,14 +98,19 @@ def check_database_users(env: Environment) -> Outcome:
 
     database_exists = any(database.get("name") == DATABASE_NAME for database in databases)
     user_names = {user.get("name") for user in users}
-    users_match = user_names == EXPECTED_DATABASE_USERS
+    users_match = len(users) == len(EXPECTED_DATABASE_USERS) and user_names == EXPECTED_DATABASE_USERS
     if not database_exists or not users_match:
         mismatch_count = int(not database_exists) + int(not users_match)
         return Outcome.failed(
             f"{mismatch_count} database or user settings differ; "
-            f"database count={len(databases)}, API-created user count={len(users)}"
+            f"database_present={str(database_exists).lower()}, "
+            f"user_inventory_match={str(users_match).lower()}, "
+            f"database_count={len(databases)}, user_count={len(users)}"
         )
-    return Outcome.passed(f"1 database and {len(users)} API-created user match policy")
+    return Outcome.passed(
+        f"application database present and {len(users)} user inventory roles match policy "
+        f"(database_present=true, user_inventory_match=true)"
+    )
 
 
 def check_secrets(env: Environment) -> Outcome:
@@ -130,7 +142,7 @@ CHECKS = (
     Check("gcp3.network", GROUP, "Cloud SQL network configuration", Cost.FREE, check_network),
     Check("gcp3.protection-backups", GROUP, "Cloud SQL protection and backups", Cost.FREE,
           check_protection_backups),
-    Check("gcp3.database-users", GROUP, "Application database and API-created users", Cost.FREE,
+    Check("gcp3.database-users", GROUP, "Application database and user inventory", Cost.FREE,
           check_database_users),
     Check("gcp3.secrets", GROUP, "Required database and API secrets have enabled versions", Cost.FREE,
           check_secrets),
