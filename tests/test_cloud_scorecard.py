@@ -209,18 +209,72 @@ class TestGcp3:
     def test_protection_and_backups_are_pending_when_instance_is_missing(self):
         assert gcp3.check_protection_backups(environment({SQL_INSTANCE: None})).status is Status.PENDING
 
-    def test_database_and_api_created_users_pass(self):
+    def test_database_and_user_inventory_pass_for_expected_categories(self):
         env = environment({
-            SQL_DATABASES: [{"name": "forseti"}],
-            SQL_USERS: [{"name": "forseti_owner"}],
+            SQL_DATABASES: fixture("sql_databases"),
+            SQL_USERS: fixture("sql_users"),
         })
 
         outcome = gcp3.check_database_users(env)
 
         assert outcome.status is Status.PASS
-        assert outcome.detail == "1 database and 1 API-created user match policy"
+        assert outcome.detail == (
+            "application database present and 3 user inventory roles match policy "
+            "(database_present=true, user_inventory_match=true)"
+        )
+        assert "API-created" not in outcome.detail
+        for name in ("forseti", "forseti_owner", "forseti_app", "postgres"):
+            assert name not in outcome.detail
 
-    def test_database_users_fail_if_database_is_missing_or_an_extra_user_exists(self):
+    def test_database_users_fail_if_application_database_is_missing(self):
+        env = environment({
+            SQL_DATABASES: [{"name": "postgres"}],
+            SQL_USERS: fixture("sql_users"),
+        })
+
+        outcome = gcp3.check_database_users(env)
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == (
+            "1 database or user settings differ; "
+            "database_present=false, user_inventory_match=true, database_count=1, user_count=3"
+        )
+        assert "postgres" not in outcome.detail
+        assert "forseti" not in outcome.detail
+
+    @pytest.mark.parametrize("missing_role", ["forseti_owner", "forseti_app", "postgres"])
+    def test_database_users_fail_if_any_required_role_is_missing(self, missing_role):
+        users = [user for user in fixture("sql_users") if user["name"] != missing_role]
+        env = environment({
+            SQL_DATABASES: fixture("sql_databases"),
+            SQL_USERS: users,
+        })
+
+        outcome = gcp3.check_database_users(env)
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == (
+            "1 database or user settings differ; "
+            "database_present=true, user_inventory_match=false, database_count=2, user_count=2"
+        )
+        assert missing_role not in outcome.detail
+
+    def test_database_users_fail_if_an_unexpected_extra_user_exists(self):
+        env = environment({
+            SQL_DATABASES: fixture("sql_databases"),
+            SQL_USERS: [*fixture("sql_users"), {"name": "unexpected-user"}],
+        })
+
+        outcome = gcp3.check_database_users(env)
+
+        assert outcome.status is Status.FAIL
+        assert outcome.detail == (
+            "1 database or user settings differ; "
+            "database_present=true, user_inventory_match=false, database_count=2, user_count=4"
+        )
+        assert "unexpected-user" not in outcome.detail
+
+    def test_database_users_fail_when_both_database_and_users_differ(self):
         env = environment({
             SQL_DATABASES: [{"name": "other"}],
             SQL_USERS: [{"name": "forseti_owner"}, {"name": "unexpected-user"}],
@@ -229,8 +283,12 @@ class TestGcp3:
         outcome = gcp3.check_database_users(env)
 
         assert outcome.status is Status.FAIL
-        assert outcome.detail == "2 database or user settings differ; database count=1, API-created user count=2"
+        assert outcome.detail == (
+            "2 database or user settings differ; "
+            "database_present=false, user_inventory_match=false, database_count=1, user_count=2"
+        )
         assert "unexpected-user" not in outcome.detail
+        assert "other" not in outcome.detail
 
     def test_database_users_are_pending_when_queries_are_not_available(self):
         outcome = gcp3.check_database_users(environment({SQL_DATABASES: None, SQL_USERS: []}))
@@ -714,7 +772,7 @@ class TestMarkdown:
             SERVICE_ACCOUNTS: fixture("service_accounts"), PROJECT_POLICY: fixture("project_policy"),
             KEYS: [], PROVIDER: fixture("provider_loose"), REPOSITORY: None, SECRET_POLICY: fixture("secret_policy"),
             JOBS: None, API_SERVICE: None, SQL_INSTANCE: cloud_sql_instance(),
-            SQL_DATABASES: [{"name": "forseti"}], SQL_USERS: [{"name": "forseti_owner"}],
+            SQL_DATABASES: fixture("sql_databases"), SQL_USERS: fixture("sql_users"),
             **secret_routes(),
             ("logging", "metrics", "list"): [
                 {"name": name, "disabled": False} for name in sorted(gcp6.EXPECTED_METRICS)
