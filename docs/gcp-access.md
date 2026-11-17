@@ -230,7 +230,11 @@ not necessarily the current PR head.
 Pushes changing workloads on `main`, or a manual `apply`, wait for approval
 in `gcp-infra`, then plan and apply **the same saved plan**, including plans
 that delete or replace resources.
-Apply concurrency is `terraform-main`, with cancellation disabled.
+Apply concurrency is `terraform-main`, with cancellation disabled. Because
+`cancel-in-progress: false` holds the `terraform-main` slot while an `apply`
+job waits for `gcp-infra` review, approve or reject a pending `gcp-infra`
+deployment before merging another infrastructure PR to `main` (or cancel a
+superseded run so the latest `main` run can acquire the lock).
 Saved plans and error captures remain runner-local and are removed on exit.
 No plan artifacts are uploaded. The nightly drift check fails on any
 non-empty plan; inspect its run summary and open a corrective PR rather

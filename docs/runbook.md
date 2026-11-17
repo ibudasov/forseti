@@ -42,6 +42,10 @@ open a PR that makes `agent_modes` match, otherwise the drift check fails.
 In the plan comment or run summary check that: only expected resources change;
 nothing is destroyed or replaced unexpectedly (Cloud SQL, secrets); no IAM or
 identity change appears (those belong to bootstrap); the SHA is the PR head.
+Approve the `gcp-infra` deployment immediately after merging a workload PR so
+`main` does not advance while the run waits in the `terraform-main` concurrency
+group. If a newer commit reaches `main` before an older `Infrastructure` run is
+approved, cancel the older superseded run first so the latest run can proceed.
 
 ## Migration policy
 

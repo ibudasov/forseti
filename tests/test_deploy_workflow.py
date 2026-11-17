@@ -69,6 +69,8 @@ def gate_environment(tmp_path):
         'printf "gh %s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == *"actions/workflows/test.yml/runs?branch="* ]]; then\n'
         '  printf "%s\\n" "$PREVIOUS_BUILD_SHAS"\n'
+        'elif [[ "$*" == *"actions/workflows/infra.yml/runs?branch="* ]]; then\n'
+        '  printf "%s\\n" "${PENDING_INFRA_COUNT:-0}"\n'
         'elif [[ "$*" == *"actions/workflows/test.yml/runs?head_sha="* ]]; then\n'
         '  printf "%s\\n" "$BUILD_CONCLUSION"\n'
         'else\n'
@@ -137,6 +139,21 @@ def test_build_defers_deployment_when_workload_infrastructure_changes(gate_steps
     commands = Path(environment["COMMAND_LOG"]).read_text()
     assert "workflows/test.yml/runs?branch=main" in commands
     assert "attempts/" not in commands
+
+
+def test_build_defers_deployment_when_earlier_infrastructure_run_is_pending(gate_steps, gate_environment):
+    environment = {**gate_environment, "PENDING_INFRA_COUNT": "1"}
+
+    result = run_step(gate_steps, "Gate deployment on workload apply", environment)
+
+    assert result.returncode == 0
+    assert deployment_gate_outputs(environment) == [
+        "should_deploy=false",
+        "source_sha=source-sha",
+    ]
+    assert "earlier workload infrastructure run on main is still pending or waiting" in result.stdout
+    commands = Path(environment["COMMAND_LOG"]).read_text()
+    assert "workflows/infra.yml/runs?branch=main" in commands
 
 
 def test_infrastructure_deployment_requires_matching_successful_apply(gate_steps, gate_environment):
