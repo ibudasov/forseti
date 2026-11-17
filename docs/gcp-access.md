@@ -95,7 +95,9 @@ jobs and buckets do not exist yet. To add one, declare the resource in
 and add `{kind, resource, member, role}` to `resource_grants`. Supported kinds
 are `secret`, `service`, `job` and `bucket`; unknown resources fail planning.
 Members are service-account IDs or `owner`, resolved from the sensitive
-`owner_email`. Do not add authoritative resource IAM policies to `main/`.
+`owner_email`. Do not add full resource-wide IAM policies to `main/`. A
+role-specific binding may be authoritative for its single role when it does
+not overlap a member resource for that role.
 
 To add an identity, edit the manifest, regenerate docs, review the PR, and
 have the owner run bootstrap again. Project roles, conditional roles, act-as

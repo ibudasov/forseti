@@ -265,6 +265,22 @@ def test_apply_workflow_applies_saved_plan_without_destroy_gate():
     assert "allow_destroy" not in workflow
 
 
+def test_drift_workflow_summarizes_redacted_plan_and_removes_captures():
+    workflow = (ROOT / ".github/workflows/infra.yml").read_text()
+
+    assert workflow.count("      - 'scripts/terraform_drift_summary.py'") == 2
+    assert (
+        "terraform -chdir=infra/terraform/main plan -input=false -lock=false "
+        "-detailed-exitcode -out=drift.tfplan"
+    ) in workflow
+    assert (
+        "terraform -chdir=infra/terraform/main show -json drift.tfplan "
+        "2>drift-show-error.txt | "
+        "python3 -m scripts.terraform_drift_summary"
+    ) in workflow
+    assert "rm -f drift-error.txt drift-show-error.txt infra/terraform/main/drift.tfplan" in workflow
+
+
 def test_custom_metric_alerts_wait_for_their_logging_metrics():
     monitoring = (ROOT / "infra/terraform/main/monitoring.tf").read_text()
     expected_filters = {
@@ -396,3 +412,58 @@ def test_document_generation_preserves_prose_and_detects_manifest_changes():
     assert "new.role" in updated
     assert updated.split(iam_doc.START)[0] == document.split(iam_doc.START)[0]
     assert updated.split(iam_doc.END)[1] == document.split(iam_doc.END)[1]
+
+
+def test_drift_summary_reports_resource_actions_without_private_values():
+    plan = {
+        "resource_changes": [
+            {
+                "address": 'google_cloud_run_v2_job_iam_member.grants["job/private-job"]',
+                "type": "google_cloud_run_v2_job_iam_member",
+                "change": {"actions": ["create"], "after": {"name": "private-job"}},
+            },
+            {
+                "address": 'google_cloud_run_v2_job_iam_member.grants["job/another-private-job"]',
+                "type": "google_cloud_run_v2_job_iam_member",
+                "change": {"actions": ["create"], "after": {"name": "another-private-job"}},
+            },
+            {
+                "address": 'google_secret_manager_secret.secret["private-secret"]',
+                "type": "google_secret_manager_secret",
+                "change": {"actions": ["delete", "create"]},
+            },
+            {
+                "address": "google_storage_bucket.artifacts",
+                "type": "google_storage_bucket",
+                "change": {"actions": ["no-op"]},
+            },
+        ]
+    }
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/terraform_drift_summary.py")],
+        input=json.dumps(plan),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "| google_cloud_run_v2_job_iam_member | create | 2 |" in result.stdout
+    assert "| google_secret_manager_secret | replace | 1 |" in result.stdout
+    assert "private-job" not in result.stdout
+    assert "private-secret" not in result.stdout
+
+
+def test_drift_summary_rejects_invalid_json():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/terraform_drift_summary.py")],
+        input="{",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Invalid Terraform plan JSON" in result.stderr

@@ -51,6 +51,14 @@ resource "google_cloud_run_v2_job_iam_member" "grants" {
   member   = local.grant_members[each.key]
 }
 
+# The verifier needs override execution, not plain invocation of this job.
+resource "google_cloud_run_v2_job_iam_binding" "trust_check_invoker" {
+  name     = local.job_resources["forseti-trust-check"]
+  location = var.region
+  role     = "roles/run.invoker"
+  members  = []
+}
+
 resource "google_storage_bucket_iam_member" "grants" {
   for_each = { for key, grant in local.resource_grants : key => grant if grant.kind == "bucket" }
   bucket   = local.bucket_resources[each.value.resource]
