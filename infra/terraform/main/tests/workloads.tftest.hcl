@@ -21,7 +21,7 @@ run "workload_plan" {
       length(google_secret_manager_secret_iam_member.grants) == 6 &&
       length(google_cloud_run_v2_service_iam_member.grants) == 3 &&
       length(google_cloud_run_v2_job_iam_member.grants) == 3 &&
-      length(google_storage_bucket_iam_member.grants) == 2
+      length(google_storage_bucket_iam_member.grants) == 3
     )
     error_message = "Secret accessors, private API invokers, job invokers/executors and artifacts bucket grants must match identities.json."
   }

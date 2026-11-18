@@ -492,4 +492,5 @@ def test_daily_refresh_job_and_scheduler_configuration():
     grants = {(g["kind"], g["resource"], g["member"], g["role"]) for g in identities["resource_grants"]}
     assert ("job", "forseti-daily-refresh", "forseti-scheduler", "run.invoker") in grants
     assert ("job", "forseti-daily-refresh", "forseti-verifier", "run.invoker") in grants
+    assert ("bucket", "forseti-505116-artifacts", "forseti-verifier", "storage.legacyBucketReader") in grants
     assert ("bucket", "forseti-505116-artifacts", "forseti-verifier", "storage.objectViewer") in grants

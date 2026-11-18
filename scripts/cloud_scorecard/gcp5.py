@@ -107,6 +107,15 @@ def _job_template_spec(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _job_has_cloudsql_mount(job: dict[str, Any], mounts: dict[Any, Any]) -> bool:
+    if "/cloudsql" in mounts:
+        return True
+    annotations = job.get("spec", {}).get("template", {}).get("metadata", {}).get("annotations", {})
+    if annotations.get("run.googleapis.com/cloudsql-instances"):
+        return True
+    return False
+
+
 def check_job(env: Environment) -> Outcome:
     job = env.gcloud([
         "run", "jobs", "describe", JOB_NAME,
@@ -147,7 +156,7 @@ def check_job(env: Environment) -> Outcome:
         if bucket_name and bucket_name != f"{env.project}-artifacts":
             problems.append("wrong artifacts bucket mount")
 
-    if "/cloudsql" not in mounts:
+    if not _job_has_cloudsql_mount(job, mounts):
         problems.append("missing /cloudsql mount")
 
     if problems:
@@ -286,9 +295,19 @@ def check_artifacts_bucket(env: Environment) -> Outcome:
         return Outcome.pending(f"artifacts bucket {bucket_name} does not exist yet")
 
     iam_cfg = bucket.get("iamConfiguration", {})
-    ubla = iam_cfg.get("uniformBucketLevelAccess", {}).get("enabled") is True
-    pap = iam_cfg.get("publicAccessPrevention") == "enforced"
-    rules = bucket.get("lifecycle", {}).get("rule", [])
+    ubla = (
+        bucket.get("uniform_bucket_level_access") is True
+        or iam_cfg.get("uniformBucketLevelAccess", {}).get("enabled") is True
+    )
+    pap = (
+        bucket.get("public_access_prevention") == "enforced"
+        or iam_cfg.get("publicAccessPrevention") == "enforced"
+    )
+    rules = (
+        bucket.get("lifecycle_config", {}).get("rule")
+        or bucket.get("lifecycle", {}).get("rule")
+        or []
+    )
     has_180d_reports_lifecycle = any(
         rule.get("action", {}).get("type") == "Delete"
         and rule.get("condition", {}).get("age") == 180
