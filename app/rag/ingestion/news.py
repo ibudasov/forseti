@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import List
@@ -51,6 +52,8 @@ def _parse_yf_news(ticker: str, articles: list, source_type: SourceType) -> List
                     text=text,
                     source_quality_tier=SourceQualityTier.secondary_reputable,
                     published_at=published_at,
+                    raw_payload=json.dumps(article, sort_keys=True, default=str),
+                    raw_extension="json",
                 )
             )
     return documents

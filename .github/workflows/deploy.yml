@@ -181,6 +181,11 @@ jobs:
             echo "::error::forseti-trust-check does not exist; apply the approved gcp-infra plan before deploying."
             exit 1
           fi
+          if ! gcloud run jobs describe forseti-daily-refresh \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json >/dev/null; then
+            echo "::error::forseti-daily-refresh does not exist; apply the approved gcp-infra plan before deploying."
+            exit 1
+          fi
           if ! gcloud run services describe forseti-api \
             --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format=json > "$RUNNER_TEMP/forseti-api.json"; then
             echo "::error::forseti-api does not exist; apply the approved gcp-infra plan before deploying."
@@ -230,6 +235,15 @@ jobs:
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
           gcloud run jobs update forseti-trust-check \
+            --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+
+      - name: Point the daily-refresh job at the new image
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          gcloud run jobs update forseti-daily-refresh \
             --image "$IMAGE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
 
       - name: Deploy API image

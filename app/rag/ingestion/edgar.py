@@ -250,6 +250,7 @@ class SECEdgarIngestor:
             ]
 
         normalized_text = _normalize_html(filing_html)
+        raw_ext = "txt" if filing.primary_document.lower().endswith(".txt") else "html"
         return [
             self._extract_section(
                 ticker=ticker,
@@ -258,6 +259,8 @@ class SECEdgarIngestor:
                 filing=filing,
                 normalized_text=normalized_text,
                 source_type=source_type,
+                raw_payload=filing_html,
+                raw_extension=raw_ext,
             )
             for source_type in section_types
         ]
@@ -281,6 +284,9 @@ class SECEdgarIngestor:
         filing: FilingMetadata,
         normalized_text: str,
         source_type: SourceType,
+        *,
+        raw_payload: str | None = None,
+        raw_extension: str | None = None,
     ) -> SectionExtraction:
         patterns = _SECTION_PATTERNS.get(source_type, {}).get(filing.canonical_form, ())
         for pattern in patterns:
@@ -303,6 +309,8 @@ class SECEdgarIngestor:
                 form_type=filing.form_type,
                 accession_number=filing.accession_number,
                 period_end=filing.report_date,
+                raw_payload=raw_payload,
+                raw_extension=raw_extension,
             )
             return SectionExtraction(
                 source_type=source_type,

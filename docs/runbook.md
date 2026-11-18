@@ -64,10 +64,15 @@ API revision (expand, then contract in a later release). See
 
 ## Re-running or backfilling the refresh
 
-Until the scheduled refresh exists (GCP-5), run ingestion locally against the
-Cloud SQL proxy (`make cloudsql-proxy`, then the `make ingest*` targets). Once
-it exists, execute the refresh job with `gcloud run jobs execute` and pass the
-date range as arguments.
+Routine reruns (respecting the `XNYS` trading calendar) are triggered by
+commenting `/rerun-refresh` on tracking issue #121, which executes
+`forseti-daily-refresh` as `forseti-verifier` without `--force`. For a forced
+backfill on a non-trading day or local run against the Cloud SQL proxy, see
+[`docs/data-refresh.md`](data-refresh.md):
+
+```bash
+gcloud run jobs execute forseti-daily-refresh --region europe-west4 --args="--force"
+```
 
 ## Restoring a Cloud SQL backup (owner)
 
@@ -114,7 +119,7 @@ history and update the table.
 
 ## Scorecard authentication
 
-`/verify` and `/verify full` on #121 must be the entire comment. Ops mints the
+`/verify`, `/verify full`, and `/rerun-refresh` on #121 must be the entire comment. Ops mints the
 verifier's Cloud Run ID token with the auth action and does not print the
 service URL or the token. A paid run also needs the main-layer apply that
 creates the artifacts bucket and grants `run.jobsExecutorWithOverrides` on

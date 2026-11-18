@@ -5,8 +5,9 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from app.ingestion.coverage import build_coverage_report
 from app.ingestion.earnings import ingest_earnings
@@ -81,15 +82,43 @@ def _write_coverage_report() -> None:
     report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def main() -> int:
-    from app.observability.logging import configure_logging
+@dataclass(frozen=True)
+class StructuredIngestionResult:
+    inserted_securities: int
+    rows_by_source: dict[str, int]
+    failed_tickers_by_source: dict[str, list[str]]
+    attempted_tickers_by_source: dict[str, int]
+    failed_sources: list[str]
+    duration_seconds: float
+    coverage_report_written: bool
 
-    configure_logging()
-    args = _build_parser().parse_args()
+
+def _attempted_count_for_source(
+    source_name: str,
+    ticker: str | None,
+    active_tickers: Sequence[str] | None,
+) -> int:
+    if source_name == "vix":
+        return 1
+    if ticker is not None:
+        return 1
+    if active_tickers is None:
+        return 0
+    return len(active_tickers)
+
+
+def run_structured_ingestion(
+    *,
+    source: str = "all",
+    ticker: str | None = None,
+    refetch_fundamentals: bool = False,
+    active_tickers: Sequence[str] | None = None,
+) -> StructuredIngestionResult:
+    """Execute structured ingestion and return per-source counts, attempts, and failures."""
     handlers = _source_handlers()
-    if args.source == "fundamentals-backfill" and getattr(args, "refetch_fundamentals", False):
-        handlers["fundamentals-backfill"] = lambda ticker: _run_fundamentals_backfill(
-            ticker,
+    if source == "fundamentals-backfill" and refetch_fundamentals:
+        handlers["fundamentals-backfill"] = lambda t: _run_fundamentals_backfill(
+            t,
             refetch=True,
         )
 
@@ -99,20 +128,26 @@ def main() -> int:
         for source_name in handlers
         if source_name != "fundamentals-backfill"
     ]
-    if args.source != "all":
-        selected_sources = [args.source]
+    if source != "all":
+        selected_sources = [source]
 
     inserted_securities = seed_universe()
     logger.info("seed_universe_done: inserted=%s", inserted_securities)
 
     rows_by_source: dict[str, int] = {}
     failed_tickers_by_source: dict[str, list[str]] = {}
+    attempted_tickers_by_source: dict[str, int] = {}
     failed_sources: list[str] = []
 
     for source_name in selected_sources:
         handler = handlers[source_name]
+        attempted_tickers_by_source[source_name] = _attempted_count_for_source(
+            source_name,
+            ticker,
+            active_tickers,
+        )
         try:
-            rows_upserted, failed_tickers = handler(args.ticker)
+            rows_upserted, failed_tickers = handler(ticker)
             rows_by_source[source_name] = rows_upserted
             failed_tickers_by_source[source_name] = failed_tickers
         except Exception:
@@ -121,9 +156,11 @@ def main() -> int:
             failed_sources.append(source_name)
             logger.exception("source_ingestion_failed: source=%s", source_name)
 
-    if args.source == "all" and args.ticker is None:
+    coverage_report_written = False
+    if source == "all" and ticker is None:
         try:
             _write_coverage_report()
+            coverage_report_written = True
         except Exception:
             logger.exception("ingestion_coverage_report_failed")
 
@@ -136,9 +173,30 @@ def main() -> int:
         failed_sources,
         duration_seconds,
     )
+    return StructuredIngestionResult(
+        inserted_securities=inserted_securities,
+        rows_by_source=rows_by_source,
+        failed_tickers_by_source=failed_tickers_by_source,
+        attempted_tickers_by_source=attempted_tickers_by_source,
+        failed_sources=failed_sources,
+        duration_seconds=duration_seconds,
+        coverage_report_written=coverage_report_written,
+    )
 
-    any_failed_tickers = any(tickers for tickers in failed_tickers_by_source.values())
-    if failed_sources or any_failed_tickers:
+
+def main() -> int:
+    from app.observability.logging import configure_logging
+
+    configure_logging()
+    args = _build_parser().parse_args()
+    result = run_structured_ingestion(
+        source=args.source,
+        ticker=args.ticker,
+        refetch_fundamentals=getattr(args, "refetch_fundamentals", False),
+    )
+
+    any_failed_tickers = any(tickers for tickers in result.failed_tickers_by_source.values())
+    if result.failed_sources or any_failed_tickers:
         return 1
     return 0
 

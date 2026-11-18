@@ -61,7 +61,7 @@ both layers, this generated documentation, and future live IAM verification
 | `forseti-api` | Cloud Run API | aiplatform.user, cloudsql.client, cloudtrace.agent, logging.logWriter, monitoring.metricWriter | None | Runtime only |
 | `forseti-jobs` | Cloud Run data jobs | aiplatform.user, cloudsql.client, cloudtrace.agent, logging.logWriter, monitoring.metricWriter | None | Runtime only |
 | `forseti-housekeeping` | Database housekeeping; exclusive reader of owner DB secrets (GCP-3b) | cloudsql.client, logging.logWriter | None | Runtime only |
-| `forseti-scheduler` | Cloud Scheduler; job invocation added in GCP-5 | None | None | Runtime only |
+| `forseti-scheduler` | Cloud Scheduler; invokes daily refresh job (GCP-5) | None | None | Runtime only |
 | `forseti-tf-plan` | Read-only infrastructure plans and drift checks | viewer, iam.securityReviewer | None | infra.yml on main; no environment |
 | `forseti-tf-apply` | Approved infrastructure applies; no identity or billing administration | run.admin, cloudsql.admin, secretmanager.admin, artifactregistry.admin, cloudscheduler.admin, monitoring.editor, logging.configWriter, storage.admin (exclude_state_bucket) | forseti-api, forseti-jobs, forseti-housekeeping, forseti-scheduler | infra.yml on main; gcp-infra |
 | `forseti-deployer` | Deploy application images from main | run.developer, artifactregistry.writer | forseti-api, forseti-jobs, forseti-housekeeping | deploy.yml on main; gcp-dev |
@@ -86,7 +86,10 @@ both layers, this generated documentation, and future live IAM verification
 | service | forseti-api | forseti-deployer | run.invoker |
 | service | forseti-api | forseti-verifier | run.invoker |
 | job | forseti-trust-check | forseti-verifier | run.jobsExecutorWithOverrides |
+| job | forseti-daily-refresh | forseti-scheduler | run.invoker |
+| job | forseti-daily-refresh | forseti-verifier | run.invoker |
 | bucket | forseti-505116-artifacts | forseti-jobs | storage.objectUser |
+| bucket | forseti-505116-artifacts | forseti-verifier | storage.objectViewer |
 <!-- END GENERATED IAM -->
 
 Resource grants are initially empty because the later secrets, services,

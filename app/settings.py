@@ -53,6 +53,20 @@ class Settings(BaseSettings):
         default="/tmp/forseti-ingest-report.json",
         validation_alias="INGEST_REPORT_PATH",
     )
+    INGEST_MAX_FAILED_TICKER_RATIO: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        validation_alias="INGEST_MAX_FAILED_TICKER_RATIO",
+    )
+    RAW_DOCUMENT_DIR: Optional[str] = Field(
+        default=None,
+        validation_alias="RAW_DOCUMENT_DIR",
+    )
+    REPORT_DIR: str = Field(
+        default="/tmp/forseti-reports",
+        validation_alias="REPORT_DIR",
+    )
     EARNINGS_FALLBACK_ENABLED: bool = Field(
         default=False,
         validation_alias="EARNINGS_FALLBACK_ENABLED",

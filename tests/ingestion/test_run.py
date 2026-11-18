@@ -148,3 +148,24 @@ class TestIngestionRun:
 
         assert exit_code == 0
         assert calls == []
+
+    def test_run_structured_ingestion_records_attempted_tickers_and_empty_input(self, monkeypatch):
+        monkeypatch.setattr(run, "seed_universe", lambda: 0)
+        monkeypatch.setattr(run, "_write_coverage_report", lambda: None)
+        monkeypatch.setattr(
+            run,
+            "_source_handlers",
+            lambda: {
+                "prices": lambda _: (10, ["NVDA"]),
+                "vix": lambda _: (1, []),
+                "fundamentals": lambda _: (_ for _ in ()).throw(RuntimeError("boom")),
+            },
+        )
+
+        result = run.run_structured_ingestion(source="all", active_tickers=["NVDA", "AMD", "MSFT"])
+        assert result.attempted_tickers_by_source == {"prices": 3, "vix": 1, "fundamentals": 3}
+        assert result.failed_sources == ["fundamentals"]
+        assert result.failed_tickers_by_source["prices"] == ["NVDA"]
+
+        empty_result = run.run_structured_ingestion(source="all", active_tickers=[])
+        assert empty_result.attempted_tickers_by_source == {"prices": 0, "vix": 1, "fundamentals": 0}

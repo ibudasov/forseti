@@ -467,3 +467,29 @@ def test_drift_summary_rejects_invalid_json():
     assert result.returncode == 2
     assert result.stdout == ""
     assert "Invalid Terraform plan JSON" in result.stderr
+
+
+def test_daily_refresh_job_and_scheduler_configuration():
+    run_jobs = (ROOT / "infra/terraform/main/run_jobs.tf").read_text()
+    scheduler = (ROOT / "infra/terraform/main/scheduler.tf").read_text()
+    identities = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
+
+    assert 'resource "google_cloud_run_v2_job" "daily_refresh"' in run_jobs
+    assert 'execution_environment = "EXECUTION_ENVIRONMENT_GEN2"' in run_jobs
+    assert 'memory = "2Gi"' in run_jobs
+    assert 'timeout               = "3600s"' in run_jobs
+    assert "max_retries           = 1" in run_jobs
+    assert 'RAW_DOCUMENT_DIR          = "/mnt/artifacts/raw"' in run_jobs
+    assert 'REPORT_DIR                = "/mnt/artifacts/reports"' in run_jobs
+    assert 'INGEST_REPORT_PATH        = "/mnt/artifacts/reports/ingest/coverage-latest.json"' in run_jobs
+    assert 'EARNINGS_FALLBACK_ENABLED = "true"' in run_jobs
+
+    assert 'resource "google_cloud_scheduler_job" "daily_refresh"' in scheduler
+    assert 'schedule         = "30 18 * * 1-5"' in scheduler
+    assert 'time_zone        = "America/New_York"' in scheduler
+    assert "retry_count = 1" in scheduler
+
+    grants = {(g["kind"], g["resource"], g["member"], g["role"]) for g in identities["resource_grants"]}
+    assert ("job", "forseti-daily-refresh", "forseti-scheduler", "run.invoker") in grants
+    assert ("job", "forseti-daily-refresh", "forseti-verifier", "run.invoker") in grants
+    assert ("bucket", "forseti-505116-artifacts", "forseti-verifier", "storage.objectViewer") in grants

@@ -29,6 +29,11 @@ class JsonFormatter(logging.Formatter):
         "agent",
         "reason",
         "status",
+        "exit_status",
+        "market_closed",
+        "duration_seconds",
+        "stored_chunks",
+        "failed_sources",
     )
 
     def format(self, record: logging.LogRecord) -> str:
