@@ -9,7 +9,7 @@ from typing import Any, Dict, Sequence, Tuple
 import pytest
 import yaml
 
-from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3, gcp3b, gcp4, gcp6
+from scripts.cloud_scorecard import exit_criteria, gcp2, gcp3, gcp3b, gcp4, gcp5, gcp6
 from scripts.cloud_scorecard.environment import CloudQueryError, Environment, query_gcloud
 from scripts.cloud_scorecard.model import Check, Cost, Outcome, Status
 from scripts.cloud_scorecard.redaction import redact
@@ -792,6 +792,9 @@ class TestMarkdown:
             ("logging", "read", 'jsonPayload.event="analysis_completed"'): [{"trace": "trace-id"}],
             ("logging", "read", gcp6.API_5XX_FILTER): [],
             ("logging", "read", exit_criteria._unexpected_writers_filter(fixture("manifest"))): [],
+            ("scheduler", "jobs", "describe"): None,
+            ("run", "jobs", "executions", "list"): [],
+            ("storage", "buckets", "describe"): None,
         }, {
             ("repos/example/repo/actions/workflows/infra.yml/runs?event=schedule&branch=main&status=completed&per_page=1",):
                 fixture("drift_success"),
@@ -812,7 +815,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 16 · ❌ 2 · ⏳ 9 · ➖ 2" in markdown
+        assert "✅ 16 · ❌ 2 · ⏳ 13 · ➖ 2" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)
@@ -940,3 +943,154 @@ class TestOpsWorkflow:
         assert "echo \"$SCORECARD_ID_TOKEN\"" not in rendered
         assert "echo $SCORECARD_ID_TOKEN" not in rendered
         assert "50" in str(job["timeout-minutes"])
+
+    def test_rerun_refresh_is_owner_only_and_never_passes_force(self):
+        workflow = yaml.safe_load(OPS_WORKFLOW.read_text())
+        job = workflow["jobs"]["rerun_refresh"]
+        condition = job["if"]
+        rendered_steps = "\n".join(step.get("run", "") for step in job["steps"])
+
+        assert "github.event.issue.number == 121" in condition
+        assert "github.event.comment.author_association == 'OWNER'" in condition
+        assert "github.event.comment.body == '/rerun-refresh'" in condition
+        assert "--force" not in rendered_steps
+        assert "github.event.comment.body" not in rendered_steps
+
+
+class TestGcp5Checks:
+    def _scheduler_payload(self, **overrides):
+        base = {
+            "state": "ENABLED",
+            "schedule": gcp5.EXPECTED_SCHEDULE,
+            "timeZone": gcp5.EXPECTED_TIME_ZONE,
+            "retryConfig": {"retryCount": 1},
+            "httpTarget": {
+                "uri": (
+                    f"https://run.googleapis.com/v2/projects/{PROJECT}"
+                    "/locations/europe-west4/jobs/forseti-daily-refresh:run"
+                ),
+                "oauthToken": {"serviceAccountEmail": f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"},
+            },
+        }
+        base.update(overrides)
+        return base
+
+    def _job_payload(self):
+        return {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "template": {
+                            "spec": {
+                                "serviceAccountName": f"forseti-jobs@{PROJECT}.iam.gserviceaccount.com",
+                                "containers": [
+                                    {
+                                        "env": [{"name": k, "value": v} for k, v in gcp5.EXPECTED_ENV.items()],
+                                        "volumeMounts": [
+                                            {"name": "artifacts", "mountPath": "/mnt/artifacts"},
+                                            {"name": "cloudsql", "mountPath": "/cloudsql"},
+                                        ],
+                                    }
+                                ],
+                                "volumes": [
+                                    {"name": "artifacts", "gcs": {"bucket": f"{PROJECT}-artifacts"}},
+                                    {"name": "cloudsql"},
+                                ],
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    def test_registry_has_no_planned_placeholders(self):
+        assert all(not check.identifier.endswith(".planned") for check in ALL_CHECKS)
+        assert any(check.group == "GCP-5" for check in ALL_CHECKS)
+
+    def test_scheduler_check_pending_pass_and_fail(self):
+        missing = environment({("scheduler", "jobs", "describe"): None})
+        assert gcp5.check_scheduler(missing).status is Status.PENDING
+        valid = environment({("scheduler", "jobs", "describe"): self._scheduler_payload()})
+        assert gcp5.check_scheduler(valid).status is Status.PASS
+        paused = self._scheduler_payload(state="PAUSED")
+        assert gcp5.check_scheduler(environment({("scheduler", "jobs", "describe"): paused})).status is Status.FAIL
+
+    def test_job_check_pass_and_fail(self):
+        assert gcp5.check_job(environment({("run", "jobs", "describe"): self._job_payload()})).status is Status.PASS
+        broken = self._job_payload()
+        broken["spec"]["template"]["spec"]["template"]["spec"]["serviceAccountName"] = "wrong@example.com"
+        assert gcp5.check_job(environment({("run", "jobs", "describe"): broken})).status is Status.FAIL
+
+    def test_scheduled_runs_distinguishes_manual_from_scheduled_provenance(self):
+        verifier_sa = f"forseti-verifier@{PROJECT}.iam.gserviceaccount.com"
+        scheduler_sa = f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"
+        manual_exec = {
+            "metadata": {"name": "exec-manual", "annotations": {"run.googleapis.com/creator": verifier_sa}},
+            "status": {"conditions": [{"type": "Completed", "status": "True"}]},
+        }
+        sched_exec_1 = {
+            "metadata": {"name": "exec-sched-1", "annotations": {"run.googleapis.com/creator": scheduler_sa}},
+            "status": {"conditions": [{"type": "Completed", "status": "True"}]},
+        }
+        sched_exec_2 = {
+            "metadata": {"name": "exec-sched-2", "annotations": {"run.googleapis.com/creator": scheduler_sa}},
+            "status": {"conditions": [{"type": "Completed", "status": "True"}]},
+        }
+
+        only_manual_env = environment({
+            ("run", "jobs", "executions", "list"): [manual_exec, manual_exec],
+            ("logging", "read"): [],
+        })
+        assert gcp5.check_scheduled_runs(only_manual_env).status is Status.PENDING
+
+        both_sched_env = environment({
+            ("run", "jobs", "executions", "list"): [manual_exec, sched_exec_1, sched_exec_2],
+            ("logging", "read"): [],
+        })
+        assert gcp5.check_scheduled_runs(both_sched_env).status is Status.PASS
+
+    def test_freshness_accounts_for_weekends_and_stale_weekdays(self):
+        from datetime import datetime as dt, timezone as tz
+
+        scheduler_sa = f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"
+        friday_run = {
+            "metadata": {"name": "exec-fri", "annotations": {"run.googleapis.com/creator": scheduler_sa}},
+            "status": {
+                "completionTime": "2026-11-20T23:35:00+00:00",  # Friday 18:35 ET
+                "conditions": [{"type": "Completed", "status": "True"}],
+            },
+        }
+        env = environment({
+            ("run", "jobs", "executions", "list"): [friday_run],
+            ("logging", "read"): [],
+        })
+
+        # Sunday 2026-11-22 20:00 UTC (>44h after Friday run, before Monday 18:30 ET) -> PASS
+        sunday_now = dt(2026, 11, 22, 20, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(env, now=sunday_now).status is Status.PASS
+
+        # Tuesday 2026-11-24 15:00 UTC (missed Monday 18:30 ET run) -> FAIL
+        tuesday_now = dt(2026, 11, 24, 15, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(env, now=tuesday_now).status is Status.FAIL
+
+    def test_artifacts_bucket_check(self):
+        bucket = {
+            "iamConfiguration": {
+                "uniformBucketLevelAccess": {"enabled": True},
+                "publicAccessPrevention": "enforced",
+            },
+            "lifecycle": {
+                "rule": [{"action": {"type": "Delete"}, "condition": {"age": 180, "matchesPrefix": ["reports/"]}}]
+            },
+        }
+        env_ok = environment({
+            ("storage", "buckets", "describe"): bucket,
+            ("storage", "objects", "describe"): {"name": "reports/ingest/coverage-latest.json"},
+        })
+        assert gcp5.check_artifacts_bucket(env_ok).status is Status.PASS
+
+        env_missing_report = environment({
+            ("storage", "buckets", "describe"): bucket,
+            ("storage", "objects", "describe"): None,
+        })
+        assert gcp5.check_artifacts_bucket(env_missing_report).status is Status.PENDING

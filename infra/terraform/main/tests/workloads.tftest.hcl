@@ -20,10 +20,28 @@ run "workload_plan" {
     condition = (
       length(google_secret_manager_secret_iam_member.grants) == 6 &&
       length(google_cloud_run_v2_service_iam_member.grants) == 3 &&
-      length(google_cloud_run_v2_job_iam_member.grants) == 1 &&
-      length(google_storage_bucket_iam_member.grants) == 1
+      length(google_cloud_run_v2_job_iam_member.grants) == 3 &&
+      length(google_storage_bucket_iam_member.grants) == 2
     )
-    error_message = "Secret accessors, private API invokers, the trust-job executor and the artifacts writer must be the only resource grants."
+    error_message = "Secret accessors, private API invokers, job invokers/executors and artifacts bucket grants must match identities.json."
+  }
+  assert {
+    condition = toset([
+      for grant in local.resource_grants :
+      grant.member
+      if grant.kind == "job" && grant.resource == "forseti-daily-refresh" && grant.role == "run.invoker"
+    ]) == toset(["forseti-scheduler", "forseti-verifier"])
+    error_message = "Only the scheduler and verifier may invoke the daily-refresh job."
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_job.daily_refresh.name == "forseti-daily-refresh" &&
+      google_cloud_run_v2_job.daily_refresh.template[0].template[0].max_retries == 1 &&
+      google_cloud_run_v2_job.daily_refresh.template[0].template[0].timeout == "3600s" &&
+      google_cloud_scheduler_job.daily_refresh.schedule == "30 18 * * 1-5" &&
+      google_cloud_scheduler_job.daily_refresh.time_zone == "America/New_York"
+    )
+    error_message = "The daily-refresh job and Cloud Scheduler must match the GCP-5 specification."
   }
   assert {
     condition = toset([

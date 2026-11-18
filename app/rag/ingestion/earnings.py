@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -96,6 +97,7 @@ class EarningsCallIngestor:
                     f"hold={row.get('hold', 0)} sell={row.get('sell', 0)} "
                     f"strongSell={row.get('strongSell', 0)}"
                 )
+            tail_records = [dict(row) for _, row in recommendations.tail(10).iterrows()]
             documents.append(
                 RawDocument(
                     ticker=ticker.upper(),
@@ -107,6 +109,8 @@ class EarningsCallIngestor:
                     text="\n".join(summary_lines),
                     source_quality_tier=SourceQualityTier.secondary_reputable,
                     published_at=datetime.now(timezone.utc),
+                    raw_payload=json.dumps(tail_records, sort_keys=True, default=str),
+                    raw_extension="json",
                 )
             )
         except Exception as exc:
@@ -133,6 +137,8 @@ class EarningsCallIngestor:
                     text="\n".join(calendar_lines),
                     source_quality_tier=SourceQualityTier.secondary_reputable,
                     published_at=datetime.now(timezone.utc),
+                    raw_payload=json.dumps(calendar, sort_keys=True, default=str),
+                    raw_extension="json",
                 )
             )
         except Exception as exc:
@@ -163,6 +169,7 @@ class EarningsCallIngestor:
                     status="missing",
                     detail="empty_transcript_response",
                 )
+            raw_ext = "html" if "<" in response.text else "txt"
             document = RawDocument(
                 ticker=ticker.upper(),
                 source_type=SourceType.earnings_call_transcript,
@@ -173,6 +180,8 @@ class EarningsCallIngestor:
                 text=text,
                 source_quality_tier=SourceQualityTier.unknown,
                 published_at=datetime.now(timezone.utc),
+                raw_payload=response.text,
+                raw_extension=raw_ext,
             )
             return document, self._coverage_note(
                 ticker=ticker,

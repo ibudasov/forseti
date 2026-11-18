@@ -29,7 +29,7 @@ flowchart LR
 |---|---|---|
 | API | Cloud Run service `forseti-api`, 1 vCPU / 1 GiB, 0–2 instances, concurrency 4 | Scale-to-zero keeps cost near nothing for a single-user system. The pipeline is plain request/response Python, so Cloud Run is enough. **Agent Engine** is deferred to Week 11: it adds managed sessions we do not need while the deterministic spine (ADR 005) owns orchestration. |
 | Database | Cloud SQL Postgres 15, `db-f1-micro`, zonal | Cheapest tier that supports pgvector (ADR 001). Data is reproducible from ingestion, so HA is not worth its cost yet. |
-| Jobs | Cloud Run jobs `forseti-housekeeping` and `forseti-trust-check` | Same image as the API; one-shot, retries off, run on demand. |
+| Jobs | Cloud Run jobs `forseti-housekeeping`, `forseti-trust-check`, and `forseti-daily-refresh` | Same image as the API; `forseti-daily-refresh` runs on a weekday post-close schedule (gen2, 2 GiB, 3600s, 1 retry) and archives raw inputs to GCS. |
 | Models | Vertex AI Gemini through the `forseti-api`/`forseti-jobs` identities | No API keys; billed to the project. |
 | Observability | Logging, Trace, log-based metrics, dashboard, alerts | See `docs/observability.md`. |
 
@@ -46,10 +46,12 @@ flowchart LR
 
 ## Daily refresh flow
 
-Cloud Scheduler triggers the refresh job as `forseti-scheduler` (arrives with
-GCP-5, #127), which ingests prices, fundamentals and RAG documents into Cloud
-SQL, then logs `daily_refresh_status` for the alerts. Until then data is loaded
-by hand with the `make ingest*` targets.
+Cloud Scheduler triggers `forseti-daily-refresh` at `30 18 * * 1-5` (`America/New_York`)
+as `forseti-scheduler`. The job gates on the `XNYS` trading calendar, ingests
+structured market data and RAG documents into Cloud SQL, archives raw documents
+under `/mnt/artifacts/raw` (`gs://forseti-505116-artifacts/raw/`), writes
+`${REPORT_DIR}/ingest/YYYY-MM-DD.json` and `coverage-latest.json`, and logs
+`daily_refresh_status` for the alerts. See [`docs/data-refresh.md`](data-refresh.md).
 
 ## Identity and IAM
 
@@ -78,6 +80,8 @@ Every resource in `infra/terraform/main` must be mentioned here; the nightly
 | `google_cloud_run_v2_service.api` | The private API |
 | `google_cloud_run_v2_job.housekeeping` | Migrations, roles, extensions |
 | `google_cloud_run_v2_job.trust_check` | On-demand cloud trust check |
+| `google_cloud_run_v2_job.daily_refresh` | Scheduled daily market-data and RAG refresh |
+| `google_cloud_scheduler_job.daily_refresh` | Weekday post-close trigger for `forseti-daily-refresh` |
 | `google_cloud_run_v2_service_iam_member.grants` | API invokers |
 | `google_cloud_run_v2_job_iam_member.grants` | Job invokers (verifier runs the trust check) |
 | `google_cloud_run_v2_job_iam_binding.trust_check_invoker` | Prevents the broader job invoker role |

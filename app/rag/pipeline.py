@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from app.db.models import DocumentChunk
 from app.db.repository import upsert_document_chunks
+from app.rag.archive import archive_raw_document
 from app.rag.chunking import chunk_text
 from app.rag.embedding import EmbeddingClient, embedding_usage_of
 from app.rag.ingestion.base import IngestionResult, RawDocument, compute_source_hash
@@ -97,10 +98,12 @@ def ingest_ticker_with_cost(
     if sector:
         ingestors.append(SectorNewsIngestor(sector=sector))
 
+    raw_document_dir = getattr(settings, "RAW_DOCUMENT_DIR", None)
     all_chunks: List[DocumentChunk] = []
     for ingestor in ingestors:
         result: IngestionResult = ingestor.fetch(ticker)
         for doc in result.documents:
+            archive_raw_document(doc, raw_document_dir)
             text_chunks = chunk_text(doc.text, chunk_size=chunk_size, overlap=overlap)
             if not text_chunks:
                 continue

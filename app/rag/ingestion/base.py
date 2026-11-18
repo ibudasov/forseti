@@ -24,6 +24,8 @@ class RawDocument:
     accession_number: Optional[str] = None
     period_start: Optional[date] = None
     period_end: Optional[date] = None
+    raw_payload: Optional[bytes | str] = None
+    raw_extension: Optional[str] = None
 
 
 @dataclass(frozen=True)

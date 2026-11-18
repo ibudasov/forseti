@@ -11,7 +11,8 @@ locals {
     "forseti-api" = google_cloud_run_v2_service.api.name
   }
   job_resources = {
-    "forseti-trust-check" = google_cloud_run_v2_job.trust_check.name
+    "forseti-trust-check"   = google_cloud_run_v2_job.trust_check.name
+    "forseti-daily-refresh" = google_cloud_run_v2_job.daily_refresh.name
   }
   bucket_resources = {
     "${var.project_id}-artifacts" = google_storage_bucket.artifacts.name

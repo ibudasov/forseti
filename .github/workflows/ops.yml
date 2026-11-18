@@ -110,3 +110,62 @@ jobs:
       - name: Remove runner-local captures
         if: always()
         run: rm -f scorecard.md comment.md
+
+  rerun_refresh:
+    name: Rerun daily refresh
+    # Comment commands are owner-only and exact. The comment body is only compared here, never passed to a shell.
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.number == 121 &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.body == '/rerun-refresh'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SCORECARD_ISSUE: '121'
+      COMMENT_ID: ${{ github.event.comment.id }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
+    steps:
+      - name: Acknowledge the command
+        run: gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes > /dev/null
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_VERIFIER_SA }}
+      - name: Execute daily refresh job without overrides
+        id: execute
+        run: |
+          set -euo pipefail
+          outcome=succeeded
+          if ! gcloud run jobs execute forseti-daily-refresh \
+            --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --wait --quiet; then
+            outcome=failed
+          fi
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          if [ "$outcome" != succeeded ]; then
+            exit 1
+          fi
+      - name: Post sanitized outcome on tracking issue
+        if: always()
+        env:
+          EXECUTION_OUTCOME: ${{ steps.execute.outputs.outcome || 'failed' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          printf '\x60/rerun-refresh\x60 completed with status **%s** ([workflow run](%s)).\n' \
+            "$EXECUTION_OUTCOME" "$RUN_URL" > rerun_comment.md
+          gh api --method POST "repos/$GH_REPO/issues/$SCORECARD_ISSUE/comments" \
+            -F body=@rerun_comment.md > /dev/null
+          rm -f rerun_comment.md
+      - name: Report the outcome on the command
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          reaction=confused
+          if [ "$JOB_STATUS" = success ]; then reaction=rocket; fi
+          gh api "repos/$GH_REPO/issues/comments/$COMMENT_ID/reactions" -f content="$reaction" > /dev/null
