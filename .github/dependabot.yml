@@ -18,6 +18,10 @@ updates:
       # until googleapis/google-cloud-python#18948 is resolved upstream.
       - dependency-name: "python-dateutil"
         update-types: ["version-update:semver-major"]
+      # google-adk enforces websockets<16,>=15.0.1; blocks upgrade to 16+/17.x
+      # until google-adk supports >=16.
+      - dependency-name: "websockets"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
