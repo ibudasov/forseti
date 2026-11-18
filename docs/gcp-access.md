@@ -89,6 +89,7 @@ both layers, this generated documentation, and future live IAM verification
 | job | forseti-daily-refresh | forseti-scheduler | run.invoker |
 | job | forseti-daily-refresh | forseti-verifier | run.invoker |
 | bucket | forseti-505116-artifacts | forseti-jobs | storage.objectUser |
+| bucket | forseti-505116-artifacts | forseti-verifier | storage.legacyBucketReader |
 | bucket | forseti-505116-artifacts | forseti-verifier | storage.objectViewer |
 <!-- END GENERATED IAM -->
 

@@ -70,6 +70,7 @@
     {"kind": "job", "resource": "forseti-daily-refresh", "member": "forseti-scheduler", "role": "run.invoker"},
     {"kind": "job", "resource": "forseti-daily-refresh", "member": "forseti-verifier", "role": "run.invoker"},
     {"kind": "bucket", "resource": "forseti-505116-artifacts", "member": "forseti-jobs", "role": "storage.objectUser"},
+    {"kind": "bucket", "resource": "forseti-505116-artifacts", "member": "forseti-verifier", "role": "storage.legacyBucketReader"},
     {"kind": "bucket", "resource": "forseti-505116-artifacts", "member": "forseti-verifier", "role": "storage.objectViewer"}
   ]
 }

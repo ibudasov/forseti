@@ -1021,6 +1021,15 @@ class TestGcp5Checks:
         broken["spec"]["template"]["spec"]["template"]["spec"]["serviceAccountName"] = "wrong@example.com"
         assert gcp5.check_job(environment({("run", "jobs", "describe"): broken})).status is Status.FAIL
 
+        cloud_run_annotated = self._job_payload()
+        cloud_run_annotated["spec"]["template"]["spec"]["template"]["spec"]["containers"][0]["volumeMounts"] = [
+            {"name": "artifacts", "mountPath": "/mnt/artifacts"},
+        ]
+        cloud_run_annotated["spec"]["template"]["metadata"] = {
+            "annotations": {"run.googleapis.com/cloudsql-instances": f"{PROJECT}:europe-west4:forseti-pg"}
+        }
+        assert gcp5.check_job(environment({("run", "jobs", "describe"): cloud_run_annotated})).status is Status.PASS
+
     def test_scheduled_runs_distinguishes_manual_from_scheduled_provenance(self):
         verifier_sa = f"forseti-verifier@{PROJECT}.iam.gserviceaccount.com"
         scheduler_sa = f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"
@@ -1094,3 +1103,16 @@ class TestGcp5Checks:
             ("storage", "objects", "describe"): None,
         })
         assert gcp5.check_artifacts_bucket(env_missing_report).status is Status.PENDING
+
+        snake_case_bucket = {
+            "uniform_bucket_level_access": True,
+            "public_access_prevention": "enforced",
+            "lifecycle_config": {
+                "rule": [{"action": {"type": "Delete"}, "condition": {"age": 180, "matchesPrefix": ["reports/"]}}]
+            },
+        }
+        env_snake = environment({
+            ("storage", "buckets", "describe"): snake_case_bucket,
+            ("storage", "objects", "describe"): {"name": "reports/ingest/coverage-latest.json"},
+        })
+        assert gcp5.check_artifacts_bucket(env_snake).status is Status.PASS
