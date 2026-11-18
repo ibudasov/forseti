@@ -778,9 +778,9 @@ google-crc32c==1.9.0 \
     # via
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==2.34.0 \
-    --hash=sha256:8e182cf3f73384167b96861cf0aef5102b5070f2db1ea11002879e913806ef37 \
-    --hash=sha256:a4cb02aebc4c357f863d2938132f0e3f7967fc5e00b8a4078673f68aad340665
+google-genai==3.3.0 \
+    --hash=sha256:86bd1830fec4b12e474237414fa52383aa0f49458910f6c9c938c207715559b5 \
+    --hash=sha256:c0ab7bfbf13d4a24a5798ec9e4200773b2fa150eb620317db337f751a9c9576c
     # via
     #   forseti (pyproject.toml)
     #   google-adk
