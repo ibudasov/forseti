@@ -96,7 +96,7 @@ instances × (pool + overflow) below the Cloud SQL connection limit.
 
 Cloud SQL has deletion protection. To remove the Cloud Run service, jobs and
 scheduler for the reproducibility drill, use owner credentials:
-`terraform destroy -target=google_cloud_run_v2_service.api -target=google_cloud_run_v2_job.housekeeping -target=google_cloud_run_v2_job.trust_check`
+`terraform destroy -target=google_cloud_run_v2_service.api -target=google_cloud_run_v2_job.housekeeping -target=google_cloud_run_v2_job.trust_check -target=google_cloud_run_v2_job.daily_refresh -target=google_cloud_scheduler_job.daily_refresh`
 in `infra/terraform/main`. The pipeline recreates them with an approved apply.
 Destroying the database requires disabling deletion protection in a PR first.
 

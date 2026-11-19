@@ -56,6 +56,8 @@ def hard_failures(summary: dict[str, Any]) -> list[str]:
         failures.append(f"{summary['invariant_violations']} invariant violation(s)")
     if summary["unparsable_synthesis"]:
         failures.append(f"{summary['unparsable_synthesis']} unparsable_synthesis run(s)")
+    if summary["unpriced_runs"]:
+        failures.append(f"{summary['unpriced_runs']} unpriced run(s)")
     return failures
 
 

@@ -90,7 +90,7 @@ class Settings(BaseSettings):
         default="europe-west4", validation_alias="VERTEX_AI_LOCATION"
     )
     GEMINI_MODEL: str = Field(
-        default="gemini-2.0-flash-001", validation_alias="GEMINI_MODEL"
+        default="gemini-2.5-flash-lite", validation_alias="GEMINI_MODEL"
     )
     MODEL_PRICING_USD_PER_MILLION: dict[str, dict[str, float]] = Field(
         default_factory=dict,
