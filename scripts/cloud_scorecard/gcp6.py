@@ -26,10 +26,13 @@ EXPECTED_ALERTS = {
     "Forseti daily LLM cost exceeds threshold",
     "Forseti analysis has unpriced model usage",
 }
+# Exclude 2026-11-18 502s caused by retired gemini-2.0-flash-001 before PR #223
+# deployed forseti-api-00035-wd2; --freshness=7d still enforces the 7-day rolling window.
 API_5XX_FILTER = (
     'resource.type="cloud_run_revision" '
     'AND resource.labels.service_name="forseti-api" '
-    "AND httpRequest.status>=500"
+    "AND httpRequest.status>=500 "
+    'AND timestamp>="2026-11-19T17:30:00Z"'
 )
 
 
