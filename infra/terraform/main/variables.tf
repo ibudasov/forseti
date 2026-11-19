@@ -66,7 +66,7 @@ variable "agent_modes" {
 variable "gemini_model" {
   description = "Gemini model used by the API agents."
   type        = string
-  default     = "gemini-2.0-flash-001"
+  default     = "gemini-2.5-flash-lite"
 }
 
 variable "embedding_model" {

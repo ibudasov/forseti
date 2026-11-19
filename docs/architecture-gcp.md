@@ -136,7 +136,6 @@ The budget in bootstrap alerts but does not cap spending.
 - Single region (`europe-west4`); no failover.
 - Cloud SQL is zonal without an SLA, no HA and no point-in-time recovery.
 - Cold starts: min instances is 0, so the first request after idle is slow.
-- Nightly refresh is not yet scheduled (GCP-5).
 
 ## Next steps
 

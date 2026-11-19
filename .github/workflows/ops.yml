@@ -80,6 +80,8 @@ jobs:
           id_token_include_email: true
           create_credentials_file: false
           export_environment_variables: false
+      - name: Install scorecard dependencies
+        run: python3 -m pip install --quiet exchange-calendars pandas
       - name: Run checks
         env:
           SCORECARD_ID_TOKEN: ${{ steps.verifier_id_token.outputs.id_token }}

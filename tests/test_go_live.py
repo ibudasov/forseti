@@ -71,6 +71,11 @@ class TestTrustSummary:
 
         assert "1 run(s) errored" in failures
 
+    def test_unpriced_run_blocks_go_live(self):
+        summary = cloud_trust_check.summarize(report([run(analysis())], pending=1))
+
+        assert cloud_trust_check.hard_failures(summary) == ["1 unpriced run(s)"]
+
     def test_comparison_shows_cloud_and_baseline_columns(self):
         cloud = cloud_trust_check.summarize(report([run(analysis(downgraded=["technical_analyst"]))]))
 

@@ -148,7 +148,7 @@ def synthesize(
         from vertexai.generative_models import GenerativeModel
 
         vertexai.init(project=vertex_project, location=vertex_location)
-        model_name = gemini_model or "gemini-2.0-flash-001"
+        model_name = gemini_model or "gemini-2.5-flash-lite"
         model = GenerativeModel(model_name)
 
         response = model.generate_content(
