@@ -724,6 +724,9 @@ class TestObservability:
 
         assert gcp6.check_no_recent_api_5xx(env).status is Status.PASS
 
+    def test_api_5xx_filter_excludes_pre_pr_223_cutoff(self):
+        assert 'timestamp>="2026-11-19T17:30:00Z"' in gcp6.API_5XX_FILTER
+
 
 class TestRunner:
     def test_paid_checks_are_skipped_unless_requested(self):
