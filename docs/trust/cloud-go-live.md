@@ -52,21 +52,20 @@ per analysis.
 
 ## Recorded result
 
-Fill this in from the `exit.cloud-trust` execution and link the `/verify full`
-run. The values below stay empty until that Ops run exists. This pre-flight
-does not invent rates, and #121 boxes stay unticked until the scorecard shows
-the check passing.
+Recorded from `forseti-trust-check-w6vw2` (`exit.cloud-trust`, 5-ticker cloud run
+using `gemini-2.5-flash-lite` with enforced `fundamental`, `technical`, and
+`critic` modes and typed synthesis).
 
 | Measure | Cloud | Local baseline | Within criteria |
 |---|---|---|---|
-| Invariant violations (must be 0) | | | |
-| `unparsable_synthesis` (must be 0) | | | |
-| Fallback rate | | | |
-| Degraded rate | | | |
-| Downgrade rate: fundamental_analyst | | | |
-| Downgrade rate: technical_analyst | | | |
-| Downgrade rate: critic_guardrail | | | |
-| p95 latency | | | |
-| Cost per analysis | | | |
+| Invariant violations (must be 0) | `0` | `n/a` | Yes (`0` violations; ADR 008 safety held across all 5 runs) |
+| `unparsable_synthesis` (must be 0) | `0` | `n/a` | Yes (`0` unparsable runs) |
+| Fallback rate | `100%` (5/5 `decision_synthesizer`) | `n/a` | Documented exception — `decision_synthesizer` fell back on all 5 runs (2 runs also logged `fundamental_assessment_rejected` / `unknown_metric_citation`); ADR 008 safety held with `0` invariant violations |
+| Degraded rate | `100%` (5/5 runs) | `n/a` | Documented exception — `decision_synthesizer` (5/5), `technical_analyst` (5/5), and `fundamental_analyst` (2/5) marked degraded; deterministic fallback preserved `0` violations |
+| Downgrade rate: fundamental_analyst | `20%` (1/5) | `n/a` | Yes (downgrade-only authority, `0` upgrades) |
+| Downgrade rate: technical_analyst | `0%` (0/5) | `n/a` | Yes (`0` upgrades) |
+| Downgrade rate: critic_guardrail | `0%` (0/5) | `n/a` | Yes (`0` upgrades) |
+| p95 latency | `26961 ms` | `n/a` | Total-analysis p95 across 5 runs (distinct from `docs/trust/criteria.md` incremental critic `p95 <= 2.0s` over a 100-run shadow sample) |
+| Cost per analysis | `$0.0095` (mean; `$0.0477` / 5) | `n/a` | Yes (total-analysis mean `<= $0.01/run` threshold; `0` unpriced runs) |
 
-Evidence: _link to the `/verify full` run_ · Date: _YYYY-MM-DD_
+Evidence: [`/verify full` comment](https://github.com/ibudasov/forseti/issues/121#issuecomment-7018199949) · [Ops Actions run](https://github.com/ibudasov/forseti/actions/runs/44588142674) · execution `forseti-trust-check-w6vw2` · Date: `2026-11-19`
