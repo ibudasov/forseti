@@ -1,4 +1,6 @@
-@baseUrl = http://localhost:8000
+# Cloud Run via `make cloud-proxy`: http://127.0.0.1:8080
+# Local dev (`make up`): http://localhost:8000
+@baseUrl = http://127.0.0.1:8080
 @symbol = NVDA
 @runId = replace-with-run-id
 
@@ -17,19 +19,38 @@ GET {{baseUrl}}/livez
 ### Liveness check alias
 GET {{baseUrl}}/live
 
-### Analyze a ticker
+### Analyze a ticker (uses latest available data)
 # Optional query parameters: include_trace=true|false, pipeline=linear|agentic.
-# pipeline overrides may be disabled by the server.
+# pipeline overrides may be disabled by the server (ALLOW_PIPELINE_OVERRIDE=false in cloud).
 POST {{baseUrl}}/analyze?include_trace=true
 Content-Type: application/json
 
 {
-  "ticker": "{{symbol}}",
-  "account_size_eur": 10000,
-  "risk_percentage": 0.01,
-  "max_position_size_eur": 2000,
-  "as_of_date": "2026-11-15",
-  "notes": "Example analysis request"
+  "ticker": "{{symbol}}"
+}
+
+### Demo ticker 1: NVDA
+POST {{baseUrl}}/analyze?include_trace=true
+Content-Type: application/json
+
+{
+  "ticker": "NVDA"
+}
+
+### Demo ticker 2: LMT
+POST {{baseUrl}}/analyze?include_trace=true
+Content-Type: application/json
+
+{
+  "ticker": "LMT"
+}
+
+### Demo ticker 3: OKLO
+POST {{baseUrl}}/analyze?include_trace=true
+Content-Type: application/json
+
+{
+  "ticker": "OKLO"
 }
 
 ### Screen the universe
