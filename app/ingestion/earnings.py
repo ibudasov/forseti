@@ -159,12 +159,35 @@ def _fallback_earnings_events(active_tickers: dict[str, int]) -> list[EarningsEv
     return events
 
 
+def _merge_fallback_events(
+    events: list[EarningsEvent],
+    active_tickers: dict[str, int],
+    *,
+    fallback_enabled: bool,
+) -> list[EarningsEvent]:
+    """Backfill active tickers absent from the primary feed via Yahoo fallback."""
+    if not fallback_enabled:
+        return events
+
+    present_ids = {event.security_id for event in events}
+    missing_tickers = {
+        symbol: security_id
+        for symbol, security_id in active_tickers.items()
+        if security_id not in present_ids
+    }
+    if not missing_tickers:
+        return events
+
+    return [*events, *_fallback_earnings_events(missing_tickers)]
+
+
 def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, list[str]]:
     settings = get_settings()
+    fallback_enabled = bool(getattr(settings, "EARNINGS_FALLBACK_ENABLED", False))
     api_key = normalize_api_key(settings.ALPHA_VANTAGE_API_KEY)
     if api_key is None:
         logger.error("%s: set ALPHA_VANTAGE_API_KEY in .env", MISSING_API_KEY_MARKER)
-        if getattr(settings, "EARNINGS_FALLBACK_ENABLED", False):
+        if fallback_enabled:
             active_tickers = _active_tickers(engine=engine, ticker=ticker)
             events = _fallback_earnings_events(active_tickers)
             if events:
@@ -182,13 +205,14 @@ def ingest_earnings(engine=None, ticker: Optional[str] = None) -> tuple[int, lis
         )
     except Exception:
         logger.exception("earnings_ingestion_failed")
-        if getattr(settings, "EARNINGS_FALLBACK_ENABLED", False):
+        if fallback_enabled:
             events = _fallback_earnings_events(active_tickers)
             if events:
                 upsert_earnings_events(events, engine=engine)
                 return len(events), []
         return 0, [SOURCE_FAILURE_MARKER]
 
+    events = _merge_fallback_events(events, active_tickers, fallback_enabled=fallback_enabled)
     if not events:
         logger.error("earnings_ingestion_failed: reason=no_rows_matched active_tickers=%s", len(active_tickers))
         return 0, [SOURCE_FAILURE_MARKER]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import httpx
 import pytest
 from sqlmodel import Session, select
@@ -194,10 +196,59 @@ class TestEarningsIngestion:
 
         assert ingest_earnings(engine=db_engine) == (0, [SOURCE_FAILURE_MARKER])
 
+    def test_ingest_earnings_backfills_missing_tickers_when_fallback_enabled(self, db_engine, monkeypatch):
+        self._stub_settings(monkeypatch, "REALKEY123", fallback_enabled=True)
+        self._seed_securities(db_engine, "NVDA", "MSFT")
+        monkeypatch.setattr(
+            "app.ingestion.earnings.fetch_earnings_calendar_csv",
+            lambda _: "symbol,reportDate\nNVDA,2026-09-01\n",
+        )
+        fallback_calls = []
+
+        def fake_fallback(missing_tickers):
+            fallback_calls.append(dict(missing_tickers))
+            return [
+                EarningsEvent(
+                    security_id=missing_tickers["MSFT"],
+                    report_date=date(2026, 10, 28),
+                    confirmed=False,
+                )
+            ]
+
+        monkeypatch.setattr("app.ingestion.earnings._fallback_earnings_events", fake_fallback)
+
+        assert ingest_earnings(engine=db_engine) == (2, [])
+        assert len(fallback_calls) == 1
+        assert list(fallback_calls[0].keys()) == ["MSFT"]
+        events = self._stored_events(db_engine)
+        assert len(events) == 2
+
+    def test_ingest_earnings_uses_fallback_when_no_active_tickers_matched(self, db_engine, monkeypatch):
+        self._stub_settings(monkeypatch, "REALKEY123", fallback_enabled=True)
+        self._seed_securities(db_engine, "NVDA")
+        monkeypatch.setattr(
+            "app.ingestion.earnings.fetch_earnings_calendar_csv",
+            lambda _: "symbol,reportDate\nMSFT,2026-09-03\n",
+        )
+        monkeypatch.setattr(
+            "app.ingestion.earnings._fallback_earnings_events",
+            lambda missing: [
+                EarningsEvent(
+                    security_id=missing["NVDA"],
+                    report_date=date(2026, 11, 25),
+                    confirmed=False,
+                )
+            ],
+        )
+
+        assert ingest_earnings(engine=db_engine) == (1, [])
+        assert len(self._stored_events(db_engine)) == 1
+
     @staticmethod
-    def _stub_settings(monkeypatch, api_key):
+    def _stub_settings(monkeypatch, api_key, *, fallback_enabled=False):
         class SettingsStub:
             ALPHA_VANTAGE_API_KEY = api_key
+            EARNINGS_FALLBACK_ENABLED = fallback_enabled
 
         monkeypatch.setattr("app.ingestion.earnings.get_settings", SettingsStub)
 
