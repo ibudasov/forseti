@@ -37,6 +37,24 @@ flowchart TD
     NT --> G
     G --> H{"PIPELINE_MODE = agentic?"}
     H -- "linear (default)" --> I["Persist Recommendation & Return"]
-    H -- "agentic" --> J["Specialists + Synthesizer + Critic<br/>(Downgrade-only authority; risk math locked)"]
-    J --> I
+
+    subgraph AG["ADK SequentialAgent: trade_analyst_supervisor (no peer transfers; state-key handoff)"]
+        direction TB
+        PREP["Deterministic Tools & RAG<br/>structured_data_collector · retriever · rules_engine · risk_manager"]
+        FA["Fundamental Analyst<br/>Evidence + score adj [-2, 0]"]
+        TA["Technical Analyst<br/>Trend & momentum (downgrade-only)"]
+        DS["Decision Synthesizer<br/>Cited memo (risk math locked)"]
+        CR["Critic / Guardrail<br/>Checks contradictions & hard rules<br/>(downgrade-only / force no_trade)"]
+
+        PREP --> FA
+        FA -- "writes state: fundamental_view" --> TA
+        TA -- "reads fundamental_view<br/>writes state: technical_view" --> DS
+        FA -. "fundamental_view" .-> DS
+        DS -- "reads both views<br/>writes state: draft_recommendation" --> CR
+        FA -. "fundamental_view" .-> CR
+        TA -. "technical_view" .-> CR
+    end
+
+    H -- "agentic" --> PREP
+    CR -- "writes state: critique" --> I
 ```
