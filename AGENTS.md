@@ -1,6 +1,6 @@
 # Agent Guidelines
 
-Check relevant instructions in the folder `./.github/instructions/*.*` and refer to the project's wiki in `./wiki/` (synced to the GitHub Wiki on push to `main` via `.github/workflows/sync-wiki.yml`) for full context and domain knowledge.
+Check relevant instructions in the folder `./.github/instructions/*.*` and refer to the project's wiki in `./wiki/` and docs in `./docs/` (both synced to the GitHub Wiki on push to `main` via `.github/workflows/sync-wiki.yml`) for full context and domain knowledge.
 
 ## Cloud access
 

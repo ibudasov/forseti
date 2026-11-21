@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'wiki/**'
+      - 'docs/**/*.md'
       - '.github/workflows/sync-wiki.yml'
   workflow_dispatch: {}
 
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync wiki/ to GitHub Wiki
+    name: Sync wiki/ and docs/ to GitHub Wiki
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,7 +28,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Sync wiki directory to GitHub Wiki
+      - name: Sync wiki and docs directories to GitHub Wiki
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -62,7 +63,9 @@ jobs:
             git -C "$wiki_dir" checkout -b master
           fi
 
-          rsync -a --delete --exclude='.git' wiki/ "$wiki_dir/"
+          rsync -a --delete --exclude='.git' --exclude='/docs' wiki/ "$wiki_dir/"
+          mkdir -p "$wiki_dir/docs"
+          rsync -a --delete --prune-empty-dirs --include='*/' --include='*.md' --exclude='*' docs/ "$wiki_dir/docs/"
 
           git -C "$wiki_dir" add -A
           if git -C "$wiki_dir" diff --cached --quiet; then
