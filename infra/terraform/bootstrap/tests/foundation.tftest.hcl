@@ -56,6 +56,14 @@ run "foundation_plan" {
     error_message = "Only deploy.yml workflow runs and main-branch manual dispatches may impersonate forseti-deployer."
   }
   assert {
+    condition = (
+      local.federated_accounts["forseti-tf-plan"].workflow.file == "infra.yml" &&
+      local.federated_accounts["forseti-tf-plan"].workflow.environment == null &&
+      toset(local.federated_accounts["forseti-tf-plan"].workflow.events) == toset(["push", "workflow_dispatch", "schedule"])
+    )
+    error_message = "Only infra.yml push, manual dispatch, and schedule runs on main may impersonate forseti-tf-plan."
+  }
+  assert {
     condition = alltrue([
       for grant in google_project_iam_member.storage_except_state :
       strcontains(grant.condition[0].expression, "!resource.name.startsWith('projects/_/buckets/forseti-505116-tfstate')")

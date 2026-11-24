@@ -28,7 +28,7 @@
       "purpose": "Read-only infrastructure plans and drift checks",
       "project_roles": ["viewer", "iam.securityReviewer"],
       "act_as": [],
-      "workflow": {"file": "infra.yml", "environment": null, "events": ["workflow_dispatch", "schedule"]}
+      "workflow": {"file": "infra.yml", "environment": null, "events": ["push", "workflow_dispatch", "schedule"]}
     },
     "forseti-tf-apply": {
       "purpose": "Approved infrastructure applies; no identity or billing administration",
