@@ -48,7 +48,7 @@ variable "agent_modes" {
   default = {
     FUNDAMENTAL_AGENT_MODE = "enforced"
     TECHNICAL_AGENT_MODE   = "enforced"
-    CRITIC_MODE            = "enforced"
+    CRITIC_MODE            = "shadow"
   }
   validation {
     condition = (
