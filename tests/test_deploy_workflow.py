@@ -112,6 +112,16 @@ def deployment_gate_outputs(environment):
     return Path(environment["GITHUB_OUTPUT"]).read_text().splitlines()
 
 
+def test_deploy_run_name_distinguishes_triggers():
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    run_name = workflow["run-name"]
+
+    assert "github.event_name == 'workflow_dispatch'" in run_name
+    assert "github.event.workflow_run.name" in run_name
+    assert "github.event.workflow_run.display_title" in run_name
+    assert "github.event.workflow_run.event" in run_name
+
+
 def test_app_only_build_deploys_after_successful_build(gate_steps, gate_environment):
     result = run_step(gate_steps, "Gate deployment on workload apply", gate_environment)
 
