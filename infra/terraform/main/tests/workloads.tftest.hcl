@@ -88,7 +88,7 @@ run "workload_plan" {
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "ALPHA_VANTAGE_API_KEY" && value.value_source[0].secret_key_ref[0].secret == "forseti-alpha-vantage-api-key"], true) &&
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "FUNDAMENTAL_AGENT_MODE" && value.value == "enforced"], true) &&
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "TECHNICAL_AGENT_MODE" && value.value == "enforced"], true) &&
-      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "shadow"], true) &&
+      contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "enforced"], true) &&
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "SYNTHESIZER_CONTRACT" && value.value == "typed"], true) &&
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "ALLOW_PIPELINE_OVERRIDE" && value.value == "false"], true) &&
       contains([for value in google_cloud_run_v2_service.api.template[0].containers[0].env : value.name == "DEBUG_LLM_IO" && value.value == "false"], true)
@@ -120,7 +120,7 @@ run "workload_plan" {
       google_cloud_run_v2_job.trust_check.template[0].template[0].max_retries == 0 &&
       startswith(google_cloud_run_v2_job.trust_check.template[0].template[0].service_account, "forseti-jobs@") &&
       !contains([for value in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].env : value.name], "CONFIRM_COST") &&
-      contains([for value in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "shadow"], true)
+      contains([for value in google_cloud_run_v2_job.trust_check.template[0].template[0].containers[0].env : value.name == "CRITIC_MODE" && value.value == "enforced"], true)
     )
     error_message = "The trust-check job must run as forseti-jobs with enforced agents and must not pre-approve its own cost."
   }
