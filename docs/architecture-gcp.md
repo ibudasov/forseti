@@ -120,14 +120,16 @@ Every resource in `infra/terraform/main` must be mentioned here; the nightly
 ## Cost
 
 Actuals come from the monthly billing report (see the runbook's monthly cost
-check); the owner fills in the last column.
+check); recorded for November 2026 MTD as of `2026-11-24` against the `€30`
+monthly budget (`Forseti monthly budget`).
 
 | Item | Expected driver | Actual (EUR / month) |
 |---|---|---|
-| Cloud SQL `db-f1-micro` | Always-on instance and storage | _from billing report_ |
-| Cloud Run API and jobs | Request time only, scale to zero | _from billing report_ |
-| Vertex AI Gemini | Per analysis; alert on daily cost | _from billing report_ |
-| Artifact Registry, Secret Manager, logging | Storage and volume | _from billing report_ |
+| Cloud SQL `db-f1-micro` | Always-on instance and storage | `€7.12` (Nov 2026 MTD) |
+| Cloud Run API and jobs | Request time only, scale to zero | `€0.00` (`€0.17` usage, `-€0.17` free-tier savings) |
+| Vertex AI Gemini | Per analysis; alert on daily cost | `€0.24` (Nov 2026 MTD) |
+| Artifact Registry, Cloud Storage, Secret Manager, logging | Storage and volume | `€0.24` (`€0.21` Artifact Registry + `€0.03` Cloud Storage) |
+| **Total** | **All GCP services** | **`€7.60`** (`25.3%` of `€30.00` budget) |
 
 The budget in bootstrap alerts but does not cap spending.
 
