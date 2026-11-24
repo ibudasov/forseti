@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, time as dt_time, timedelta, timezone
 from importlib import import_module
+import json
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from scripts.cloud_scorecard import gcp4
 from scripts.cloud_scorecard.environment import Environment
 from scripts.cloud_scorecard.model import Check, Cost, Outcome
 
@@ -334,10 +336,56 @@ def check_artifacts_bucket(env: Environment) -> Outcome:
     return Outcome.passed("artifacts bucket policy/lifecycle valid and coverage-latest.json exists")
 
 
+def check_universe_coverage(env: Environment) -> Outcome:
+    service = gcp4._service(env)
+    if service is None:
+        return Outcome.pending(f"Cloud Run service {gcp4.SERVICE_NAME} does not exist yet")
+    service_url = gcp4._service_url(service).rstrip("/")
+    if not service_url:
+        return Outcome.pending(f"Cloud Run service {gcp4.SERVICE_NAME} has no URL yet")
+
+    token = gcp4._identity_token(service_url)
+    status, body = gcp4._http_get(f"{service_url}/diagnostics/universe", token)
+    if status != 200:
+        return Outcome.failed(f"authenticated /diagnostics/universe returned HTTP {status}")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return Outcome.failed("/diagnostics/universe response was not valid JSON")
+
+    universe_size = int(payload.get("universe_size") or 0)
+    coverage = payload.get("coverage") or {}
+    blocked_by = payload.get("blocked_by") or {}
+    bars_200 = int(coverage.get("tickers_with_200_bars") or 0)
+    fundamentals = int(coverage.get("tickers_with_fundamentals") or 0)
+    earnings = int(coverage.get("tickers_with_earnings_events") or 0)
+    rag_chunks = int(coverage.get("tickers_with_document_chunks") or 0)
+    macro_date = coverage.get("latest_macro_daily_date") or "none"
+    passed = int(blocked_by.get("passed") or 0)
+
+    summary = (
+        f"universe={universe_size}, 200+ bars={bars_200}/{universe_size}, "
+        f"fundamentals={fundamentals}/{universe_size}, earnings={earnings}/{universe_size}, "
+        f"RAG={rag_chunks}/{universe_size}, trade-passed={passed}, macro={macro_date}"
+    )
+    if universe_size == 0:
+        return Outcome.failed(f"active universe is empty ({summary})")
+    if bars_200 == 0:
+        return Outcome.failed(f"no tickers have 200+ price bars ({summary})")
+    return Outcome.passed(summary)
+
+
 CHECKS = (
     Check("gcp5.scheduler", GROUP, "Daily refresh Cloud Scheduler configured", Cost.FREE, check_scheduler),
     Check("gcp5.job", GROUP, "Daily refresh Cloud Run job configured", Cost.FREE, check_job),
     Check("gcp5.scheduled-runs", GROUP, "Last 2 scheduled refresh runs succeeded", Cost.FREE, check_scheduled_runs),
     Check("gcp5.freshness", GROUP, "Scheduled refresh freshness (XNYS-aware)", Cost.FREE, check_freshness),
     Check("gcp5.artifacts-bucket", GROUP, "Artifacts bucket policy and latest report", Cost.FREE, check_artifacts_bucket),
+    Check(
+        "gcp5.universe-coverage",
+        GROUP,
+        "Live universe data coverage reported by /diagnostics/universe",
+        Cost.FREE,
+        check_universe_coverage,
+    ),
 )
