@@ -1,12 +1,13 @@
 #!/usr/bin/env python
-"""`make scorecard` entrypoint: seed the frozen fixture universe, run the
-deterministic screening engine against it, and print the product scorecard.
+"""`make scorecard` entrypoint: run offline agent/synthesizer evals plus the
+deterministic screening engine against the frozen fixture universe, and print
+the product scorecard.
 
 Thin entrypoint (codestyle §35): all metric logic lives in
 `app/services/scorecard.py`. This script only wires I/O — reading the
-fixture, seeding the database, calling `run_screening`, and printing/
-comparing the result. No network access, no API keys: everything it touches
-is either the fixture JSON or the test database.
+fixture, seeding the disposable test database, running offline eval suites,
+calling `run_screening`, and printing/comparing the result. No network access,
+no API keys: everything it touches is either committed fixtures or the test DB.
 """
 from __future__ import annotations
 
@@ -31,7 +32,19 @@ from app.db.repository import (
     upsert_price_bars,
     upsert_technical_feature,
 )
-from app.services.scorecard import Scorecard, build_scorecard, compare
+from app.services.fundamental_evaluation import (
+    evaluate_recorded_suite as evaluate_fundamental_suite,
+    load_fundamental_evaluation_suite,
+)
+from app.services.scorecard import (
+    MetricNumber,
+    Scorecard,
+    build_scorecard,
+    compare,
+    extract_fundamental_metrics,
+    extract_suite_metrics,
+    extract_synthesizer_metrics,
+)
 from app.services.screening import run_screening
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -151,6 +164,25 @@ def seed_fixture(engine, fixture: dict) -> date:
     return date.fromisoformat(fixture["today"])
 
 
+def run_offline_agent_evals() -> dict[str, dict[str, MetricNumber]]:
+    """Run all four offline agent/synthesizer evaluation suites (no network calls)."""
+    from tests.fixtures.critic.loader import evaluate_suite as evaluate_critic_suite, load_critic_cases
+    from tests.fixtures.synthesizer.loader import evaluate_synthesizer_cases, load_synthesizer_cases
+    from tests.fixtures.technical.loader import evaluate_suite as evaluate_technical_suite, load_technical_cases
+
+    synthesizer_report = evaluate_synthesizer_cases(load_synthesizer_cases(), live=False).to_dict()
+    fundamental_report = evaluate_fundamental_suite(load_fundamental_evaluation_suite()).model_dump(mode="json")
+    technical_report = evaluate_technical_suite(load_technical_cases(include_live=False), live=False).to_dict()
+    critic_report = evaluate_critic_suite(load_critic_cases(include_live=False), live=False).to_dict()
+
+    return {
+        "synthesizer": extract_synthesizer_metrics(synthesizer_report),
+        "fundamental": extract_fundamental_metrics(fundamental_report),
+        "technical": extract_suite_metrics(technical_report),
+        "critic": extract_suite_metrics(critic_report),
+    }
+
+
 def _scorecard_from_json(path: Path) -> Scorecard:
     payload = json.loads(path.read_text())
     return Scorecard(
@@ -163,6 +195,8 @@ def _scorecard_from_json(path: Path) -> Scorecard:
         no_trade_count=payload["no_trade_count"],
         zero_confidence_count=payload["zero_confidence_count"],
         warning_counts=payload["warning_counts"],
+        blocked_by_counts=payload.get("blocked_by_counts", {}),
+        agent_evals=payload.get("agent_evals", {}),
     )
 
 
@@ -184,6 +218,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Exit 1 if any metric regressed relative to --baseline.",
     )
+    parser.add_argument(
+        "--skip-agent-evals",
+        action="store_true",
+        help="Skip offline agent/synthesizer evaluation suites (deterministic screening only).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write the primary output (--json or --markdown) directly to this file instead of stdout.",
+    )
     return parser.parse_args(argv)
 
 
@@ -196,12 +241,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     today = seed_fixture(engine, fixture)
 
     response = run_screening(engine=engine, today=today)
-    current = build_scorecard(response)
+    agent_evals = None if args.skip_agent_evals else run_offline_agent_evals()
+    current = build_scorecard(response, agent_evals=agent_evals)
 
-    if args.json:
-        print(current.as_json(), end="")
-    if args.markdown or not args.json:
-        print(current.as_markdown(), end="")
+    if args.output is not None:
+        content = current.as_json() if args.json else current.as_markdown()
+        args.output.write_text(content, encoding="utf-8")
+    else:
+        if args.json:
+            print(current.as_json(), end="")
+        if args.markdown or not args.json:
+            print(current.as_markdown(), end="")
 
     if args.baseline is None:
         return 0
