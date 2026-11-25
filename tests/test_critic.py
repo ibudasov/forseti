@@ -9,6 +9,7 @@ from app.schemas.critique import (
     CritiqueObjection,
     CritiqueRequest,
     CritiqueResponse,
+    CritiqueRevisionTarget,
     DraftRecommendation,
 )
 from app.schemas.fundamentals import EvidenceChunkInput
@@ -516,3 +517,38 @@ def _response(
         revision_instructions="Revise the draft.",
         summary="Summary",
     )
+
+
+def test_validate_critique_revision_routing_rules():
+    req = _request()
+    valid_resp = CritiqueResponse(
+        run_id=req.run_id,
+        context_hash=req.context_hash,
+        status="completed",
+        verdict="revise",
+        objections=[_objection(objection_id="objection-1")],
+        revision_instructions="Cite chunk 10.",
+        revision_objection_ids=["objection-1"],
+        revision_targets=[
+            CritiqueRevisionTarget(
+                objection_id="objection-1",
+                target="key_reasons",
+                action="add_citations",
+            )
+        ],
+        summary="Revise with citations.",
+    )
+    assert validate_critique(valid_resp, req).accepted is True
+
+    dup_resp = valid_resp.model_copy(update={"revision_objection_ids": ["objection-1", "objection-1"]})
+    assert "duplicate_revision_objection_id" in validate_critique(dup_resp, req).reason_codes
+
+    accept_with_routing = valid_resp.model_copy(update={"verdict": "accept", "revision_instructions": ""})
+    assert "unexpected_revision_routing" in validate_critique(accept_with_routing, req).reason_codes
+
+    unknown_ref = valid_resp.model_copy(update={"revision_objection_ids": ["missing-obj"]})
+    assert "unknown_revision_objection_id" in validate_critique(unknown_ref, req).reason_codes
+
+    schema = _gemini_response_schema()
+    assert "revision_objection_ids" in schema["properties"]
+    assert "revision_targets" in schema["properties"]

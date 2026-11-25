@@ -60,3 +60,23 @@ Keep the root as an `LlmAgent` and keep patching the supervisor prompt.
 Rejected because the problem is structural, not editorial. As long as the root
 model decides whether and when to transfer, the ordering contract remains
 probabilistic, and the guardrail remains skippable.
+
+## Addendum (#217 / #214–#216): Typed Blackboard Spine & Parallel Specialist Fan-Out
+
+The root `SequentialAgent` (`trade_analyst_supervisor`) now orchestrates typed
+ADK `BaseAgent` blackboard nodes (`agents/orchestration/blackboard.py`) that
+read and write validated Pydantic artifacts on `session.state`:
+
+1. `specialist_fan_out` (`ParallelAgent`) runs `fundamental_analyst` and
+   `technical_analyst` concurrently when both are enabled, followed by
+   `specialist_policy_fold` which folds policies strictly sequentially
+   (`Rules -> Fundamental -> Technical`) and preserves `SPECIALIST_ORDER` trace
+   steps and `context_hash` determinism.
+2. `cross_domain_tension` detects specialist conflicts and performs at most one
+   bounded, point-in-time-safe `pgvector` evidence lookup.
+3. `decision_synthesizer` synthesizes the typed memo from `session.state`.
+4. `critic_guardrail` runs as a single-call typed node (zero tokens when
+   `CRITIC_MODE=off`, max 1 Critic LLM call when `shadow`/`enforced`, zero
+   redundant ADK tokens) with bounded `revise` routing (`MAX_CRITIC_REVISIONS = 1`)
+   and a mandatory zero-token post-revision `evaluate_deterministic_objections`
+   gate.

@@ -9,12 +9,16 @@ invent risk numbers or upgrade the deterministic baseline.
 The agentic pipeline applies guardrails in a fixed sequence, each one working
 from the decision the previous stage produced:
 
-`deterministic -> fundamental -> technical -> critic`
+`deterministic -> fundamental -> technical -> synthesizer -> critic`
 
 - The deterministic checklist score and decision are the starting baseline.
-- The fundamental policy (`app/services/fundamental_policy.py`) may raise or
-  lower the decision; see `docs/technical-analyst.md` and
-  `app/services/fundamental_policy.py` for its authority limits.
+- When both Fundamental and Technical specialists are enabled, their context
+  building and LLM assessments run concurrently (`specialist_fan_out`), but
+  policy folding always executes sequentially (`specialist_policy_fold`:
+  `Rules -> Fundamental -> Technical`) so effects, decisions, and
+  `context_hash` values are deterministic regardless of completion order.
+- The fundamental policy (`app/services/fundamental_policy.py`) is strictly
+  downgrade-only (see [ADR 008](adr/008-agent-authority.md)).
 - The technical policy (`app/services/technical_policy.py`) is strictly
   downgrade-only: its proposed adjustments are always `<= 0`, and its
   counterfactual decision can never rank above whatever decision the
@@ -23,8 +27,17 @@ from the decision the previous stage produced:
   analyzer does for non-trade decisions and recomputes confidence with the
   analyzer's formula, taking `min(current, recomputed)` — it never recomputes
   risk.
-- The Critic runs last and sees whatever response the fundamental and
-  technical stages produced.
+- If completed Fundamental and Technical views conflict (`polarity_conflict`,
+  `signal_conflict`, or high-materiality `technical_risk_flag`), a bounded
+  `CrossDomainTension` resolution performs at most one point-in-time-safe
+  (`published_at <= snapshot_at`) `pgvector` evidence lookup deduplicated
+  against `FundamentalAnalysisRequest.evidence_chunks` and passes the tension
+  and supplemental chunks into `DecisionSynthesisRequest` and `CritiqueRequest`.
+- The Critic runs last on the unified ADK blackboard (`BlackboardCriticAgent` /
+  `TypedCriticViewAgent`), executing at most one Critic LLM call per run in
+  `shadow`/`enforced` modes and zero LLM calls / zero tokens when
+  `CRITIC_MODE=off` (enforced by `check_critic_step_zero_redundant_tokens` in
+  `app/trust/invariants.py`).
 
 ## What the Critic checks
 
@@ -108,9 +121,19 @@ The application default remains `CRITIC_MODE=off`.
 
 ## Revision loop bound
 
-A `revise` verdict sets `revisions_requested=1`. The workflow can call the
-Decision Synthesizer one extra time, never more. If the rewrite fails, the run
-keeps the first draft and adds the warning `critic_revision_failed`.
+A `revise` verdict sets `revisions_requested=1` and routes structured objection
+references (`revision_objection_ids` and optional `revision_targets`) together
+with the merged `critic_objections` to the Decision Synthesizer. The workflow
+can call the Decision Synthesizer at most one extra time
+(`MAX_CRITIC_REVISIONS = 1`), never more.
+
+Every revised memo is re-verified through the zero-token deterministic gate
+(`evaluate_deterministic_objections` + `evaluate_post_revision_policy`) before
+finalizing — without making a second Critic LLM call. If the revised draft
+introduces a risk-number mismatch, decision upgrade, or memo-claim mismatch,
+the deterministic gate rejects or downgrades it fail-closed and preserves
+deterministic `RISK_FIELDS`. If the rewrite itself fails, the run keeps the
+first draft and adds the warning `critic_revision_failed`.
 
 ## Reason codes
 

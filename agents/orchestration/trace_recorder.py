@@ -83,16 +83,23 @@ class TraceRecorder:
             retries=retries,
         )
 
-    def record_skipped(self, agent_name: str, reason: str) -> None:
+    def record_skipped(
+        self,
+        agent_name: str,
+        reason: str,
+        *,
+        output: dict[str, Any] | None = None,
+        token_usage: dict[str, int] | None = None,
+    ) -> None:
         self._append_with_reason(
             agent_name,
             status="skipped",
             reason=reason,
             detail=None,
             tool_calls=(),
-            output=None,
+            output=output,
             latency_ms=0.0,
-            token_usage=None,
+            token_usage=token_usage,
             retries=0,
         )
 

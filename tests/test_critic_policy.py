@@ -17,6 +17,7 @@ from app.services.critic_policy import (
     ANALYST_CONTRADICTION_CONFIDENCE_PENALTY,
     MEDIUM_OBJECTION_CONFIDENCE_PENALTY,
     apply_critic_policy,
+    evaluate_post_revision_policy,
 )
 
 
@@ -452,3 +453,31 @@ def _model_objection() -> CritiqueObjection:
         chunk_ids=[],
         warning_codes=["warning-1"],
     )
+
+
+@pytest.mark.parametrize(
+    "warning_code",
+    [
+        "memo_claim_mismatch:numeric_claim_mismatch",
+        "memo_claim_mismatch:decision_label_mismatch",
+    ],
+)
+def test_memo_claim_mismatch_restores_baseline_and_evaluates_post_revision_policy(warning_code):
+    effect = evaluate_post_revision_policy(
+        mode="enforced",
+        response=_response(decision="trade", confidence=0.72),
+        request=_request(),
+        baseline=_baseline(decision="watchlist", confidence=0.55),
+        deterministic_objections=[
+            _deterministic_objection(
+                "internal_inconsistency",
+                "high",
+                objection_id="det:memo_claim_mismatch:1",
+                warning_codes=[warning_code],
+            )
+        ],
+    )
+
+    assert effect.final_decision == "watchlist"
+    assert effect.final_confidence == 0.55
+    assert "guardrail_rejected: memo_claim_mismatch" in effect.reason_codes

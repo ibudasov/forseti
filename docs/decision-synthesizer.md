@@ -29,17 +29,26 @@ baseline memo. The fallback never raises the baseline decision or confidence.
 `SYNTHESIZER_CONTRACT=legacy|typed` selects the synthesizer (default `legacy`; the
 Makefile test targets pin `legacy`). In `typed` mode the workflow:
 
-- builds a `DecisionSynthesisRequest` after the analyst views are known and calls
-  `DecisionSynthesizer.synthesize` outside ADK;
-- puts a deterministic `TypedDecisionMemoAgent` in the `decision_synthesizer` ADK slot
-  (no LLM call, no `calculate_risk` tool), so the step reports zero tokens;
+- builds a `DecisionSynthesisRequest` inside the unified ADK blackboard node
+  (`BlackboardSynthesizerAgent` on `session.state`, or `TypedDecisionMemoAgent`
+  in legacy view mode) after the specialist views and optional
+  `CrossDomainTension` resolution are complete;
+- includes `cross_domain_tension` and deduplicated `supplemental_evidence_chunks`
+  when Fundamental and Technical views conflict (omitting them from the canonical
+  `context_hash` payload when absent/empty to preserve hash stability);
+- executes the typed `DecisionSynthesizer.synthesize` service once (no duplicate
+  narrative `LlmAgent` call, no `calculate_risk` tool), reporting zero redundant
+  ADK view tokens;
 - applies `proposed_decision` through the shared downgrade-only transition, so a
   promotion is ignored. Risk numbers always come from the rules and the memo risk
   block is rendered from them;
 - never reaches `unparsable_synthesis`; a rejected memo becomes a deterministic
   fallback memo and the step is marked degraded with reason `synthesis_fallback`;
-- reuses the service for the Critic revision loop with the Critic findings as extra
-  input (`critic_findings`), instead of the legacy revision prompt;
+- reuses the service for the bounded Critic revision loop (`MAX_CRITIC_REVISIONS = 1`)
+  with structured `critic_objections`, `revision_objection_ids`,
+  `revision_targets`, and `critic_findings` as input, and re-verifies every
+  revised memo through zero-token `evaluate_deterministic_objections` before
+  finalizing;
 - passes the rendered memo and its structured claims to the Critic, whose
   deterministic rules check the claims against risk numbers and decision labels;
 - exposes `AnalyzeResponse.memo` (thesis, cited reasons/risks/change conditions,

@@ -237,3 +237,108 @@ def test_fundamental_typed_mode_guides_synthesizer_and_critic_to_citations():
         instruction = registry.specialists[name].instruction.lower()
         assert "validated json assessment" in instruction
         assert "chunk_ids" in instruction
+
+
+def test_registry_keeps_legacy_llm_agent_for_critic_when_critic_mode_is_none():
+    from google.adk.agents import LlmAgent
+
+    registry = build_agent_registry(_config())
+
+    assert type(registry.specialists[CRITIC_NAME]) is LlmAgent
+
+
+def test_registry_builds_typed_critic_view_agent_when_critic_mode_is_provided():
+    from agents.orchestration.typed_view_agent import TypedCriticViewAgent
+
+    for mode in ("off", "shadow", "enforced"):
+        registry = build_agent_registry(_config(), critic_mode=mode)
+
+        critic = registry.specialists[CRITIC_NAME]
+        assert isinstance(critic, TypedCriticViewAgent)
+        assert critic.output_key == CRITIQUE_OUTPUT_KEY
+        assert critic.critic_mode == mode
+        assert isinstance(registry.root_agent, SequentialAgent)
+        assert [agent.name for agent in registry.root_agent.sub_agents] == list(SPECIALIST_ORDER)
+
+
+def test_registry_builds_parallel_fan_out_when_both_specialists_enabled():
+    from google.adk.agents import ParallelAgent
+
+    from agents.orchestration.blackboard import (
+        BlackboardCriticAgent,
+        BlackboardFundamentalAgent,
+        BlackboardPolicyFoldAgent,
+        BlackboardSynthesizerAgent,
+        BlackboardTechnicalAgent,
+        CrossDomainTensionAgent,
+    )
+    from agents.orchestration.registry import (
+        CROSS_DOMAIN_TENSION_NAME,
+        SPECIALIST_FAN_OUT_NAME,
+        SPECIALIST_POLICY_FOLD_NAME,
+    )
+
+    config = load_agent_config(
+        Settings(
+            _env_file=None,
+            FUNDAMENTAL_AGENT_MODE="enforced",
+            TECHNICAL_AGENT_MODE="shadow",
+            SYNTHESIZER_CONTRACT="typed",
+            CRITIC_MODE="enforced",
+        )
+    )
+    registry = build_agent_registry(config)
+
+    assert isinstance(registry.root_agent, SequentialAgent)
+    sub_agents = registry.root_agent.sub_agents
+    assert isinstance(sub_agents[0], ParallelAgent)
+    assert sub_agents[0].name == SPECIALIST_FAN_OUT_NAME
+    assert [agent.name for agent in sub_agents[0].sub_agents] == [
+        FUNDAMENTAL_ANALYST_NAME,
+        TECHNICAL_ANALYST_NAME,
+    ]
+    assert isinstance(sub_agents[0].sub_agents[0], BlackboardFundamentalAgent)
+    assert isinstance(sub_agents[0].sub_agents[1], BlackboardTechnicalAgent)
+    assert [agent.name for agent in sub_agents[1:]] == [
+        SPECIALIST_POLICY_FOLD_NAME,
+        CROSS_DOMAIN_TENSION_NAME,
+        DECISION_SYNTHESIZER_NAME,
+        CRITIC_NAME,
+    ]
+    assert isinstance(sub_agents[1], BlackboardPolicyFoldAgent)
+    assert isinstance(sub_agents[2], CrossDomainTensionAgent)
+    assert isinstance(sub_agents[3], BlackboardSynthesizerAgent)
+    assert isinstance(sub_agents[4], BlackboardCriticAgent)
+
+
+def test_registry_uses_sequential_specialists_when_at_most_one_enabled():
+    from google.adk.agents import LlmAgent, ParallelAgent
+
+    from agents.orchestration.registry import CROSS_DOMAIN_TENSION_NAME, SPECIALIST_POLICY_FOLD_NAME
+
+    for fund_mode, tech_mode in (("off", "enforced"), ("enforced", "off"), ("off", "off")):
+        config = load_agent_config(
+            Settings(
+                _env_file=None,
+                FUNDAMENTAL_AGENT_MODE=fund_mode,
+                TECHNICAL_AGENT_MODE=tech_mode,
+                SYNTHESIZER_CONTRACT="typed",
+                CRITIC_MODE="off",
+            )
+        )
+        registry = build_agent_registry(config)
+
+        assert isinstance(registry.root_agent, SequentialAgent)
+        assert not any(isinstance(agent, ParallelAgent) for agent in registry.root_agent.sub_agents)
+        assert [agent.name for agent in registry.root_agent.sub_agents] == [
+            FUNDAMENTAL_ANALYST_NAME,
+            TECHNICAL_ANALYST_NAME,
+            SPECIALIST_POLICY_FOLD_NAME,
+            CROSS_DOMAIN_TENSION_NAME,
+            DECISION_SYNTHESIZER_NAME,
+            CRITIC_NAME,
+        ]
+        if fund_mode == "off":
+            assert type(registry.specialists[FUNDAMENTAL_ANALYST_NAME]) is LlmAgent
+        if tech_mode == "off":
+            assert type(registry.specialists[TECHNICAL_ANALYST_NAME]) is LlmAgent

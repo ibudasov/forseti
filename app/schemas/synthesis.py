@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.schemas.critique import AnalystView
+from app.schemas.critique import AnalystView, CritiqueObjection, CritiqueRevisionTarget
+from app.schemas.fundamentals import EvidenceChunkInput
 from app.schemas.memo import DecisionMemoItem
+from app.schemas.tension import CrossDomainTension
 
 if TYPE_CHECKING:
     from app.schemas.analyze import DecisionDiagnosis
@@ -42,6 +44,11 @@ class DecisionSynthesisRequest(BaseModel):
     known_chunk_ids: list[int] = Field(default_factory=list)
     known_warning_codes: list[str] = Field(default_factory=list)
     critic_findings: list[str] = Field(default_factory=list)
+    critic_objections: list[CritiqueObjection] = Field(default_factory=list)
+    revision_objection_ids: list[str] = Field(default_factory=list)
+    revision_targets: list[CritiqueRevisionTarget] = Field(default_factory=list)
+    cross_domain_tension: CrossDomainTension | None = None
+    supplemental_evidence_chunks: list[EvidenceChunkInput] = Field(default_factory=list)
     allowed_decisions: list[SYNTHESIS_DECISION] = Field(default_factory=list)
     max_confidence: float = Field(ge=0, le=1)
 
@@ -59,6 +66,15 @@ class DecisionSynthesisRequest(BaseModel):
         _assert_unique(self.known_chunk_ids, "Chunk IDs")
         _assert_unique(self.known_warning_codes, "Warning codes")
         _assert_unique(self.allowed_decisions, "Allowed decisions")
+        _assert_unique(
+            [objection.objection_id for objection in self.critic_objections],
+            "Critic objection IDs",
+        )
+        _assert_unique(self.revision_objection_ids, "Revision objection IDs")
+        _assert_unique(
+            [chunk.chunk_id for chunk in self.supplemental_evidence_chunks],
+            "Supplemental evidence chunk IDs",
+        )
         return self
 
 

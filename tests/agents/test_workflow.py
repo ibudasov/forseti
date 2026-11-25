@@ -200,6 +200,8 @@ def test_happy_trajectory_records_observed_steps(monkeypatch):
     ]
     critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
     assert critic_step.output == {
+        "source": "typed_critic_view",
+        "adk_token_usage": {},
         "status": "completed",
         "verdict": "accept",
         "objection_counts_by_severity": {},
@@ -546,6 +548,8 @@ def test_critic_trace_output_summarizes_objections_and_decision_change(monkeypat
 
     critic_step = [step for step in response.trace.steps if step.agent_name == "critic_guardrail"][0]
     assert critic_step.output == {
+        "source": "typed_critic_view",
+        "adk_token_usage": {},
         "status": "completed",
         "verdict": "reject",
         "objection_counts_by_severity": {"high": 1, "medium": 1, "low": 1},
@@ -792,7 +796,7 @@ def test_explicit_file_recorder_writes_run_artifacts(monkeypatch, tmp_path):
     monkeypatch.setattr(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None, today=None: registry,
+        lambda config, engine=None, today=None, **_kwargs: registry,
     )
     monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
     recorder = FileLlmIoRecorder(tmp_path / "run-1")
@@ -1673,3 +1677,143 @@ def test_typed_memo_claims_reach_the_critic_draft(monkeypatch):
     draft = seen_drafts[0]
     assert "Decision: watchlist" in draft.memo
     assert draft.memo_claims == ["Price data is stale.", "Prices are stale."]
+
+
+def _setup_real_adk_all_typed_workflow(monkeypatch, *, critic_mode: str):
+    import socket
+
+    def _reject_network(*_args, **_kwargs):
+        raise AssertionError("Live network calls are forbidden in offline workflow tests.")
+
+    monkeypatch.setattr(socket.socket, "connect", _reject_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", _reject_network)
+    settings = Settings(
+        _env_file=None,
+        FUNDAMENTAL_AGENT_MODE="enforced",
+        TECHNICAL_AGENT_MODE="enforced",
+        SYNTHESIZER_CONTRACT="typed",
+        CRITIC_MODE=critic_mode,
+    )
+    monkeypatch.setattr(workflow_module, "get_settings", lambda: settings)
+    baseline = _watchlist_response().model_copy(update={"warnings": ["stale_price_data"]}, deep=True)
+    monkeypatch.setattr(workflow_module, "resolve_ticker", lambda ticker_reference: _Resolved())
+    monkeypatch.setattr(workflow_module, "analyze_request", lambda request, engine=None: baseline.model_copy(deep=True))
+    monkeypatch.setattr(workflow_module, "build_fundamental_analysis_request", lambda *a, **k: _request())
+    monkeypatch.setattr(workflow_module, "FundamentalAnalyst", lambda: _AnalystStub(_assessment(accepted=True, adjustment=0)))
+    monkeypatch.setattr(workflow_module, "build_technical_analysis_request", lambda *a, **k: _technical_request())
+    monkeypatch.setattr(
+        workflow_module,
+        "TechnicalAnalyst",
+        lambda: _AnalystStub(_technical_assessment(accepted=True, adjustment=0)),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "build_critique_request",
+        lambda *args, **kwargs: _critique_request(kwargs["draft"]),
+    )
+    monkeypatch.setattr(workflow_module, "evaluate_deterministic_objections", lambda **kwargs: [])
+    monkeypatch.setattr(workflow_module.AgenticAnalysisWorkflow, "_persist_trace", lambda self, trace: None)
+
+    critic_calls = []
+
+    class _CountingCritic:
+        def review(self, critique_request):
+            critic_calls.append(critique_request)
+            return _critique_result(token_usage={"prompt_token_count": 7, "total_token_count": 11})
+
+    monkeypatch.setattr(workflow_module, "Critic", _CountingCritic)
+    workflow = AgenticAnalysisWorkflow(
+        load_agent_config(settings),
+        decision_synthesizer=DecisionSynthesizer(
+            _ScriptedSynthesizerModel(_memo_output(), token_usage={"total_token_count": 9}),
+            max_retries=1,
+        ),
+        llm_io_recorder=_NoopRecorder(),
+    )
+    return workflow, baseline, critic_calls
+
+
+def test_real_adk_runner_critic_mode_off_makes_zero_critic_calls_and_zero_tokens(monkeypatch):
+    from app.trust.invariants import CRITIC_OFF_ALLOWED_SKIPS, evaluate_agentic_invariants
+
+    workflow, baseline, critic_calls = _setup_real_adk_all_typed_workflow(monkeypatch, critic_mode="off")
+
+    response = workflow.analyze("NVDA")
+
+    assert critic_calls == []
+    assert response.critic_effect is None
+    critic_step = next(step for step in response.trace.steps if step.agent_name == "critic_guardrail")
+    assert critic_step.status == "skipped"
+    assert critic_step.output == {"reason": "critic_mode_off"}
+    assert critic_step.token_usage == {}
+    assert response.trace.token_usage == {"total_token_count": 9}
+    assert (
+        evaluate_agentic_invariants(
+            deterministic_response=baseline,
+            agentic_response=response,
+            trace=response.trace,
+            allowed_skip_reasons=CRITIC_OFF_ALLOWED_SKIPS,
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("critic_mode", ("shadow", "enforced"))
+def test_real_adk_runner_typed_critic_view_runs_at_most_one_critic_call(monkeypatch, critic_mode):
+    from app.trust.invariants import evaluate_agentic_invariants
+
+    workflow, baseline, critic_calls = _setup_real_adk_all_typed_workflow(monkeypatch, critic_mode=critic_mode)
+
+    response = workflow.analyze("NVDA")
+
+    assert len(critic_calls) == 1
+    assert response.critic_effect is not None
+    assert response.critic_effect.mode == critic_mode
+    critic_step = next(step for step in response.trace.steps if step.agent_name == "critic_guardrail")
+    assert critic_step.status == "completed"
+    assert critic_step.output is not None
+    assert critic_step.output["source"] == "typed_critic_view"
+    assert critic_step.output["adk_token_usage"] == {}
+    assert critic_step.token_usage == {"prompt_token_count": 7, "total_token_count": 11}
+    assert response.trace.token_usage == {"prompt_token_count": 7, "total_token_count": 20}
+    assert (
+        evaluate_agentic_invariants(
+            deterministic_response=baseline,
+            agentic_response=response,
+            trace=response.trace,
+        )
+        == []
+    )
+
+
+def test_redundant_adk_critic_tokens_trigger_trust_invariant_violations(monkeypatch):
+    from app.trust.invariants import CRITIC_OFF_ALLOWED_SKIPS, evaluate_agentic_invariants
+
+    events = [
+        _event("fundamental_analyst", text="ok"),
+        _event("technical_analyst", text="ok"),
+        _event("decision_synthesizer", text='{"decision":"no_trade","confidence":0.0,"reasons":[]}'),
+        _event("critic_guardrail", text="redundant", token_usage={"prompt_token_count": 4, "total_token_count": 9}),
+    ]
+    baseline = _deterministic_response()
+
+    _enable_critic(monkeypatch, mode="enforced")
+    enforced_response = _workflow(monkeypatch, events=events).analyze("NVDA")
+    enforced_violations = evaluate_agentic_invariants(
+        deterministic_response=baseline,
+        agentic_response=enforced_response,
+        trace=enforced_response.trace,
+    )
+    assert "critic_redundant_adk_tokens" in {violation.code for violation in enforced_violations}
+
+    monkeypatch.setattr(workflow_module, "_critic_mode", lambda: "off")
+    off_response = _workflow(monkeypatch, events=events).analyze("NVDA")
+    off_violations = evaluate_agentic_invariants(
+        deterministic_response=baseline,
+        agentic_response=off_response,
+        trace=off_response.trace,
+        allowed_skip_reasons=CRITIC_OFF_ALLOWED_SKIPS,
+    )
+    assert {"critic_redundant_adk_tokens", "critic_skipped_step_nonzero_tokens"} <= {
+        violation.code for violation in off_violations
+    }

@@ -3,15 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agents.orchestration.registry import DECISION_SYNTHESIZER_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
+from agents.orchestration.registry import CRITIC_NAME, DECISION_SYNTHESIZER_NAME, SPECIALIST_ORDER, TECHNICAL_ANALYST_NAME
 from app.schemas.analyze import AnalysisTrace
-from app.trust.invariants import check_synthesizer_step_zero_tokens_in_typed_mode
+from app.trust.invariants import (
+    check_critic_step_zero_redundant_tokens,
+    check_synthesizer_step_zero_tokens_in_typed_mode,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "clear_trade_trajectory.json"
 TYPED_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_technical_view_trajectory.json"
 TYPED_VIEWS_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_views_trajectory.json"
 TYPED_SYNTHESIZER_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_synthesizer_trajectory.json"
+TYPED_CRITIC_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "trust" / "typed_critic_trajectory.json"
 ALLOWED_TOOL_CALLS = {
     DECISION_SYNTHESIZER_NAME: {"calculate_risk"},
 }
@@ -124,3 +128,26 @@ def test_typed_view_steps_with_zero_tokens_cost_nothing():
     assert zero_token_lines
     assert all(line["usd"] == 0.0 for line in zero_token_lines)
     assert estimate.status == "priced"
+
+
+def test_typed_critic_trajectory_has_zero_redundant_adk_tokens_and_attributed_cost():
+    from app.services.trace_cost import UNATTRIBUTED_STEP, price_trace
+
+    _, trace = _load_trace(TYPED_CRITIC_TRACE_FIXTURE)
+
+    assert [step.agent_name for step in trace.steps] == list(SPECIALIST_ORDER)
+    critic_step = next(step for step in trace.steps if step.agent_name == CRITIC_NAME)
+    assert critic_step.output is not None
+    assert critic_step.output["source"] == "typed_critic_view"
+    assert critic_step.output["adk_token_usage"] == {}
+    assert check_synthesizer_step_zero_tokens_in_typed_mode(trace) == []
+    assert check_critic_step_zero_redundant_tokens(trace) == []
+
+    total_usage = dict(critic_step.token_usage)
+    estimate, breakdown = price_trace(trace.steps, total_usage)
+
+    assert estimate.status == "priced"
+    assert estimate.usd is not None and estimate.usd > 0
+    lines_by_step = {line["step"]: line for line in breakdown["lines"]}
+    assert UNATTRIBUTED_STEP not in lines_by_step
+    assert lines_by_step["4:critic_guardrail"]["usd"] == estimate.usd

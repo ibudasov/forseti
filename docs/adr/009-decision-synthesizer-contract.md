@@ -42,3 +42,17 @@ leak, and promotion attempt. It requires 100% schema validity after fallback,
 zero money fields, zero promotions, and citation precision of at least 0.95.
 The golden-cassette baseline for existing synthesizer outputs is 0 unparsable
 outputs among 3 recorded outputs.
+
+## Addendum (#217 / #215 & #216): Blackboard Integration, Tension Context & Structured Revision Routing
+
+- **Cross-domain tension context (#215)**: `DecisionSynthesisRequest` accepts
+  optional `cross_domain_tension` and `supplemental_evidence_chunks` (excluded
+  from `context_hash` when absent/empty to preserve backward compatibility with
+  frozen fixtures) and exposes supplemental chunk IDs in `known_chunk_ids`.
+- **Blackboard spine & structured revision routing (#216)**: The typed
+  `DecisionSynthesizer` runs inside `BlackboardSynthesizerAgent` on
+  `session.state`. When the Critic returns `revise` (`MAX_CRITIC_REVISIONS = 1`),
+  `DecisionSynthesisRequest` receives structured `critic_objections`,
+  `revision_objection_ids`, and `revision_targets`, and the revised memo is
+  re-verified via zero-token `evaluate_deterministic_objections` before
+  finalizing.

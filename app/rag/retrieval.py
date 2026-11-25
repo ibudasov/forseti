@@ -23,6 +23,7 @@ def retrieve(
     source_types: Optional[List[SourceType]] = None,
     quality_tiers: Optional[List[SourceQualityTier]] = None,
     date_window_days: int = _DEFAULT_DATE_WINDOW_DAYS,
+    published_before: Optional[datetime] = None,
     engine=None,
 ) -> List[DocumentChunk]:
     """Return the *top_k* most relevant chunks for *ticker* and *question*.
@@ -30,7 +31,8 @@ def retrieve(
     Falls back to sector-level chunks when the ticker-specific result set is
     smaller than *top_k // 2*.
     """
-    published_after = datetime.now(timezone.utc) - timedelta(days=date_window_days)
+    anchor = published_before or datetime.now(timezone.utc)
+    published_after = anchor - timedelta(days=date_window_days)
     query_embedding = embedding_client.embed_texts([question])[0]
 
     chunks = similarity_search(
@@ -40,6 +42,7 @@ def retrieve(
         source_types=source_types,
         quality_tiers=quality_tiers,
         published_after=published_after,
+        published_before=published_before,
         engine=engine,
     )
 
@@ -51,6 +54,7 @@ def retrieve(
             source_types=_SECTOR_FALLBACK_SOURCE_TYPES,
             quality_tiers=[SourceQualityTier.secondary_reputable],
             published_after=published_after,
+            published_before=published_before,
             engine=engine,
         )
         existing_ids = {c.id for c in chunks}

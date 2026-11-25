@@ -19,8 +19,10 @@ from app.schemas.fundamentals import (
 from agents.orchestration.adk_events import event_author, event_text, event_token_usage
 from agents.orchestration.typed_view_agent import (
     TypedAnalystViewAgent,
+    TypedCriticViewAgent,
     NEUTRAL_TECHNICAL_VIEW,
     TypedTechnicalViewAgent,
+    render_critic_view,
     render_fundamental_view,
     render_technical_view,
 )
@@ -214,3 +216,54 @@ def test_fundamental_typed_agent_emits_one_zero_token_event_and_writes_cited_vie
     assert json.loads(event_text(events[0])) == expected
     assert expected["findings"][0]["metric_ids"] == ["revenue_growth:2026-06-30"]
     assert expected["findings"][0]["chunk_ids"] == [10]
+
+
+def test_render_critic_view_handles_modes_and_custom_payload():
+    assert render_critic_view("off") == {"status": "skipped", "reason": "critic_mode_off"}
+    assert render_critic_view("shadow") == {
+        "status": "pending",
+        "mode": "shadow",
+        "source": "typed_critic_view",
+    }
+    assert render_critic_view("enforced") == {
+        "status": "pending",
+        "mode": "enforced",
+        "source": "typed_critic_view",
+    }
+    custom = {"status": "completed", "verdict": "accept"}
+    rendered = render_critic_view("enforced", custom)
+    assert rendered == custom
+    assert rendered is not custom
+
+
+def test_typed_critic_view_agent_emits_zero_token_event_and_writes_state():
+    for mode in ("off", "shadow", "enforced"):
+        agent = TypedCriticViewAgent(name="critic_guardrail", critic_mode=mode)
+
+        events, session = _run_agent(agent)
+
+        expected = render_critic_view(mode)
+        assert agent.output_key == "critique"
+        assert len(events) == 1
+        assert event_author(events[0]) == "critic_guardrail"
+        assert event_token_usage(events[0]) == {}
+        assert session.state["critique"] == expected
+        assert json.loads(event_text(events[0])) == expected
+
+
+def test_typed_critic_view_agent_writes_custom_payload_with_zero_tokens():
+    payload = {"status": "completed", "verdict": "accept", "source": "typed_critic_view"}
+    agent = TypedCriticViewAgent(
+        name="critic_guardrail",
+        state_key="custom_critique",
+        critic_mode="enforced",
+        critique_payload=payload,
+    )
+
+    events, session = _run_agent(agent)
+
+    assert agent.output_key == "custom_critique"
+    assert len(events) == 1
+    assert event_token_usage(events[0]) == {}
+    assert session.state["custom_critique"] == payload
+    assert json.loads(event_text(events[0])) == payload

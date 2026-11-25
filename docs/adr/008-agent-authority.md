@@ -71,6 +71,23 @@ to `fundamental_view` without making another model call. `off` retains the
 legacy narrative specialist. The typed-view trace event must report zero
 tokens; the upstream assessment trace retains usage for the single model call.
 
+### Unified Blackboard, Parallel Fan-Out & Cross-Domain Tension addendum (#217)
+
+- **Parallel specialist fan-out (#214)**: Fundamental and Technical context
+  building and LLM assessments execute concurrently when both are enabled,
+  within bounded DB pool limits, while policy folding remains strictly
+  sequential (`Rules -> Fundamental -> Technical -> Synthesizer -> Critic`),
+  preserving identical downgrade-only ceilings and `context_hash` values.
+- **Cross-domain tension lookup (#215)**: When completed Fundamental and
+  Technical views conflict, at most one point-in-time-safe `pgvector` lookup
+  supplies deduplicated supplemental evidence chunks to synthesis and critique.
+  Supplemental evidence never relaxes downgrade-only ceilings or alters ADR 002
+  risk math.
+- **Single-call Critic & post-revision gate (#213, #216)**: `critic_guardrail`
+  executes at most one Critic LLM call (zero when `off`) and every bounded
+  revision (`MAX_CRITIC_REVISIONS = 1`) passes through zero-token
+  `evaluate_deterministic_objections` before finalizing.
+
 ## Validation
 
 The trust invariant remains `rank(agentic) <= rank(linear)`, with

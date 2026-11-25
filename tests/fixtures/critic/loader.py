@@ -581,7 +581,7 @@ def _run_workflow_case(case: CriticGoldenCase) -> CriticCaseResult:
     ), patch.object(
         workflow_module,
         "build_agent_registry",
-        lambda config, engine=None, today=None: AgentRegistry(tools={}, specialists={}, root_agent=None),
+        lambda config, engine=None, today=None, **_kwargs: AgentRegistry(tools={}, specialists={}, root_agent=None),
     ), patch.object(
         workflow_module,
         "build_critique_request",

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from datetime import date
-from typing import Literal, Sequence
+from datetime import date, datetime
+from typing import Any, Literal, Optional, Sequence
 
+from app.rag.embedding import EmbeddingClient
 from app.schemas.analyze import AnalyzeResponse, DecisionDiagnosis
 from app.schemas.critique import AnalystFinding, AnalystView, CritiqueRequest, DraftRecommendation
-from app.schemas.fundamentals import EvidenceChunkInput, FundamentalAssessmentResult
+from app.schemas.fundamentals import (
+    EvidenceChunkInput,
+    FundamentalAnalysisRequest,
+    FundamentalAssessmentResult,
+)
 from app.schemas.technicals import TechnicalAssessmentResult
+from app.schemas.tension import CrossDomainTension
 from app.services.context_hash import compute_context_hash
 from app.services.fundamental_context import build_fundamental_analysis_request
 
@@ -66,28 +72,87 @@ def build_critique_request(
     deterministic_diagnosis: DecisionDiagnosis | None = None,
     as_of: date | None = None,
     engine: object | None = None,
+    fundamental_request: FundamentalAnalysisRequest | None = None,
+    cross_domain_tension: CrossDomainTension | None = None,
+    supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
+    snapshot_at: datetime | None = None,
+    embedding_client: Optional[EmbeddingClient] = None,
 ) -> CritiqueRequest:
-    context = build_fundamental_analysis_request(
-        ticker=ticker,
-        run_id=run_id,
-        as_of=as_of,
-        engine=engine,
+    resolved_ticker, resolved_as_of_date, resolved_snapshot_at, base_chunks = (
+        _resolve_fundamental_context(
+            ticker=ticker,
+            run_id=run_id,
+            as_of=as_of,
+            engine=engine,
+            fundamental_request=fundamental_request,
+            snapshot_at=snapshot_at,
+            embedding_client=embedding_client,
+        )
     )
+    merged_chunks = _deduplicated_chunks(base_chunks, supplemental_evidence_chunks)
     request = CritiqueRequest(
         run_id=run_id,
         context_hash="pending",
-        ticker=context.ticker,
-        as_of_date=context.as_of_date,
-        snapshot_at=context.snapshot_at,
+        ticker=resolved_ticker,
+        as_of_date=resolved_as_of_date,
+        snapshot_at=resolved_snapshot_at,
         draft=draft,
         analyst_views=sorted(list(analyst_views), key=lambda view: view.agent_name),
-        evidence_chunks=_cap_evidence_chunks(context.evidence_chunks),
+        evidence_chunks=_cap_evidence_chunks(merged_chunks),
         deterministic_warnings=_deduplicated(deterministic_warnings),
         deterministic_diagnosis=deterministic_diagnosis,
+        cross_domain_tension=cross_domain_tension,
         allowed_actions=list(DEFAULT_ALLOWED_ACTIONS),
     )
     payload = request.model_dump(exclude={"context_hash", "run_id", "snapshot_at"})
+    if payload.get("cross_domain_tension") is None:
+        payload.pop("cross_domain_tension", None)
     return request.model_copy(update={"context_hash": compute_context_hash(payload)})
+
+
+def _resolve_fundamental_context(
+    *,
+    ticker: str,
+    run_id: str,
+    as_of: date | None,
+    engine: object | None,
+    fundamental_request: FundamentalAnalysisRequest | None,
+    snapshot_at: datetime | None,
+    embedding_client: Optional[EmbeddingClient],
+) -> tuple[str, date, datetime, Sequence[EvidenceChunkInput]]:
+    if fundamental_request is not None:
+        return (
+            fundamental_request.ticker,
+            fundamental_request.as_of_date,
+            snapshot_at or fundamental_request.snapshot_at,
+            fundamental_request.evidence_chunks,
+        )
+    builder_kwargs: dict[str, Any] = {
+        "ticker": ticker,
+        "run_id": run_id,
+        "as_of": as_of,
+        "engine": engine,
+    }
+    if snapshot_at is not None:
+        builder_kwargs["snapshot_at"] = snapshot_at
+    if embedding_client is not None:
+        builder_kwargs["embedding_client"] = embedding_client
+    context = build_fundamental_analysis_request(**builder_kwargs)
+    return context.ticker, context.as_of_date, context.snapshot_at, context.evidence_chunks
+
+
+def _deduplicated_chunks(
+    base_chunks: Sequence[EvidenceChunkInput],
+    supplemental_chunks: Sequence[EvidenceChunkInput],
+) -> list[EvidenceChunkInput]:
+    merged: list[EvidenceChunkInput] = []
+    seen_ids: set[int] = set()
+    for chunk in (*base_chunks, *supplemental_chunks):
+        if chunk.chunk_id in seen_ids:
+            continue
+        seen_ids.add(chunk.chunk_id)
+        merged.append(chunk)
+    return merged
 
 
 def _build_fundamental_view(

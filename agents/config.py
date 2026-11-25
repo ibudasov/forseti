@@ -7,12 +7,15 @@ only assembles plain configuration values.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from app.settings import Settings, get_settings
 
 LINEAR_PIPELINE_MODE = "linear"
 AGENTIC_PIPELINE_MODE = "agentic"
 _VALID_PIPELINE_MODES = (LINEAR_PIPELINE_MODE, AGENTIC_PIPELINE_MODE)
+_VALID_AGENT_MODES = ("off", "shadow", "enforced")
+_VALID_SYNTHESIZER_CONTRACTS = ("legacy", "typed")
 
 # Hard product rules every LLM agent instruction must restate. These are
 # non-negotiable per the "Agentic workflow with Google ADK" execution plan:
@@ -42,10 +45,30 @@ class AgentWorkflowConfig:
     max_retries: int
     debug_llm_io: bool = False
     debug_llm_io_dir: str = "/tmp/forseti-llm-io"
+    fundamental_agent_mode: Literal["off", "shadow", "enforced"] = "off"
+    technical_agent_mode: Literal["off", "shadow", "enforced"] = "off"
+    critic_mode: Literal["off", "shadow", "enforced"] = "off"
+    synthesizer_contract: Literal["legacy", "typed"] = "legacy"
 
     def is_agentic(self) -> bool:
         """Whether the agentic (ADK) pipeline should run instead of the linear one."""
         return self.pipeline_mode == AGENTIC_PIPELINE_MODE
+
+
+def _validated_agent_mode(name: str, raw_value: str) -> Literal["off", "shadow", "enforced"]:
+    normalized = raw_value.strip().lower()
+    if normalized not in _VALID_AGENT_MODES:
+        raise ValueError(f"{name} must be one of {_VALID_AGENT_MODES!r}, got {normalized!r}.")
+    return cast(Literal["off", "shadow", "enforced"], normalized)
+
+
+def _validated_synthesizer_contract(raw_value: str) -> Literal["legacy", "typed"]:
+    normalized = raw_value.strip().lower()
+    if normalized not in _VALID_SYNTHESIZER_CONTRACTS:
+        raise ValueError(
+            f"SYNTHESIZER_CONTRACT must be one of {_VALID_SYNTHESIZER_CONTRACTS!r}, got {normalized!r}."
+        )
+    return cast(Literal["legacy", "typed"], normalized)
 
 
 def load_agent_config(settings: Settings | None = None) -> AgentWorkflowConfig:
@@ -65,4 +88,8 @@ def load_agent_config(settings: Settings | None = None) -> AgentWorkflowConfig:
         max_retries=settings.AGENT_MAX_RETRIES,
         debug_llm_io=settings.DEBUG_LLM_IO,
         debug_llm_io_dir=settings.DEBUG_LLM_IO_DIR,
+        fundamental_agent_mode=_validated_agent_mode("FUNDAMENTAL_AGENT_MODE", settings.FUNDAMENTAL_AGENT_MODE),
+        technical_agent_mode=_validated_agent_mode("TECHNICAL_AGENT_MODE", settings.TECHNICAL_AGENT_MODE),
+        critic_mode=_validated_agent_mode("CRITIC_MODE", settings.CRITIC_MODE),
+        synthesizer_contract=_validated_synthesizer_contract(settings.SYNTHESIZER_CONTRACT),
     )

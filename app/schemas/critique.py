@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.fundamentals import CitedFinding, EvidenceChunkInput, SCHEMA_VERSION
 from app.schemas.technicals import TechnicalFinding
+from app.schemas.tension import CrossDomainTension
 
 if TYPE_CHECKING:
     from app.schemas.analyze import DecisionDiagnosis
@@ -182,6 +183,7 @@ class CritiqueRequest(BaseModel):
     evidence_chunks: list[EvidenceChunkInput] = Field(default_factory=list)
     deterministic_warnings: list[str] = Field(default_factory=list)
     deterministic_diagnosis: Optional["DecisionDiagnosis"] = None
+    cross_domain_tension: Optional[CrossDomainTension] = None
     allowed_actions: list[
         Literal[
             "accept",
@@ -234,6 +236,33 @@ class CritiqueObjection(BaseModel):
         return self
 
 
+class CritiqueRevisionTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    objection_id: str
+    target: Literal[
+        "thesis",
+        "key_reasons",
+        "key_risks",
+        "what_would_change",
+        "decision_and_confidence",
+        "full_memo",
+    ]
+    action: Literal[
+        "add_citations",
+        "clarify_tension",
+        "soften_claims",
+        "align_decision_confidence",
+        "address_risks",
+    ]
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> "CritiqueRevisionTarget":
+        if not self.objection_id.strip():
+            raise ValueError("Revision target objection_id must not be empty.")
+        return self
+
+
 class CritiqueResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -247,11 +276,14 @@ class CritiqueResponse(BaseModel):
     proposed_decision: Optional[Literal["trade", "watchlist", "no_trade"]] = None
     proposed_confidence_penalty: float = Field(default=0.0, ge=0, le=1)
     revision_instructions: str = ""
+    revision_objection_ids: list[str] = Field(default_factory=list)
+    revision_targets: list[CritiqueRevisionTarget] = Field(default_factory=list)
     summary: str
 
     @model_validator(mode="after")
     def _validate_response(self) -> "CritiqueResponse":
         _assert_unique_objection_ids(self.objections)
+        _assert_unique_revision_objection_ids(self.revision_objection_ids)
         if not self.summary.strip():
             raise ValueError("Critique summary must not be empty.")
         if self.status in {"insufficient_data", "failed"}:
@@ -263,6 +295,8 @@ class CritiqueResponse(BaseModel):
                 raise ValueError("Failed and insufficient-data critiques must keep confidence penalty 0.0.")
             if self.proposed_decision is not None:
                 raise ValueError("Failed and insufficient-data critiques must not propose a decision change.")
+            if self.revision_objection_ids or self.revision_targets:
+                raise ValueError("Failed and insufficient-data critiques must not include revision routing.")
         if self.verdict == "revise" and not self.revision_instructions.strip():
             raise ValueError("Revision verdicts must include revision instructions.")
         if self.verdict == "reject" and not any(
@@ -341,6 +375,13 @@ def _assert_unique_objection_ids(objections: list[CritiqueObjection]) -> None:
     objection_ids = [objection.objection_id for objection in objections]
     if len(objection_ids) != len(set(objection_ids)):
         raise ValueError("Objection IDs must be unique across the full critique response.")
+
+
+def _assert_unique_revision_objection_ids(objection_ids: list[str]) -> None:
+    if any(not objection_id.strip() for objection_id in objection_ids):
+        raise ValueError("Revision objection IDs must not be empty.")
+    if len(objection_ids) != len(set(objection_ids)):
+        raise ValueError("Revision objection IDs must be unique.")
 
 
 _DecisionDiagnosis = getattr(import_module("app.schemas.analyze"), "DecisionDiagnosis")

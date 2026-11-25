@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, Union
 
 from google.adk.agents import BaseAgent
 from google.adk.events import Event
@@ -86,6 +86,41 @@ class TypedTechnicalViewAgent(TypedAnalystViewAgent):
     @property
     def output_key(self) -> str:
         return self.state_key
+
+
+class TypedCriticViewAgent(BaseAgent):
+    """Writes the typed critic view to session state without an ADK model call."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    state_key: str = "critique"
+    critic_mode: Literal["off", "shadow", "enforced"] = "off"
+    critique_payload: Optional[dict[str, Any]] = None
+
+    @property
+    def output_key(self) -> str:
+        return self.state_key
+
+    async def _run_async_impl(self, ctx: "InvocationContext") -> AsyncGenerator[Event, None]:
+        payload = render_critic_view(self.critic_mode, self.critique_payload)
+        payload_text = json.dumps(payload, sort_keys=True)
+        yield Event(
+            author=self.name,
+            content=types.Content(role="model", parts=[types.Part(text=payload_text)]),
+            actions=EventActions(state_delta={self.state_key: payload}),
+        )
+
+
+def render_critic_view(
+    critic_mode: Literal["off", "shadow", "enforced"],
+    critique_payload: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Render the deterministic typed critic view payload for session state."""
+    if critique_payload is not None:
+        return dict(critique_payload)
+    if critic_mode == "off":
+        return {"status": "skipped", "reason": "critic_mode_off"}
+    return {"status": "pending", "mode": critic_mode, "source": "typed_critic_view"}
 
 
 def render_analyst_view(
