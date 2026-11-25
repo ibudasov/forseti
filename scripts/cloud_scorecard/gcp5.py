@@ -14,7 +14,7 @@ from scripts.cloud_scorecard.model import Check, Cost, Outcome
 GROUP = "GCP-5"
 JOB_NAME = "forseti-daily-refresh"
 SCHEDULER_NAME = "forseti-daily-refresh"
-EXPECTED_SCHEDULE = "30 18 * * 1-5"
+EXPECTED_SCHEDULE = "30 18 * * *"
 EXPECTED_TIME_ZONE = "America/New_York"
 EXPECTED_JOB_SA = "forseti-jobs"
 EXPECTED_SCHEDULER_SA = "forseti-scheduler"
@@ -228,12 +228,26 @@ def _list_executions(env: Environment) -> list[dict[str, Any]]:
     ]) or []
 
 
+def _is_trading_day_execution(execution: dict[str, Any]) -> bool:
+    """Heartbeat-only runs on weekends/holidays must not mask a failed trading-day run."""
+    timestamp = _execution_timestamp(execution)
+    if timestamp is None:
+        return True
+    pd = import_module("pandas")
+    session_date = timestamp.astimezone(ET_ZONE).date()
+    return bool(_xnys_calendar().is_session(pd.Timestamp(session_date)))
+
+
+def _filter_trading_day_executions(executions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [ex for ex in executions if _is_trading_day_execution(ex)]
+
+
 def check_scheduled_runs(env: Environment) -> Outcome:
     executions = _list_executions(env)
     if not executions:
         return Outcome.pending(f"job {JOB_NAME} has not run yet")
 
-    scheduled = _filter_scheduled_executions(env, executions)
+    scheduled = _filter_trading_day_executions(_filter_scheduled_executions(env, executions))
     if not scheduled:
         return Outcome.pending("no scheduled refresh executions recorded yet (manual runs excluded)")
 
@@ -265,7 +279,11 @@ def _latest_expected_scheduled_run(now_utc: datetime) -> datetime:
 
 def check_freshness(env: Environment, *, now: datetime | None = None) -> Outcome:
     executions = _list_executions(env)
-    scheduled = _filter_scheduled_executions(env, executions) if executions else []
+    scheduled = (
+        _filter_trading_day_executions(_filter_scheduled_executions(env, executions))
+        if executions
+        else []
+    )
     successful_times = [
         ts
         for ex in scheduled

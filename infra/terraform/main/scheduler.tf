@@ -5,8 +5,8 @@ locals {
 resource "google_cloud_scheduler_job" "daily_refresh" {
   name             = "forseti-daily-refresh"
   region           = var.region
-  description      = "Trigger Forseti daily market-data and RAG refresh after US market close"
-  schedule         = "30 18 * * 1-5"
+  description      = "Trigger Forseti daily refresh after US market close; non-trading days only emit a market_closed heartbeat"
+  schedule         = "30 18 * * *"
   time_zone        = "America/New_York"
   attempt_deadline = "320s"
 

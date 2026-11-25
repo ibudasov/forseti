@@ -38,7 +38,7 @@ run "workload_plan" {
       google_cloud_run_v2_job.daily_refresh.name == "forseti-daily-refresh" &&
       google_cloud_run_v2_job.daily_refresh.template[0].template[0].max_retries == 1 &&
       google_cloud_run_v2_job.daily_refresh.template[0].template[0].timeout == "3600s" &&
-      google_cloud_scheduler_job.daily_refresh.schedule == "30 18 * * 1-5" &&
+      google_cloud_scheduler_job.daily_refresh.schedule == "30 18 * * *" &&
       google_cloud_scheduler_job.daily_refresh.time_zone == "America/New_York"
     )
     error_message = "The daily-refresh job and Cloud Scheduler must match the GCP-5 specification."
