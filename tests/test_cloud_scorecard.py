@@ -1085,6 +1085,51 @@ class TestGcp5Checks:
         tuesday_now = dt(2026, 11, 24, 15, 0, tzinfo=tz.utc)
         assert gcp5.check_freshness(env, now=tuesday_now).status is Status.FAIL
 
+    def test_weekend_heartbeats_do_not_mask_failed_trading_day_run(self):
+        from datetime import datetime as dt, timezone as tz
+
+        scheduler_sa = f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"
+
+        def execution(name: str, completed: str, ok: bool) -> dict:
+            return {
+                "metadata": {"name": name, "annotations": {"run.googleapis.com/creator": scheduler_sa}},
+                "status": {
+                    "completionTime": completed,
+                    "conditions": [{"type": "Completed", "status": "True" if ok else "False"}],
+                },
+            }
+
+        thursday = execution("thu", "2026-11-19T23:35:00+00:00", True)
+        friday_failed = execution("fri", "2026-11-20T23:35:00+00:00", False)
+        saturday = execution("sat", "2026-11-21T23:31:00+00:00", True)
+        sunday = execution("sun", "2026-11-22T23:31:00+00:00", True)
+        env = environment({
+            (
+                "run", "jobs", "executions", "list"
+            ): [sunday, saturday, friday_failed, thursday],
+            ("logging", "read"): [],
+        })
+        # Saturday/Sunday market_closed successes are ignored; Friday's failure surfaces.
+        assert gcp5.check_scheduled_runs(env).status is Status.FAIL
+
+        healthy = environment({
+            ("run", "jobs", "executions", "list"): [
+                sunday, saturday, execution("fri-ok", "2026-11-20T23:35:00+00:00", True), thursday,
+            ],
+            ("logging", "read"): [],
+        })
+        assert gcp5.check_scheduled_runs(healthy).status is Status.PASS
+        sunday_now = dt(2026, 11, 22, 20, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(healthy, now=sunday_now).status is Status.PASS
+
+        # Only weekend heartbeats after a failed Friday: freshness must not treat them as coverage.
+        only_weekend = environment({
+            ("run", "jobs", "executions", "list"): [sunday, saturday],
+            ("logging", "read"): [],
+        })
+        monday_now = dt(2026, 11, 24, 15, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(only_weekend, now=monday_now).status is not Status.PASS
+
     def test_artifacts_bucket_check(self):
         bucket = {
             "iamConfiguration": {

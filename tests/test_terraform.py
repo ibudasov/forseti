@@ -292,7 +292,7 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
         "refresh_missing": (
             "daily_refresh_status",
             "cloud_run_job",
-            r'metric.label.status=\"success\"',
+            r'metric.label.status=one_of(\"success\",\"market_closed\")',
         ),
         "daily_llm_cost": ("analysis_cost_usd", "cloud_run_revision", None),
         "unpriced_run": (
@@ -336,9 +336,19 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
     refresh_missing = monitoring[
         refresh_missing_start:next_alert_start if next_alert_start != -1 else None
     ]
-    assert 'display_name = "No successful refresh in 23h30m"' in refresh_missing
-    assert 'duration = "84600s"' in refresh_missing
-    assert "93600s" not in refresh_missing
+    assert 'display_name = "No refresh heartbeat in 25h"' in refresh_missing
+    assert "condition_threshold" in refresh_missing
+    assert "condition_absent" not in refresh_missing
+    assert 'metric.label.status=one_of(\\"success\\",\\"market_closed\\")' in refresh_missing
+    assert 'comparison              = "COMPARISON_LT"' in refresh_missing
+    assert "EVALUATION_MISSING_DATA_ACTIVE" in refresh_missing
+    assert 'alignment_period     = "90000s"' in refresh_missing  # 25h log-metric maximum
+    assert 'cross_series_reducer = "REDUCE_SUM"' in refresh_missing
+    assert "84600s" not in refresh_missing
+
+    scheduler = (ROOT / "infra/terraform/main/scheduler.tf").read_text()
+    assert 'schedule         = "30 18 * * *"' in scheduler
+    assert 'time_zone        = "America/New_York"' in scheduler
 
 
 def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
@@ -485,7 +495,7 @@ def test_daily_refresh_job_and_scheduler_configuration():
     assert 'EARNINGS_FALLBACK_ENABLED = "true"' in run_jobs
 
     assert 'resource "google_cloud_scheduler_job" "daily_refresh"' in scheduler
-    assert 'schedule         = "30 18 * * 1-5"' in scheduler
+    assert 'schedule         = "30 18 * * *"' in scheduler
     assert 'time_zone        = "America/New_York"' in scheduler
     assert "retry_count = 1" in scheduler
 

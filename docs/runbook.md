@@ -62,6 +62,21 @@ API revision (expand, then contract in a later release). See
 - Alpha Vantage key: add a new version of `forseti-alpha-vantage-api-key`,
   redeploy, disable the old version.
 
+## Refresh missing alert
+
+"Forseti daily refresh missing" means no `success` or `market_closed`
+`daily_refresh_status` event in 25h. Triage (read-only):
+
+```bash
+gcloud run jobs executions list --job forseti-daily-refresh --region europe-west4 --limit 5
+gcloud logging read 'resource.type="cloud_run_job" AND jsonPayload.event="daily_refresh_status"' --freshness=3d --limit 5 --format="table(timestamp,jsonPayload.status)"
+```
+
+If the scheduler did not trigger the job, check `forseti-daily-refresh` in Cloud
+Scheduler is enabled. Otherwise comment `/rerun-refresh` on #121. The only
+expected false positive is the November daylight-saving fall-back Sunday, when
+18:30 ET runs are 25h apart in UTC; it clears at the next run.
+
 ## Re-running or backfilling the refresh
 
 Routine reruns (respecting the `XNYS` trading calendar) are triggered by

@@ -221,15 +221,30 @@ resource "google_monitoring_alert_policy" "refresh_missing" {
   notification_channels = [google_monitoring_notification_channel.owner_email.name]
 
   conditions {
-    display_name = "No successful refresh in 23h30m"
-    condition_absent {
-      filter   = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND resource.type=\"cloud_run_job\" AND metric.label.status=\"success\""
-      duration = "84600s"
+    display_name = "No refresh heartbeat in 25h"
+    # An absence condition caps at 23h30m, shorter than the 24h job cadence. Use a
+    # 25h threshold window (the log-based-metric maximum) over success and
+    # market_closed events; the scheduler runs daily so a heartbeat always exists.
+    condition_threshold {
+      filter                  = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND resource.type=\"cloud_run_job\" AND resource.label.job_name=\"forseti-daily-refresh\" AND metric.label.status=one_of(\"success\",\"market_closed\")"
+      comparison              = "COMPARISON_LT"
+      threshold_value         = 1
+      duration                = "0s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_ACTIVE"
       aggregations {
-        alignment_period   = "300s"
-        per_series_aligner = "ALIGN_SUM"
+        alignment_period     = "90000s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+      trigger {
+        count = 1
       }
     }
+  }
+
+  documentation {
+    content   = "No success or market_closed refresh event in the last 25h. Check Cloud Run job executions and the daily_refresh_status log, then see docs/runbook.md (Refresh missing alert)."
+    mime_type = "text/markdown"
   }
 }
 
