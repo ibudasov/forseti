@@ -265,6 +265,23 @@ def test_apply_workflow_applies_saved_plan_without_destroy_gate():
     assert "allow_destroy" not in workflow
 
 
+def test_pre_approval_plan_runs_before_apply_and_writes_summary():
+    workflow = (ROOT / ".github/workflows/infra.yml").read_text()
+    identities = json.loads((ROOT / "infra/terraform/bootstrap/identities.json").read_text())
+
+    assert "name: Pre-approval workload plan" in workflow
+    assert "needs: [checks, changes, plan-apply]" in workflow
+    assert "needs.plan-apply.result == 'success'" in workflow
+    assert "terraform -chdir=\"$directory\" plan -input=false -lock=false -no-color -out=preview.tfplan" in workflow
+    assert (
+        "python3 -m scripts.terraform_drift_summary "
+        "--title \"Pre-approval workload plan for $short_sha\""
+    ) in workflow
+    assert "[Review full plan below](#full-terraform-plan)" in workflow
+    assert "rm -f infra/terraform/main/preview.tfplan plan.txt plan-error.txt plan-show-error.txt" in workflow
+    assert "push" in identities["service_accounts"]["forseti-tf-plan"]["workflow"]["events"]
+
+
 def test_drift_workflow_summarizes_redacted_plan_and_removes_captures():
     workflow = (ROOT / ".github/workflows/infra.yml").read_text()
 
@@ -484,10 +501,32 @@ def test_drift_summary_reports_resource_actions_without_private_values():
     )
 
     assert result.returncode == 0, result.stderr
+    assert "Plan: 2 to create, 0 to update, 1 to replace, 0 to delete." in result.stdout
     assert "| google_cloud_run_v2_job_iam_member | create | 2 |" in result.stdout
     assert "| google_secret_manager_secret | replace | 1 |" in result.stdout
     assert "private-job" not in result.stdout
     assert "private-secret" not in result.stdout
+
+
+def test_drift_summary_supports_custom_title():
+    plan = {"resource_changes": []}
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/terraform_drift_summary.py"),
+            "--title",
+            "Pre-approval workload plan for abc1234",
+        ],
+        input=json.dumps(plan),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "## Pre-approval workload plan for abc1234" in result.stdout
+    assert "No resource changes to summarize." in result.stdout
 
 
 def test_drift_summary_rejects_invalid_json():

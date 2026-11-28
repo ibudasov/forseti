@@ -231,9 +231,12 @@ code with a read-only cloud identity: review it before dispatching.
 Re-dispatch after every change; a comment is evidence for its recorded SHA,
 not necessarily the current PR head.
 
-Pushes changing workloads on `main`, or a manual `apply`, wait for approval
-in `gcp-infra`, then plan and apply **the same saved plan**, including plans
-that delete or replace resources.
+Pushes changing workloads on `main`, or a manual `apply`, first run a read-only
+`plan-apply` job (`forseti-tf-plan`) that writes a concise plan summary and a
+link to the expandable full plan in the workflow run summary. After that
+preview succeeds, `apply` waits for approval in `gcp-infra`, then plans and
+applies **the same saved plan**, including plans that delete or replace
+resources.
 Apply concurrency is `terraform-main`, with cancellation disabled. Because
 `cancel-in-progress: false` holds the `terraform-main` slot while an `apply`
 job waits for `gcp-infra` review, approve or reject a pending `gcp-infra`

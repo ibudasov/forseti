@@ -163,11 +163,74 @@ jobs:
         if: always()
         run: rm -f plan.txt plan-error.txt
 
-  apply:
-    name: Approved workload apply
+  plan-apply:
+    name: Pre-approval workload plan
     needs: [checks, changes]
     if: >-
       always() && needs.checks.result == 'success' && github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && needs.changes.outputs.workloads == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.operation == 'apply'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_owner_email: ${{ secrets.OWNER_EMAIL }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TF_PLAN_SA }}
+      - name: Summarize workload plan before approval
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          directory=infra/terraform/main
+          short_sha="${GITHUB_SHA:0:7}"
+          commit_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          terraform -chdir="$directory" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
+          if ! terraform -chdir="$directory" plan -input=false -lock=false -no-color -out=preview.tfplan > plan.txt 2> plan-error.txt; then
+            echo "::error::Cloud plan failed; raw provider errors are withheld to protect private values."
+            exit 1
+          fi
+          if ! terraform -chdir="$directory" show -json preview.tfplan 2>plan-show-error.txt \
+            | python3 -m scripts.terraform_drift_summary --title "Pre-approval workload plan for $short_sha" >> "$GITHUB_STEP_SUMMARY"; then
+            echo "::error::Could not summarize plan; raw plan details are withheld."
+            exit 1
+          fi
+          {
+            echo
+            echo "[Review full plan below](#full-terraform-plan) · [View commit \`$short_sha\`]($commit_url)"
+            echo
+            echo "### Full Terraform plan"
+            echo
+            echo "<details>"
+            echo "<summary>Expand full plan output</summary>"
+            echo
+            echo '```'
+            head -c 58000 plan.txt
+            echo
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove runner-local plan captures
+        if: always()
+        run: rm -f infra/terraform/main/preview.tfplan plan.txt plan-error.txt plan-show-error.txt
+
+  apply:
+    name: Approved workload apply
+    needs: [checks, changes, plan-apply]
+    if: >-
+      always() && needs.checks.result == 'success' && needs.plan-apply.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
       ((github.event_name == 'push' && needs.changes.outputs.workloads == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.operation == 'apply'))
     runs-on: ubuntu-latest
