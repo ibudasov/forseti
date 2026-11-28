@@ -19,7 +19,7 @@
           "status": "passed",
           "points_awarded": 1,
           "points_available": 1,
-          "metric_ids": ["close_vs_sma50:2026-09-08"],
+          "metric_ids": ["close:2026-09-08", "sma_50:2026-09-08"],
           "explanation": "close is above the 50-day SMA"
         },
         {
@@ -27,7 +27,7 @@
           "status": "passed",
           "points_awarded": 1,
           "points_available": 1,
-          "metric_ids": ["close_vs_sma200:2026-09-08"],
+          "metric_ids": ["close:2026-09-08", "sma_200:2026-09-08"],
           "explanation": "close is above the 200-day SMA"
         },
         {
@@ -35,7 +35,7 @@
           "status": "passed",
           "points_awarded": 1,
           "points_available": 1,
-          "metric_ids": ["rsi_healthy:2026-09-08"],
+          "metric_ids": ["rsi_14:2026-09-08"],
           "explanation": "RSI-14 is within the healthy 40-65 band"
         },
         {
@@ -50,22 +50,29 @@
       "warnings": [],
       "metrics": [
         {
-          "metric_id": "close_vs_sma50:2026-09-08",
-          "metric_name": "close_vs_sma50",
-          "value": "1.05",
-          "unit": "ratio",
+          "metric_id": "close:2026-09-08",
+          "metric_name": "close",
+          "value": "112.00",
+          "unit": "price",
           "as_of_date": "2026-09-08"
         },
         {
-          "metric_id": "close_vs_sma200:2026-09-08",
-          "metric_name": "close_vs_sma200",
-          "value": "1.12",
-          "unit": "ratio",
+          "metric_id": "sma_50:2026-09-08",
+          "metric_name": "sma_50",
+          "value": "106.67",
+          "unit": "price",
           "as_of_date": "2026-09-08"
         },
         {
-          "metric_id": "rsi_healthy:2026-09-08",
-          "metric_name": "rsi_healthy",
+          "metric_id": "sma_200:2026-09-08",
+          "metric_name": "sma_200",
+          "value": "100.00",
+          "unit": "price",
+          "as_of_date": "2026-09-08"
+        },
+        {
+          "metric_id": "rsi_14:2026-09-08",
+          "metric_name": "rsi_14",
           "value": "55.00",
           "unit": "rsi_points",
           "as_of_date": "2026-09-08"
