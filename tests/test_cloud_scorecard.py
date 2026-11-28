@@ -818,7 +818,7 @@ class TestMarkdown:
         markdown = self.render()
 
         assert "Commit `abc1234` · Cloud Run revision `forseti-api-00012-abc`" in markdown
-        assert "✅ 16 · ❌ 2 · ⏳ 13 · ➖ 2" in markdown
+        assert "✅ 16 · ❌ 2 · ⏳ 14 · ➖ 2" in markdown
 
     def test_full_run_includes_paid_checks(self):
         assert "➖ 0" in self.render(include_paid=True)
@@ -1085,6 +1085,51 @@ class TestGcp5Checks:
         tuesday_now = dt(2026, 11, 24, 15, 0, tzinfo=tz.utc)
         assert gcp5.check_freshness(env, now=tuesday_now).status is Status.FAIL
 
+    def test_weekend_heartbeats_do_not_mask_failed_trading_day_run(self):
+        from datetime import datetime as dt, timezone as tz
+
+        scheduler_sa = f"forseti-scheduler@{PROJECT}.iam.gserviceaccount.com"
+
+        def execution(name: str, completed: str, ok: bool) -> dict:
+            return {
+                "metadata": {"name": name, "annotations": {"run.googleapis.com/creator": scheduler_sa}},
+                "status": {
+                    "completionTime": completed,
+                    "conditions": [{"type": "Completed", "status": "True" if ok else "False"}],
+                },
+            }
+
+        thursday = execution("thu", "2026-11-19T23:35:00+00:00", True)
+        friday_failed = execution("fri", "2026-11-20T23:35:00+00:00", False)
+        saturday = execution("sat", "2026-11-21T23:31:00+00:00", True)
+        sunday = execution("sun", "2026-11-22T23:31:00+00:00", True)
+        env = environment({
+            (
+                "run", "jobs", "executions", "list"
+            ): [sunday, saturday, friday_failed, thursday],
+            ("logging", "read"): [],
+        })
+        # Saturday/Sunday market_closed successes are ignored; Friday's failure surfaces.
+        assert gcp5.check_scheduled_runs(env).status is Status.FAIL
+
+        healthy = environment({
+            ("run", "jobs", "executions", "list"): [
+                sunday, saturday, execution("fri-ok", "2026-11-20T23:35:00+00:00", True), thursday,
+            ],
+            ("logging", "read"): [],
+        })
+        assert gcp5.check_scheduled_runs(healthy).status is Status.PASS
+        sunday_now = dt(2026, 11, 22, 20, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(healthy, now=sunday_now).status is Status.PASS
+
+        # Only weekend heartbeats after a failed Friday: freshness must not treat them as coverage.
+        only_weekend = environment({
+            ("run", "jobs", "executions", "list"): [sunday, saturday],
+            ("logging", "read"): [],
+        })
+        monday_now = dt(2026, 11, 24, 15, 0, tzinfo=tz.utc)
+        assert gcp5.check_freshness(only_weekend, now=monday_now).status is not Status.PASS
+
     def test_artifacts_bucket_check(self):
         bucket = {
             "iamConfiguration": {
@@ -1119,3 +1164,43 @@ class TestGcp5Checks:
             ("storage", "objects", "describe"): {"name": "reports/ingest/coverage-latest.json"},
         })
         assert gcp5.check_artifacts_bucket(env_snake).status is Status.PASS
+
+    def test_universe_coverage_reports_live_counts_from_api(self, monkeypatch):
+        payload = {
+            "universe_size": 20,
+            "coverage": {
+                "tickers_with_200_bars": 18,
+                "tickers_with_fundamentals": 16,
+                "tickers_with_earnings_events": 14,
+                "tickers_with_document_chunks": 12,
+                "latest_macro_daily_date": "2026-11-20",
+            },
+            "blocked_by": {"passed": 3},
+        }
+        monkeypatch.setattr(gcp4, "_identity_token", lambda audience: "token")
+        monkeypatch.setattr(gcp4, "_http_get", lambda url, token=None: (200, json.dumps(payload)))
+
+        outcome = gcp5.check_universe_coverage(environment({API_SERVICE: api_service()}))
+
+        assert outcome.status is Status.PASS
+        assert "universe=20" in outcome.detail
+        assert "200+ bars=18/20" in outcome.detail
+        assert "trade-passed=3" in outcome.detail
+        assert "macro=2026-11-20" in outcome.detail
+
+    def test_universe_coverage_fails_when_no_tickers_have_200_bars(self, monkeypatch):
+        payload = {
+            "universe_size": 10,
+            "coverage": {"tickers_with_200_bars": 0},
+            "blocked_by": {"passed": 0},
+        }
+        monkeypatch.setattr(gcp4, "_identity_token", lambda audience: "token")
+        monkeypatch.setattr(gcp4, "_http_get", lambda url, token=None: (200, json.dumps(payload)))
+
+        outcome = gcp5.check_universe_coverage(environment({API_SERVICE: api_service()}))
+
+        assert outcome.status is Status.FAIL
+        assert "no tickers have 200+ price bars" in outcome.detail
+
+    def test_universe_coverage_pending_when_service_missing(self):
+        assert gcp5.check_universe_coverage(environment({API_SERVICE: None})).status is Status.PENDING

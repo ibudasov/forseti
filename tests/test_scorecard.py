@@ -19,6 +19,9 @@ from app.services.scorecard import (
     Scorecard,
     build_scorecard,
     compare,
+    extract_fundamental_metrics,
+    extract_suite_metrics,
+    extract_synthesizer_metrics,
 )
 from app.services.screening import run_screening
 
@@ -26,7 +29,7 @@ from app.services.screening import run_screening
 # body) registers app.db.models on SQLModel.metadata *before* the db_engine
 # fixture's drop_all/create_all runs, matching the convention every other
 # DB-backed test file in this suite relies on.
-from scripts.scorecard import seed_fixture
+from scripts.scorecard import run_offline_agent_evals, seed_fixture
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "scorecard" / "universe.json"
 
@@ -140,6 +143,8 @@ class TestScorecardSerialization:
             "no_trade_count",
             "zero_confidence_count",
             "warning_counts",
+            "blocked_by_counts",
+            "agent_evals",
         }
 
     def test_as_json_round_trips_all_core_fields(self):
@@ -305,3 +310,129 @@ class TestScorecardFixtureUniverse:
         second = build_scorecard(run_screening(engine=db_engine, today=today)).as_json()
 
         assert first == second
+
+    def test_fixture_populates_blocked_by_counts_from_debug_reason(self, db_engine):
+        fixture = json.loads(FIXTURE_PATH.read_text())
+
+        today = seed_fixture(db_engine, fixture)
+        scorecard = build_scorecard(run_screening(engine=db_engine, today=today))
+
+        assert scorecard.blocked_by_counts.get("passed") == scorecard.trade_count
+        assert sum(scorecard.blocked_by_counts.values()) == scorecard.universe_size
+
+
+class TestAgentEvalsInScorecard:
+    def test_extractors_normalize_eval_reports(self):
+        synth = extract_synthesizer_metrics(
+            {
+                "total_cases": 10,
+                "metrics": {
+                    "valid_schema_rate": 0.9,
+                    "citation_precision": 1.0,
+                    "numeric_claim_accuracy": 0.95,
+                    "downgrade_only_compliance": 1.0,
+                    "fallback_rate": 0.2,
+                },
+                "promotion_count": 0,
+                "money_field_count": 0,
+                "rejected_without_fallback_count": 0,
+            }
+        )
+        assert synth["valid_schema_rate"] == 0.9
+        assert synth["fallback_rate"] == 0.2
+
+        fund = extract_fundamental_metrics(
+            {
+                "metrics": {
+                    "case_count": 12,
+                    "structured_output_validity_rate": 1.0,
+                    "citation_validity_rate": 0.95,
+                    "material_claim_citation_coverage": 0.9,
+                    "unsupported_claim_rate": 0.05,
+                    "agreement_rate": 0.85,
+                    "hard_blocker_violation_count": 0,
+                    "risk_field_mutation_count": 0,
+                    "neutral_fallback_rate": 0.1,
+                }
+            }
+        )
+        assert fund["case_count"] == 12
+        assert fund["agreement_rate"] == 0.85
+
+        suite = extract_suite_metrics({"total_cases": 10, "passed_cases": 9, "failed_cases": 1})
+        assert suite["pass_rate"] == 0.9
+
+    def test_compare_detects_agent_eval_regressions_and_improvements(self):
+        base = Scorecard(
+            engine_version="v1.rules.0",
+            universe_size=6,
+            analyzed_count=6,
+            failed_count=0,
+            trade_count=1,
+            watchlist_count=3,
+            no_trade_count=2,
+            zero_confidence_count=3,
+            warning_counts={},
+            blocked_by_counts={"passed": 1, "hard_veto/rsi_overbought": 1},
+            agent_evals={
+                "synthesizer": {"citation_precision": 1.0, "fallback_rate": 0.3},
+                "critic": {"pass_rate": 1.0, "failed_cases": 0},
+            },
+        )
+        curr = Scorecard(
+            engine_version="v1.rules.0",
+            universe_size=6,
+            analyzed_count=6,
+            failed_count=0,
+            trade_count=1,
+            watchlist_count=3,
+            no_trade_count=2,
+            zero_confidence_count=3,
+            warning_counts={},
+            blocked_by_counts={"passed": 1, "hard_veto/rsi_overbought": 2},
+            agent_evals={
+                "synthesizer": {"citation_precision": 0.8, "fallback_rate": 0.1},
+                "critic": {"pass_rate": 1.0, "failed_cases": 0},
+            },
+        )
+
+        delta = compare(base, curr)
+
+        assert delta.has_regressions
+        assert [c.name for c in delta.regressions] == ["synthesizer.citation_precision"]
+        assert [c.name for c in delta.improvements] == ["synthesizer.fallback_rate"]
+        assert "### Baseline Comparison" in delta.as_markdown()
+
+    def test_markdown_includes_agent_eval_and_frozen_fixture_sections(self):
+        response = _screening_response(
+            [
+                ScreeningItem(
+                    ticker="A",
+                    sector_tag="ai",
+                    status="ok",
+                    decision="trade",
+                    confidence=0.9,
+                    debug_reason="checklist/checklist_passed: score 10/11",
+                )
+            ]
+        )
+        scorecard = build_scorecard(
+            response,
+            agent_evals={"critic": {"total_cases": 5, "passed_cases": 5, "failed_cases": 0, "pass_rate": 1.0}},
+        )
+
+        markdown = scorecard.as_markdown()
+
+        assert "### Agent & Synthesizer Offline Evals" in markdown
+        assert "### Deterministic Engine Regression (Frozen Fixture)" in markdown
+        assert "blocked_by: `passed`" in markdown
+        assert "`critic`" in markdown
+
+    def test_run_offline_agent_evals_executes_all_four_suites(self):
+        evals = run_offline_agent_evals()
+
+        assert set(evals) == {"synthesizer", "fundamental", "technical", "critic"}
+        assert evals["synthesizer"]["total_cases"] > 0
+        assert evals["fundamental"]["case_count"] > 0
+        assert evals["technical"]["total_cases"] > 0
+        assert evals["critic"]["total_cases"] > 0

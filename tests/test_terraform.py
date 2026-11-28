@@ -309,7 +309,7 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
         "refresh_missing": (
             "daily_refresh_status",
             "cloud_run_job",
-            r'metric.label.status=\"success\"',
+            r'metric.label.status=one_of(\"success\",\"market_closed\")',
         ),
         "daily_llm_cost": ("analysis_cost_usd", "cloud_run_revision", None),
         "unpriced_run": (
@@ -353,9 +353,44 @@ def test_custom_metric_alerts_wait_for_their_logging_metrics():
     refresh_missing = monitoring[
         refresh_missing_start:next_alert_start if next_alert_start != -1 else None
     ]
-    assert 'display_name = "No successful refresh in 23h30m"' in refresh_missing
-    assert 'duration = "84600s"' in refresh_missing
-    assert "93600s" not in refresh_missing
+    assert 'display_name = "No refresh heartbeat in 25h"' in refresh_missing
+    assert "condition_threshold" in refresh_missing
+    assert "condition_absent" not in refresh_missing
+    assert 'metric.label.status=one_of(\\"success\\",\\"market_closed\\")' in refresh_missing
+    assert 'comparison              = "COMPARISON_LT"' in refresh_missing
+    assert 'duration                = "60s"' in refresh_missing
+    assert "EVALUATION_MISSING_DATA_ACTIVE" in refresh_missing
+    assert 'alignment_period     = "90000s"' in refresh_missing  # 25h log-metric maximum
+    assert 'cross_series_reducer = "REDUCE_SUM"' in refresh_missing
+    assert "84600s" not in refresh_missing
+
+    scheduler = (ROOT / "infra/terraform/main/scheduler.tf").read_text()
+    assert 'schedule         = "30 18 * * *"' in scheduler
+    assert 'time_zone        = "America/New_York"' in scheduler
+
+
+def test_threshold_alerts_with_evaluation_missing_data_use_nonzero_duration():
+    monitoring = (ROOT / "infra/terraform/main/monitoring.tf").read_text()
+    blocks = monitoring.split('\nresource "google_monitoring_alert_policy" ')[1:]
+    checked = 0
+    for block in blocks:
+        if "evaluation_missing_data" not in block:
+            continue
+        checked += 1
+        durations = [
+            line.split("=", 1)[1].strip().strip('"')
+            for line in block.splitlines()
+            if line.strip().startswith("duration") and "=" in line
+        ]
+        assert durations, "Missing duration in alert policy setting evaluation_missing_data"
+        for duration in durations:
+            assert duration.endswith("s"), f"Expected seconds duration, got {duration!r}"
+            seconds = int(duration[:-1])
+            assert seconds > 0 and seconds % 60 == 0, (
+                f"Cloud Monitoring requires a non-zero multiple of 60s when "
+                f"evaluation_missing_data is set, got {duration!r}"
+            )
+    assert checked >= 1
 
 
 def test_daily_llm_cost_alert_sums_distribution_totals_over_rolling_day():
@@ -524,7 +559,7 @@ def test_daily_refresh_job_and_scheduler_configuration():
     assert 'EARNINGS_FALLBACK_ENABLED = "true"' in run_jobs
 
     assert 'resource "google_cloud_scheduler_job" "daily_refresh"' in scheduler
-    assert 'schedule         = "30 18 * * 1-5"' in scheduler
+    assert 'schedule         = "30 18 * * *"' in scheduler
     assert 'time_zone        = "America/New_York"' in scheduler
     assert "retry_count = 1" in scheduler
 

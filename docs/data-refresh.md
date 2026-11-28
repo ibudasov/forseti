@@ -4,7 +4,7 @@ Forseti refreshes structured market data and RAG documents automatically after e
 
 ## Schedule and Calendar Gate
 
-- **Cloud Scheduler**: `forseti-daily-refresh` runs at `30 18 * * 1-5` (`America/New_York`, DST-aware) with `retry_count = 1`.
+- **Cloud Scheduler**: `forseti-daily-refresh` runs **daily** at `30 18 * * *` (`America/New_York`, DST-aware) with `retry_count = 1`. Non-trading days only emit a `market_closed` heartbeat, which the missing-refresh alert counts as healthy (see [observability](observability.md)).
 - **Target**: `POST` to the Cloud Run v2 `forseti-daily-refresh:run` endpoint using `forseti-scheduler` OAuth credentials.
 - **Trading-calendar gate**: `python -m app.jobs.daily_refresh` checks the `XNYS` calendar (`exchange-calendars`) for today's `America/New_York` date. On US market holidays or weekends, the job logs `market_closed`, emits `daily_refresh_status` (`status="market_closed"`), and exits `0` without ingesting. Passing `--force` overrides this gate.
 

@@ -5,7 +5,7 @@ DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then echo "
 POSTGRES_TEST_DB ?= forseti_test
 TEST_DATABASE_URL ?= postgresql+psycopg2://$${POSTGRES_USER:-user}:$${POSTGRES_PASSWORD:-password}@postgresql:5432/$(POSTGRES_TEST_DB)
 
-.PHONY: lock check-compose reports-dir preflight-dir help migrate housekeeping migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze cloud-proxy cloud-analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline cloudsql-proxy cloud-db-shell
+.PHONY: lock check-compose reports-dir preflight-dir help migrate housekeeping migration db-shell test-runtime test test-live-preflight replay ingest ingest-earnings ingest-rag rag-coverage analyze cloud-proxy cloud-analyze fundamental-context technical-context critique-context assess-fundamentals assess-technicals review-draft synthesize-draft eval-synthesizer eval-synthesizer-live eval-fundamental-agent eval-fundamental-agent-live fundamental-shadow-report eval-critic eval-critic-live critic-shadow-report critic-shadow-batch eval-technical-agent eval-technical-agent-live technical-shadow-report technical-backtest technical-shadow-batch trust-e2e trust-consistency live-preflight gcloud-login cloud-logout up down adk-web lint typecheck check scorecard scorecard-baseline live-scorecard cloudsql-proxy cloud-db-shell
 
 check-compose:
 	@if [ -z "$(DOCKER_COMPOSE)" ]; then \
@@ -69,8 +69,9 @@ help:
 	@echo "  make lint             # Run flake8 checks"
 	@echo "  make typecheck        # Run mypy checks"
 	@echo "  make check            # Run lint and typecheck"
-	@echo "  make scorecard        # Compute the product scorecard and fail on regression"
+	@echo "  make scorecard        # Compute the PR product scorecard (agent evals + engine regression) and fail on regression"
 	@echo "  make scorecard-baseline  # Rewrite docs/scorecard-baseline.json (explicit, reviewable diff)"
+	@echo "  make live-scorecard   # Compute the live product scorecard from the real database (coverage + shadow + backtest)"
 
 migrate: check-compose
 	$(DOCKER_COMPOSE) run --rm --build app python -m app.jobs.housekeeping
@@ -495,8 +496,11 @@ scorecard: check-compose
 	@# image earlier in the pipeline, and rebuilding here would reprint Docker's
 	@# build log into the scorecard output that gets posted as a PR comment.
 	@# `docker compose run` builds the image automatically if it is missing.
-	$(DOCKER_COMPOSE) run --rm \
+	$(DOCKER_COMPOSE) run --rm -T \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
+		-e SYNTHESIZER_CONTRACT=legacy \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/docs:/app/docs" \
@@ -507,14 +511,25 @@ scorecard: check-compose
 			--fail-on-regression
 
 scorecard-baseline: check-compose
-	$(DOCKER_COMPOSE) run --rm \
+	$(DOCKER_COMPOSE) run --rm -T \
 		-e TEST_DATABASE_URL=$(TEST_DATABASE_URL) \
+		-e FUNDAMENTAL_AGENT_MODE=off \
+		-e TECHNICAL_AGENT_MODE=off \
+		-e SYNTHESIZER_CONTRACT=legacy \
 		-v "$$PWD/scripts:/app/scripts" \
 		-v "$$PWD/tests:/app/tests" \
 		-v "$$PWD/docs:/app/docs" \
 		app python -m scripts.scorecard \
 			--fixture tests/fixtures/scorecard/universe.json \
-			--json > docs/scorecard-baseline.json
+			--json \
+			--output docs/scorecard-baseline.json
+
+live-scorecard: check-compose
+	$(DOCKER_COMPOSE) run --rm \
+		--env-from-file .env \
+		-v "$$PWD/scripts:/app/scripts" \
+		-v "$$PWD/tests:/app/tests" \
+		app python -m scripts.live_scorecard --markdown
 
 CLOUD_SQL_INSTANCE ?= forseti-505116:europe-west4:forseti-pg
 

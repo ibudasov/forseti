@@ -56,10 +56,15 @@ distinguishes success from failure.
 The email alert channel notifies the configured owner for refresh failures or
 missing refreshes, API 5xx responses, Cloud SQL disk/connections thresholds,
 daily LLM cost over the configured USD threshold, and runs without priced
-model usage. The missing-refresh alert uses a 23h30m absence window, the maximum
-supported by Cloud Monitoring. GCP-5 must emit a refresh-status heartbeat at
-least once within each 23h30m window, including on non-trading days when no
-refresh work is scheduled, to avoid a weekend absence alert.
+model usage. The missing-refresh alert is a threshold condition over a 25h
+window (the maximum for log-based metrics; `condition_absent` stops at 23h30m,
+shorter than the 24h job cadence, and fired before every run). It counts
+`success` and `market_closed` `daily_refresh_status` events and opens when none
+arrive, treating missing data as a breach. Cloud Scheduler therefore runs the
+job **every day** at 18:30 New York time; weekends and holidays emit a cheap
+`market_closed` heartbeat. Known limitation: on the November daylight-saving
+fall-back Sunday, consecutive 18:30 ET runs are 25h apart in UTC, so one
+false alert per year is possible; it clears at the next run.
 
 The daily LLM cost alert keeps the `analysis_cost_usd` distribution metric and
 uses MQL's `sum_from()` to extract each distribution's total cost. It sums those

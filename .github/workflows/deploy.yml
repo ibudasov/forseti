@@ -1,4 +1,14 @@
 name: Deploy
+run-name: >-
+  ${{
+    github.event_name == 'workflow_dispatch'
+      && format('Deploy (manual by @{0})', github.actor)
+      || (
+        github.event.workflow_run.event == 'push'
+          && format('Deploy (after {0}): {1}', github.event.workflow_run.name, github.event.workflow_run.display_title)
+          || format('Deploy (after {0} {1})', github.event.workflow_run.name, github.event.workflow_run.event)
+      )
+  }}
 
 on:
   workflow_run:
