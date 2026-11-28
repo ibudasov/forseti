@@ -225,11 +225,13 @@ resource "google_monitoring_alert_policy" "refresh_missing" {
     # An absence condition caps at 23h30m, shorter than the 24h job cadence. Use a
     # 25h threshold window (the log-based-metric maximum) over success and
     # market_closed events; the scheduler runs daily so a heartbeat always exists.
+    # Cloud Monitoring requires a non-zero duration whenever evaluation_missing_data
+    # is set.
     condition_threshold {
       filter                  = "metric.type=\"logging.googleapis.com/user/forseti/daily_refresh_status\" AND resource.type=\"cloud_run_job\" AND resource.label.job_name=\"forseti-daily-refresh\" AND metric.label.status=one_of(\"success\",\"market_closed\")"
       comparison              = "COMPARISON_LT"
       threshold_value         = 1
-      duration                = "0s"
+      duration                = "60s"
       evaluation_missing_data = "EVALUATION_MISSING_DATA_ACTIVE"
       aggregations {
         alignment_period     = "90000s"
