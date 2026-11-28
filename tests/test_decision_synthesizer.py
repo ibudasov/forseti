@@ -8,14 +8,16 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.critique import AnalystFinding, AnalystView
+from app.schemas.critique import AnalystFinding, AnalystView, CritiqueObjection, CritiqueRevisionTarget
 from app.schemas.synthesis import DecisionSynthesisRequest
 from app.services.decision_synthesizer import (
+    PROMPT_VERSION,
     DecisionSynthesizer,
     ModelOutput,
     RetryableModelError,
     _response_schema,
     build_decision_synthesis_request,
+    build_decision_synthesizer_prompt,
     build_deterministic_fallback,
     render_decision_memo,
 )
@@ -272,3 +274,43 @@ def _response(request) -> str:
             "what_would_change": [],
         }
     )
+
+
+def test_revision_routing_fields_preserve_baseline_context_hash_and_render_prompt():
+    base_values = _request_values(baseline_decision="trade", allowed_decisions=["trade", "watchlist", "no_trade"])
+    omitted_req = build_decision_synthesis_request(**base_values)
+    empty_req = build_decision_synthesis_request(
+        **base_values,
+        critic_objections=[],
+        revision_objection_ids=[],
+        revision_targets=[],
+    )
+    assert omitted_req.context_hash == empty_req.context_hash
+    assert PROMPT_VERSION == "decision-synthesizer.v1"
+
+    routed_req = build_decision_synthesis_request(
+        **base_values,
+        critic_objections=[
+            CritiqueObjection(
+                objection_id="model:1",
+                category="unsupported_claim",
+                severity="medium",
+                source="model",
+                claim="Add RSI metric citation.",
+                metric_ids=["rsi:2026-09-08"],
+            )
+        ],
+        revision_objection_ids=["model:1"],
+        revision_targets=[
+            CritiqueRevisionTarget(
+                objection_id="model:1",
+                target="key_reasons",
+                action="add_citations",
+            )
+        ],
+    )
+    assert routed_req.context_hash != omitted_req.context_hash
+    prompt = build_decision_synthesizer_prompt(routed_req)
+    assert "Structured critic revision routing" in prompt
+    assert "model:1->key_reasons:add_citations" in prompt
+    assert "Objection [model:1]" in prompt

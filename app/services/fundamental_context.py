@@ -140,7 +140,12 @@ def build_fundamental_analysis_request(
         normalized_ticker,
         snapshot_at=context_snapshot_at,
         engine=engine,
-        retriever=retriever or _default_retriever(engine=engine, embedding_client=embedding_client),
+        retriever=retriever
+        or _default_retriever(
+            engine=engine,
+            embedding_client=embedding_client,
+            snapshot_at=context_snapshot_at,
+        ),
     )
     coverage = _build_coverage(
         deterministic_result=deterministic_result,
@@ -522,6 +527,7 @@ def _default_retriever(
     *,
     engine,
     embedding_client: Optional[EmbeddingClient] = None,
+    snapshot_at: datetime | None = None,
 ) -> RetrieveEvidenceChunks:
     client = embedding_client or _build_embedding_client()
 
@@ -537,6 +543,7 @@ def _default_retriever(
             embedding_client=client,
             top_k=top_k,
             source_types=list(source_types),
+            published_before=snapshot_at,
             engine=engine,
         )
 

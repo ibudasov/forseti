@@ -71,3 +71,19 @@ harder while offering no deterministic stop condition.
 
 Rejected because a guardrail that can be skipped by the same model stack it is
 supposed to check is not a guardrail.
+
+## Addendum (#217 / #213 & #216): Single-Call Critic, Structured Revision Routing & Post-Revision Gate
+
+- **Single-call Critic (#213)**: The `critic_guardrail` ADK slot no longer uses
+  a duplicate narrative `LlmAgent`. `CRITIC_MODE=off` records a `skipped` step
+  (`critic_mode_off`) with zero LLM calls and zero tokens; `shadow`/`enforced`
+  executes at most one `Critic().review()` LLM call per run, with zero redundant
+  ADK tokens enforced by `check_critic_step_zero_redundant_tokens` in
+  `app/trust/invariants.py`.
+- **Structured revision routing & zero-token post-revision gate (#216)**: On
+  `verdict == "revise"`, `CritiqueResponse` routes `revision_objection_ids` and
+  `revision_targets` into `DecisionSynthesisRequest` (`MAX_CRITIC_REVISIONS = 1`).
+  Every revised memo is re-verified via zero-token
+  `evaluate_deterministic_objections` (`evaluate_post_revision_policy`) before
+  finalizing, blocking risk-number mutations, promotions, or claim mismatches
+  without a second Critic LLM call.

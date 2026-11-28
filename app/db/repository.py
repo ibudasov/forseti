@@ -437,6 +437,7 @@ def similarity_search(
     source_types: Optional[List[SourceType]] = None,
     quality_tiers: Optional[List[SourceQualityTier]] = None,
     published_after: Optional[datetime] = None,
+    published_before: Optional[datetime] = None,
     engine=None,
 ) -> List[DocumentChunk]:
     """Return the *top_k* most similar chunks for *ticker*.
@@ -464,6 +465,11 @@ def similarity_search(
     if published_after is not None:
         stmt = stmt.where(
             sa.or_(table.c.published_at.is_(None), table.c.published_at >= published_after)
+        )
+
+    if published_before is not None:
+        stmt = stmt.where(
+            sa.or_(table.c.published_at.is_(None), table.c.published_at <= published_before)
         )
 
     stmt = stmt.order_by(

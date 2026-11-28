@@ -10,6 +10,7 @@ from app.schemas.technicals import TechnicalAgentEffect, TechnicalAgentVersionSt
 from app.trust.invariants import (
     CRITIC_OFF_ALLOWED_SKIPS,
     check_critic_shadow_persistence,
+    check_critic_step_zero_redundant_tokens,
     check_data_gate_warning_propagation,
     check_downgrade_only_behavior,
     check_fundamental_agent_authority,
@@ -533,3 +534,93 @@ def test_fundamental_step_zero_tokens_in_typed_mode_rejects_nonzero_tokens():
 
     assert [violation.code for violation in violations] == ["fundamental_typed_view_step_nonzero_tokens"]
     assert violations[0].details["token_usage"] == {"total_token_count": 42}
+
+
+def test_critic_step_zero_redundant_tokens_passes_for_single_call_and_skipped_zero_tokens():
+    completed_trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(
+                    sequence=4,
+                    agent_name="critic_guardrail",
+                    status="completed",
+                    output={"source": "typed_critic_view", "adk_token_usage": {}},
+                    token_usage={"prompt_token_count": 7, "total_token_count": 11},
+                )
+            ]
+        }
+    )
+    skipped_trace = _trace(critic_status="skipped", critic_reason="critic_mode_off")
+
+    assert check_critic_step_zero_redundant_tokens(completed_trace) == []
+    assert check_critic_step_zero_redundant_tokens(skipped_trace) == []
+
+
+def test_critic_step_zero_redundant_tokens_rejects_redundant_adk_tokens():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(sequence=1, agent_name="fundamental_analyst", status="completed"),
+                TraceStep(sequence=2, agent_name="technical_analyst", status="completed"),
+                TraceStep(sequence=3, agent_name="decision_synthesizer", status="completed"),
+                TraceStep(
+                    sequence=4,
+                    agent_name="critic_guardrail",
+                    status="completed",
+                    output={
+                        "source": "typed_critic_view",
+                        "adk_token_usage": {"total_token_count": 15},
+                    },
+                    token_usage={"total_token_count": 26},
+                ),
+            ]
+        }
+    )
+
+    violations = check_critic_step_zero_redundant_tokens(trace)
+
+    assert [violation.code for violation in violations] == ["critic_redundant_adk_tokens"]
+    assert violations[0].details["adk_token_usage"] == {"total_token_count": 15}
+    aggregated = evaluate_agentic_invariants(
+        deterministic_response=_response(), agentic_response=_response(), trace=trace
+    )
+    assert "critic_redundant_adk_tokens" in {violation.code for violation in aggregated}
+
+
+def test_critic_step_zero_redundant_tokens_rejects_nonzero_tokens_when_skipped():
+    trace = _trace().model_copy(
+        update={
+            "steps": [
+                TraceStep(sequence=1, agent_name="fundamental_analyst", status="completed"),
+                TraceStep(sequence=2, agent_name="technical_analyst", status="completed"),
+                TraceStep(sequence=3, agent_name="decision_synthesizer", status="completed"),
+                TraceStep(
+                    sequence=4,
+                    agent_name="critic_guardrail",
+                    status="skipped",
+                    output={
+                        "reason": "critic_mode_off",
+                        "adk_token_usage": {"total_token_count": 5},
+                    },
+                    token_usage={"total_token_count": 5},
+                ),
+            ]
+        }
+    )
+
+    violations = check_critic_step_zero_redundant_tokens(trace)
+
+    assert {violation.code for violation in violations} == {
+        "critic_skipped_step_nonzero_tokens",
+        "critic_redundant_adk_tokens",
+    }
+    aggregated = evaluate_agentic_invariants(
+        deterministic_response=_response(),
+        agentic_response=_response(),
+        trace=trace,
+        allowed_skip_reasons=CRITIC_OFF_ALLOWED_SKIPS,
+    )
+    assert {violation.code for violation in aggregated} == {
+        "critic_skipped_step_nonzero_tokens",
+        "critic_redundant_adk_tokens",
+    }

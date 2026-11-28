@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
 
-from agents.orchestration.registry import (
+from agents.orchestration.constants import (
     CRITIC_NAME,
     DECISION_SYNTHESIZER_NAME,
     FUNDAMENTAL_ANALYST_NAME,
@@ -275,6 +275,7 @@ def evaluate_agentic_invariants(
     violations.extend(check_fundamental_step_zero_tokens_in_typed_mode(trace))
     violations.extend(check_technical_step_zero_tokens_in_typed_mode(trace))
     violations.extend(check_synthesizer_step_zero_tokens_in_typed_mode(trace))
+    violations.extend(check_critic_step_zero_redundant_tokens(trace))
     violations.extend(
         check_synthesizer_never_changes_risk_numbers(deterministic_response, agentic_response, trace)
     )
@@ -498,6 +499,41 @@ def check_synthesizer_step_zero_tokens_in_typed_mode(trace: AnalysisTrace) -> li
                     details={"sequence": step.sequence, "token_usage": nonzero_token_usage},
                 )
             )
+    return violations
+
+
+def _nonzero_token_usage(token_usage: Any) -> dict[str, Any]:
+    if not isinstance(token_usage, Mapping):
+        return {}
+    return {str(key): value for key, value in token_usage.items() if value}
+
+
+def check_critic_step_zero_redundant_tokens(trace: AnalysisTrace) -> list[InvariantViolation]:
+    """Enforce zero redundant ADK tokens and zero skipped tokens on ``critic_guardrail``."""
+    violations: list[InvariantViolation] = []
+    for step in trace.steps:
+        if step.agent_name != CRITIC_NAME:
+            continue
+        if step.status == "skipped":
+            nonzero_step_tokens = _nonzero_token_usage(step.token_usage)
+            if nonzero_step_tokens:
+                violations.append(
+                    InvariantViolation(
+                        code="critic_skipped_step_nonzero_tokens",
+                        message="Skipped critic_guardrail trace step must report zero tokens.",
+                        details={"sequence": step.sequence, "token_usage": nonzero_step_tokens},
+                    )
+                )
+        if isinstance(step.output, dict):
+            nonzero_adk_tokens = _nonzero_token_usage(step.output.get("adk_token_usage"))
+            if nonzero_adk_tokens:
+                violations.append(
+                    InvariantViolation(
+                        code="critic_redundant_adk_tokens",
+                        message="Typed-view critic_guardrail ADK step must report zero redundant ADK tokens.",
+                        details={"sequence": step.sequence, "adk_token_usage": nonzero_adk_tokens},
+                    )
+                )
     return violations
 
 

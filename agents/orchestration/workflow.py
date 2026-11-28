@@ -3,17 +3,18 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field as dataclass_field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dt_time, timezone
 from decimal import Decimal
-from typing import Any, Callable, Iterable, Literal, Optional, Protocol, cast
+from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Sequence, cast
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 from agents.config import HARD_RULES_TEXT
 from agents.config import AgentWorkflowConfig
@@ -24,6 +25,45 @@ from agents.orchestration.adk_events import (
     event_function_calls,
     event_text,
     event_token_usage,
+)
+from agents.orchestration.blackboard import (
+    MAX_CRITIC_REVISIONS,
+    BlackboardRuntime,
+    BoundedRevisionOutcome,
+    DecisionSynthesis,
+    _DecisionRevisionResult,
+    _FundamentalAssessmentOutcome,
+    _TechnicalAssessmentOutcome,
+    apply_technical_effect_to_response,
+    enforce_downgrade_only,
+    read_state_model,
+    run_bounded_critic_revision,
+    validate_risk_output,
+    write_state_model,
+)
+from agents.orchestration.constants import (
+    ANALYSIS_RESPONSE_KEY,
+    CRITIC_REVISION_COUNT_KEY,
+    CRITIC_STEP_META_KEY,
+    CROSS_DOMAIN_TENSION_KEY,
+    CROSS_DOMAIN_TENSION_NAME,
+    DECISION_MEMO_RESULT_KEY,
+    DECISION_SYNTHESIS_REQUEST_KEY,
+    DETERMINISTIC_RESPONSE_KEY,
+    EFFECTIVE_AS_OF_KEY,
+    FUNDAMENTAL_ASSESSMENT_KEY,
+    FUNDAMENTAL_ASSESSMENT_LATENCY_MS_KEY,
+    FUNDAMENTAL_CONTEXT_LATENCY_MS_KEY,
+    FUNDAMENTAL_REQUEST_KEY,
+    RUN_ID_KEY,
+    SPECIALIST_POLICY_FOLD_NAME,
+    TECHNICAL_ASSESSMENT_KEY,
+    TECHNICAL_ASSESSMENT_LATENCY_MS_KEY,
+    TECHNICAL_CONTEXT_LATENCY_MS_KEY,
+    TECHNICAL_REQUEST_KEY,
+    TENSION_LATENCY_MS_KEY,
+    TICKER_KEY,
+    WORKFLOW_WARNINGS_KEY,
 )
 from agents.orchestration.registry import (
     CRITIC_NAME,
@@ -41,14 +81,26 @@ from app.db.models import AgentRun, AgentRunStep
 from app.db.repository import get_agent_run, get_agent_run_steps, save_agent_run
 from app.rag.embedding import EmbeddingClient, embedding_usage_of
 from app.schemas.analyze import AnalysisTrace, AnalyzeRequest, AnalyzeResponse, TraceStep
-from app.schemas.critique import CritiqueObjection, CritiqueResult, DraftRecommendation
-from app.schemas.fundamentals import FundamentalAssessmentResult
+from app.schemas.critique import (
+    CritiqueObjection,
+    CritiqueRequest,
+    CritiqueResult,
+    CritiqueRevisionTarget,
+    DraftRecommendation,
+)
+from app.schemas.fundamentals import (
+    EvidenceChunkInput,
+    FundamentalAnalysisRequest,
+    FundamentalAssessmentResult,
+)
 from app.schemas.memo import DecisionMemo, SynthesizerEffect
 from app.schemas.synthesis import DecisionMemoResult, DecisionSynthesisRequest
 from app.schemas.technicals import TechnicalAgentEffect, TechnicalAnalysisRequest, TechnicalAssessmentResult
+from app.schemas.tension import CrossDomainTension
 from app.services.critic import Critic, RetryableModelError
 from app.services.critic_policy import apply_critic_policy
 from app.services.critic_rules import evaluate_deterministic_objections
+from app.services.cross_domain_tension import CrossDomainTensionResolution, resolve_cross_domain_tension
 from app.services.trace_cost import price_trace
 from app.services.decision_synthesizer import DecisionSynthesizer, build_decision_memo, memo_hash
 from app.services.critique_context import (
@@ -69,6 +121,18 @@ from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "AgenticAnalysisWorkflow",
+    "DecisionSynthesis",
+    "GoogleWorkflowError",
+    "MAX_CRITIC_REVISIONS",
+    "RunnerFactory",
+    "UnresolvableTickerError",
+    "enforce_downgrade_only",
+    "load_trace",
+    "validate_risk_output",
+]
+
 _SPECIALIST_SKIP_REASONS = {
     FUNDAMENTAL_ANALYST_NAME: "fundamental_analyst_never_reached",
     TECHNICAL_ANALYST_NAME: "technical_analyst_never_reached",
@@ -83,19 +147,6 @@ class UnresolvableTickerError(ValueError):
 
 class GoogleWorkflowError(RuntimeError):
     """Raised when Google ADK returns or raises an unsuccessful result."""
-
-
-class DecisionSynthesis(BaseModel):
-    """Typed model boundary for a specialist's proposed recommendation."""
-
-    decision: Literal["trade", "watchlist", "no_trade"]
-    confidence: float = Field(ge=0, le=1)
-    reasons: list[str] = Field(default_factory=list)
-    entry_range: Optional[tuple[float, float]] = None
-    stop_loss: Optional[float] = None
-    take_profit: Optional[tuple[float, float]] = None
-    risk_reward: Optional[float] = None
-    position_size_eur: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -161,16 +212,6 @@ class _TypedSynthesisRun:
 
 
 @dataclass(frozen=True)
-class _DecisionRevisionResult:
-    synthesis: DecisionSynthesis | None
-    raw_output: str
-    token_usage: dict[str, int]
-    latency_ms: float
-    error_reason: str | None = None
-    error_detail: str | None = None
-
-
-@dataclass(frozen=True)
 class _CriticStepResult:
     step: _PendingTraceStep
     synthesis_retries: int = 0
@@ -183,11 +224,39 @@ class _ModelOutput:
     token_usage: dict[str, int]
 
 
-class _DecisionRevisionModelPort(Protocol):
-    model_name: str
+def _decision_rank(decision: str) -> int:
+    return {"no_trade": 0, "watchlist": 1, "trade": 2}[decision]
 
-    def generate(self, prompt: str) -> _ModelOutput:
-        """Return one raw JSON response for the revision request."""
+
+def _downgrade_only_outcome(
+    *,
+    baseline_decision: str,
+    baseline_confidence: float,
+    proposed_decision: str,
+    proposed_confidence: float,
+) -> tuple[Literal["trade", "watchlist", "no_trade"], float]:
+    decision = cast(Literal["trade", "watchlist", "no_trade"], proposed_decision)
+    if _decision_rank(decision) > _decision_rank(baseline_decision):
+        decision = cast(Literal["trade", "watchlist", "no_trade"], baseline_decision)
+    confidence = min(proposed_confidence, baseline_confidence)
+    return decision, confidence
+
+
+def _token_usage(response: Any) -> dict[str, int]:
+    usage_metadata = getattr(response, "usage_metadata", None)
+    if usage_metadata is None:
+        return {}
+    return {
+        key: int(value)
+        for key in (
+            "prompt_token_count",
+            "candidates_token_count",
+            "total_token_count",
+            "thoughts_token_count",
+            "cached_content_token_count",
+        )
+        if (value := getattr(usage_metadata, key, None)) is not None
+    }
 
 
 class _GeminiDecisionRevisionModel:
@@ -224,78 +293,6 @@ class _GeminiDecisionRevisionModel:
         return _ModelOutput(text=response.text, token_usage=_token_usage(response))
 
 
-def validate_risk_output(proposal: DecisionSynthesis, deterministic: AnalyzeResponse) -> None:
-    """Reject a specialist proposal that fabricates or changes trade numbers."""
-    fields = (
-        "entry_range",
-        "stop_loss",
-        "take_profit",
-        "risk_reward",
-        "position_size_eur",
-    )
-    for field_name in fields:
-        proposed_value = getattr(proposal, field_name)
-        deterministic_value = getattr(deterministic, field_name)
-        if proposed_value is not None and proposed_value != deterministic_value:
-            raise ValueError(f"agent_output_changed_risk_value: {field_name}")
-
-
-def _decision_rank(decision: str) -> int:
-    return {"no_trade": 0, "watchlist": 1, "trade": 2}[decision]
-
-
-def _downgrade_only_outcome(
-    *,
-    baseline_decision: str,
-    baseline_confidence: float,
-    proposed_decision: str,
-    proposed_confidence: float,
-) -> tuple[Literal["trade", "watchlist", "no_trade"], float]:
-    decision = cast(Literal["trade", "watchlist", "no_trade"], proposed_decision)
-    if _decision_rank(decision) > _decision_rank(baseline_decision):
-        decision = cast(Literal["trade", "watchlist", "no_trade"], baseline_decision)
-    confidence = min(proposed_confidence, baseline_confidence)
-    return decision, confidence
-
-
-def enforce_downgrade_only(proposal: DecisionSynthesis, deterministic: AnalyzeResponse) -> DecisionSynthesis:
-    """Return a guarded proposal whose decision and confidence never upgrade."""
-    validate_risk_output(proposal, deterministic)
-    proposal.decision, proposal.confidence = _downgrade_only_outcome(
-        baseline_decision=deterministic.decision,
-        baseline_confidence=deterministic.confidence,
-        proposed_decision=proposal.decision,
-        proposed_confidence=proposal.confidence,
-    )
-    for field_name in (
-        "entry_range",
-        "stop_loss",
-        "take_profit",
-        "risk_reward",
-        "position_size_eur",
-    ):
-        if getattr(proposal, field_name) is None:
-            setattr(proposal, field_name, getattr(deterministic, field_name))
-    return proposal
-
-
-def _token_usage(response: Any) -> dict[str, int]:
-    usage_metadata = getattr(response, "usage_metadata", None)
-    if usage_metadata is None:
-        return {}
-    return {
-        key: int(value)
-        for key in (
-            "prompt_token_count",
-            "candidates_token_count",
-            "total_token_count",
-            "thoughts_token_count",
-            "cached_content_token_count",
-        )
-        if (value := getattr(usage_metadata, key, None)) is not None
-    }
-
-
 RunnerFactory = Callable[[AgentRegistry, str], Iterable[Any]]
 
 
@@ -309,6 +306,41 @@ def _synthesis_token_usage(typed_synthesis: "_TypedSynthesisRun | None") -> dict
 def _merge_token_usage(total: dict[str, int], event_usage: dict[str, int]) -> None:
     for field_name, value in event_usage.items():
         total[field_name] = total.get(field_name, 0) + value
+
+
+def _nonzero_token_usage(token_usage: dict[str, int]) -> dict[str, int]:
+    return {field_name: value for field_name, value in token_usage.items() if value}
+
+
+def _merge_adk_event_token_usage(
+    total: dict[str, int],
+    *,
+    author: str,
+    event_usage: dict[str, int],
+) -> None:
+    if author == CRITIC_NAME and _critic_mode() == "off":
+        nonzero_usage = _nonzero_token_usage(event_usage)
+        if nonzero_usage:
+            _merge_token_usage(total, nonzero_usage)
+        return
+    _merge_token_usage(total, event_usage)
+
+
+def _skipped_critic_step(latency_ms: float, adk_token_usage: dict[str, int]) -> _CriticStepResult:
+    nonzero_adk_usage = _nonzero_token_usage(adk_token_usage)
+    output: dict[str, Any] = {"reason": "critic_mode_off"}
+    if nonzero_adk_usage:
+        output["adk_token_usage"] = nonzero_adk_usage
+    return _CriticStepResult(
+        step=_PendingTraceStep(
+            status="skipped",
+            reason="critic_mode_off",
+            tool_calls=[],
+            output=output,
+            latency_ms=latency_ms,
+            token_usage=nonzero_adk_usage,
+        )
+    )
 
 
 def _merged_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
@@ -372,25 +404,7 @@ def _update_critic_trace_output(step: _PendingTraceStep, effect: Any) -> None:
 
 
 def _apply_technical_effect_to_response(effect: TechnicalAgentEffect, response: AnalyzeResponse) -> None:
-    """Mutate ``response`` for an enforced technical downgrade.
-
-    Technical adjustments are downgrade-only, so this never recomputes
-    risk levels: it either leaves the response
-    untouched or clears the trade fields exactly as the analyzer does for
-    non-trade decisions (see ``app.services.analyzer._evaluate_trade``).
-    """
-    if effect.final_decision == response.decision:
-        return
-    response.decision = effect.final_decision
-    response.confidence = effect.final_confidence
-    if effect.final_decision == "trade":
-        return
-    response.entry_range = None
-    response.stop_loss = None
-    response.take_profit = None
-    response.risk_reward = None
-    response.position_size_eur = None
-    response.time_stop_at = None
+    apply_technical_effect_to_response(effect, response)
 
 
 def _analysis_date(request: AnalyzeRequest) -> date | None:
@@ -440,7 +454,17 @@ def _deterministic_fields(response: AnalyzeResponse) -> dict[str, Any]:
     }
 
 
-MAX_CRITIC_REVISIONS = 1
+def _resolve_snapshot_at(
+    *,
+    effective_as_of: date,
+    fundamental_outcome: _FundamentalAssessmentOutcome | None,
+    technical_outcome: _TechnicalAssessmentOutcome | None,
+) -> datetime:
+    if fundamental_outcome is not None:
+        return fundamental_outcome.context.snapshot_at
+    if technical_outcome is not None:
+        return technical_outcome.context.snapshot_at
+    return datetime.combine(effective_as_of, dt_time.max, tzinfo=timezone.utc)
 
 
 def _runner_ignores_registry(runner_factory: RunnerFactory) -> bool:
@@ -488,27 +512,101 @@ class AgenticAnalysisWorkflow:
         resolved_ticker = self._resolve_ticker(ticker_reference, trace_recorder)
         request = request or AnalyzeRequest(ticker=resolved_ticker)
         analysis_date = _analysis_date(request)
+        effective_as_of = request.as_of_date or datetime.now(timezone.utc).date()
         response = self._run_deterministic_pipeline(request, trace_recorder)
         deterministic_snapshot = response.model_copy(deep=True)
-        fundamental_assessment = self._apply_fundamental_policy_if_enabled(
+
+        fundamental_mode = _fundamental_agent_mode()
+        technical_mode = _technical_agent_mode()
+        synthesizer_contract = _synthesizer_contract()
+        critic_mode = _critic_mode()
+        if self._can_run_in_adk_blackboard(
+            fundamental_mode=fundamental_mode,
+            technical_mode=technical_mode,
+            synthesizer_contract=synthesizer_contract,
+            critic_mode=critic_mode,
+        ):
+            runtime = self._build_blackboard_runtime(
+                fundamental_mode=fundamental_mode,
+                technical_mode=technical_mode,
+                synthesizer_contract=synthesizer_contract,
+                critic_mode=critic_mode,
+            )
+            registry = self._build_registry(
+                trace_recorder,
+                warnings,
+                today=analysis_date,
+                fundamental_mode=fundamental_mode,
+                technical_mode=technical_mode,
+                synthesizer_contract=synthesizer_contract,
+                critic_mode=critic_mode,
+                blackboard_runtime=runtime,
+                defer_retriever_skip=True,
+            )
+            if registry.root_agent is not None and SPECIALIST_POLICY_FOLD_NAME in registry.specialists:
+                return self._execute_blackboard_run(
+                    registry=registry,
+                    resolved_ticker=resolved_ticker,
+                    request=request,
+                    run_id=run_id,
+                    analysis_date=analysis_date,
+                    effective_as_of=effective_as_of,
+                    deterministic_snapshot=deterministic_snapshot,
+                    response=response,
+                    trace_recorder=trace_recorder,
+                    warnings=warnings,
+                    recorder=recorder,
+                    started_at=started_at,
+                )
+            if RETRIEVER_TOOL_NAME not in registry.tools:
+                trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+
+        fundamental_outcome, technical_outcome = self._assess_specialists(
             run_id=run_id,
             request=request,
+            as_of=effective_as_of,
+        )
+        fundamental_assessment = self._fold_fundamental_outcome(
+            outcome=fundamental_outcome,
             response=response,
             trace_recorder=trace_recorder,
         )
-        technical_assessment = self._apply_technical_policy_if_enabled(
-            run_id=run_id,
-            request=request,
+        defer_technical_trace = fundamental_outcome is None and technical_outcome is not None
+        technical_assessment = self._fold_technical_outcome(
+            outcome=technical_outcome,
             deterministic_response=deterministic_snapshot,
             response=response,
+            trace_recorder=trace_recorder,
+            record_trace=not defer_technical_trace,
+        )
+        deferred_technical = (
+            (technical_outcome, deterministic_snapshot, response)
+            if defer_technical_trace and technical_outcome is not None
+            else None
+        )
+        snapshot_at = _resolve_snapshot_at(
+            effective_as_of=effective_as_of,
+            fundamental_outcome=fundamental_outcome,
+            technical_outcome=technical_outcome,
+        )
+        tension_resolution = self._resolve_cross_domain_tension(
+            ticker=resolved_ticker,
+            snapshot_at=snapshot_at,
+            fundamental_outcome=fundamental_outcome,
+            technical_outcome=technical_outcome,
+            fundamental_assessment=fundamental_assessment,
+            technical_assessment=technical_assessment,
             trace_recorder=trace_recorder,
         )
         typed_synthesis = self._synthesize_typed_memo_if_enabled(
             run_id=run_id,
-            request=request,
             response=response,
             fundamental_assessment=fundamental_assessment,
             technical_assessment=technical_assessment,
+            as_of_date=effective_as_of,
+            snapshot_at=snapshot_at,
+            cross_domain_tension=tension_resolution.tension,
+            supplemental_evidence_chunks=tension_resolution.supplemental_chunks,
         )
         registry = self._build_registry(
             trace_recorder,
@@ -517,6 +615,7 @@ class AgenticAnalysisWorkflow:
             fundamental_assessment=fundamental_assessment,
             technical_assessment=technical_assessment,
             synthesized_memo=typed_synthesis.result.rendered_memo if typed_synthesis is not None else None,
+            critic_mode=critic_mode,
         )
 
         self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
@@ -535,76 +634,50 @@ class AgenticAnalysisWorkflow:
                 fundamental_assessment=fundamental_assessment,
                 technical_assessment=technical_assessment,
                 typed_synthesis=typed_synthesis,
+                effective_as_of=effective_as_of,
+                snapshot_at=snapshot_at,
+                fundamental_request=fundamental_outcome.context if fundamental_outcome is not None else None,
+                cross_domain_tension=tension_resolution.tension,
+                supplemental_evidence_chunks=tension_resolution.supplemental_chunks,
+                deferred_technical=deferred_technical,
                 recorder=recorder,
             )
         except _AdkExecutionError as exc:
-            self._record_unreached_specialists(trace_recorder, exc.result.observed_agents)
-            final_warnings = list(response.warnings) + warnings + exc.result.warnings
-            response.warnings = final_warnings
-            partial_trace = self._build_trace(
+            self._record_unreached_specialists(
+                trace_recorder,
+                exc.result.observed_agents,
+                deferred_technical=deferred_technical,
+            )
+            return self._handle_adk_execution_error(
+                exc=exc,
                 run_id=run_id,
-                ticker=resolved_ticker,
-                as_of_date=analysis_date,
+                resolved_ticker=resolved_ticker,
+                analysis_date=analysis_date,
                 trace_recorder=trace_recorder,
                 response=response,
-                token_usage=exc.result.token_usage,
-                warnings=final_warnings,
-                total_latency_ms=(time.monotonic() - started_at) * 1000,
-                adk_event_count=exc.result.event_count,
-                observed_agents=exc.result.observed_agents,
+                warnings=warnings,
+                started_at=started_at,
                 typed_synthesis=typed_synthesis,
+                recorder=recorder,
             )
-            self._persist_trace(partial_trace)
-            recorder.record_summary(
-                {
-                    "event_count": exc.result.event_count,
-                    "total_token_usage": exc.result.token_usage,
-                    "final_decision": response.decision,
-                    "deterministic_fields": _deterministic_fields(response),
-                    "observed_agents": exc.result.observed_agents,
-                    "warnings": final_warnings,
-                    "error": str(exc),
-                    "wall_clock_ms": partial_trace.total_latency_ms,
-                }
-            )
-            if getattr(recorder, "enabled", False):
-                logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
-            raise GoogleWorkflowError(str(exc)) from exc
 
-        self._record_unreached_specialists(trace_recorder, adk_result.observed_agents)
-        final_warnings = list(response.warnings) + warnings + adk_result.warnings
-        response.warnings = final_warnings
-        total_latency_ms = (time.monotonic() - started_at) * 1000
-        trace = self._build_trace(
+        self._record_unreached_specialists(
+            trace_recorder,
+            adk_result.observed_agents,
+            deferred_technical=deferred_technical,
+        )
+        return self._finalize_analysis_response(
             run_id=run_id,
-            ticker=resolved_ticker,
-            as_of_date=analysis_date,
+            resolved_ticker=resolved_ticker,
+            analysis_date=analysis_date,
             trace_recorder=trace_recorder,
             response=response,
-            token_usage=adk_result.token_usage,
-            warnings=final_warnings,
-            total_latency_ms=total_latency_ms,
-            adk_event_count=adk_result.event_count,
-            observed_agents=adk_result.observed_agents,
+            warnings=warnings,
+            adk_result=adk_result,
+            started_at=started_at,
             typed_synthesis=typed_synthesis,
+            recorder=recorder,
         )
-        response.trace_id = run_id
-        response.trace = trace
-        self._persist_trace(trace)
-        recorder.record_summary(
-            {
-                "event_count": adk_result.event_count,
-                "total_token_usage": adk_result.token_usage,
-                "final_decision": response.decision,
-                "deterministic_fields": _deterministic_fields(response),
-                "observed_agents": adk_result.observed_agents,
-                "warnings": final_warnings,
-                "wall_clock_ms": total_latency_ms,
-            }
-        )
-        if getattr(recorder, "enabled", False):
-            logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
-        return response
 
     def _resolve_ticker(self, ticker_reference: str, trace_recorder: TraceRecorder) -> str:
         started_at = time.monotonic()
@@ -638,6 +711,63 @@ class AgenticAnalysisWorkflow:
         )
         return response
 
+    def _can_run_in_adk_blackboard(
+        self,
+        *,
+        fundamental_mode: Literal["off", "shadow", "enforced"],
+        technical_mode: Literal["off", "shadow", "enforced"],
+        synthesizer_contract: Literal["legacy", "typed"],
+        critic_mode: Literal["off", "shadow", "enforced"],
+    ) -> bool:
+        if _runner_ignores_registry(self.runner_factory):
+            return False
+        uses_registry = self.runner_factory == self._default_runner_factory or bool(
+            getattr(self.runner_factory, "executes_registry", False)
+        )
+        if not uses_registry:
+            return False
+        return (
+            fundamental_mode != "off"
+            or technical_mode != "off"
+            or synthesizer_contract == "typed"
+            or critic_mode != "off"
+        )
+
+    def _build_blackboard_runtime(
+        self,
+        *,
+        fundamental_mode: Literal["off", "shadow", "enforced"],
+        technical_mode: Literal["off", "shadow", "enforced"],
+        synthesizer_contract: Literal["legacy", "typed"],
+        critic_mode: Literal["off", "shadow", "enforced"],
+    ) -> BlackboardRuntime:
+        return BlackboardRuntime(
+            engine=self.engine,
+            embedding_client=self.embedding_client,
+            embedding_client_provider=lambda: self.embedding_client,
+            fundamental_mode=fundamental_mode,
+            technical_mode=technical_mode,
+            synthesizer_contract=synthesizer_contract,
+            critic_mode=critic_mode,
+            config=self.config,
+            decision_synthesizer_provider=self._typed_synthesizer,
+            analyze_request_fn=lambda req, engine=None: analyze_request(req, engine=engine),
+            build_fundamental_request_fn=lambda *args, **kwargs: build_fundamental_analysis_request(*args, **kwargs),
+            fundamental_analyst_factory=lambda: FundamentalAnalyst(),
+            build_technical_request_fn=lambda *args, **kwargs: build_technical_analysis_request(*args, **kwargs),
+            technical_analyst_factory=lambda: TechnicalAnalyst(),
+            resolve_tension_fn=lambda **kwargs: resolve_cross_domain_tension(**kwargs),
+            build_critique_request_fn=lambda *args, **kwargs: build_critique_request(*args, **kwargs),
+            evaluate_deterministic_objections_fn=lambda **kwargs: evaluate_deterministic_objections(**kwargs),
+            review_critique_fn=self._review_critique,
+            request_synthesis_revision_fn=lambda **kwargs: self._request_synthesis_revision(**kwargs),
+            validate_risk_output_fn=lambda proposal, resp: validate_risk_output(proposal, resp),
+            fundamental_mode_fn=_fundamental_agent_mode,
+            technical_mode_fn=_technical_agent_mode,
+            synthesizer_contract_fn=_synthesizer_contract,
+            critic_mode_fn=_critic_mode,
+        )
+
     def _build_registry(
         self,
         trace_recorder: TraceRecorder,
@@ -647,27 +777,865 @@ class AgenticAnalysisWorkflow:
         fundamental_assessment: FundamentalAssessmentResult | None = None,
         technical_assessment: TechnicalAssessmentResult | None = None,
         synthesized_memo: str | None = None,
+        critic_mode: Literal["off", "shadow", "enforced"] | None = None,
+        fundamental_mode: Literal["off", "shadow", "enforced"] | None = None,
+        technical_mode: Literal["off", "shadow", "enforced"] | None = None,
+        synthesizer_contract: Literal["legacy", "typed"] | None = None,
+        blackboard_runtime: BlackboardRuntime | None = None,
+        defer_retriever_skip: bool = False,
     ) -> AgentRegistry:
-        registry_kwargs = {
+        optional_kwargs = {
+            "embedding_client": self.embedding_client,
+            "fundamental_assessment": fundamental_assessment,
+            "technical_assessment": technical_assessment,
+            "synthesized_memo": synthesized_memo,
+            "critic_mode": critic_mode,
+            "fundamental_mode": fundamental_mode,
+            "technical_mode": technical_mode,
+            "synthesizer_contract": synthesizer_contract,
+            "blackboard_runtime": blackboard_runtime,
+        }
+        registry_kwargs: dict[str, Any] = {
             "config": self.config,
             "engine": self.engine,
             "today": today,
+            **{key: value for key, value in optional_kwargs.items() if value is not None},
         }
-        if self.embedding_client is not None:
-            registry_kwargs["embedding_client"] = self.embedding_client
-        if fundamental_assessment is not None:
-            registry_kwargs["fundamental_assessment"] = fundamental_assessment
-        if technical_assessment is not None:
-            registry_kwargs["technical_assessment"] = technical_assessment
-        if synthesized_memo is not None:
-            registry_kwargs["synthesized_memo"] = synthesized_memo
         registry = build_agent_registry(**registry_kwargs)
         if _runner_ignores_registry(self.runner_factory):
             return registry
         if RETRIEVER_TOOL_NAME not in registry.tools:
-            trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+            if not defer_retriever_skip:
+                trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
             warnings.append("retriever_tool_unavailable")
         return registry
+
+    def _execute_blackboard_run(
+        self,
+        *,
+        registry: AgentRegistry,
+        resolved_ticker: str,
+        request: AnalyzeRequest,
+        run_id: str,
+        analysis_date: date | None,
+        effective_as_of: date,
+        deterministic_snapshot: AnalyzeResponse,
+        response: AnalyzeResponse,
+        trace_recorder: TraceRecorder,
+        warnings: list[str],
+        recorder: Any,
+        started_at: float,
+    ) -> AnalyzeResponse:
+        del request
+        self._record_run_metadata(recorder, run_id, resolved_ticker, registry, today=analysis_date)
+        recorder.record_user_message(f"Analyze ticker {resolved_ticker}")
+        initial_state: dict[str, Any] = {
+            TICKER_KEY: resolved_ticker,
+            RUN_ID_KEY: run_id,
+            EFFECTIVE_AS_OF_KEY: effective_as_of.isoformat(),
+            DETERMINISTIC_RESPONSE_KEY: write_state_model(deterministic_snapshot),
+            ANALYSIS_RESPONSE_KEY: write_state_model(response),
+            CRITIC_REVISION_COUNT_KEY: 0,
+            WORKFLOW_WARNINGS_KEY: list(warnings),
+        }
+        retriever_skip_pending = (
+            not _runner_ignores_registry(self.runner_factory)
+            and RETRIEVER_TOOL_NAME not in registry.tools
+        )
+        state = dict(initial_state)
+        try:
+            adk_result, state, typed_synthesis = self._run_adk_blackboard(
+                registry=registry,
+                ticker=resolved_ticker,
+                initial_state=initial_state,
+                trace_recorder=trace_recorder,
+                response=response,
+                recorder=recorder,
+                retriever_skip_pending=retriever_skip_pending,
+            )
+        except _AdkExecutionError as exc:
+            self._sync_blackboard_technical_hooks(state)
+            self._record_unreached_specialists(trace_recorder, exc.result.observed_agents)
+            return self._handle_adk_execution_error(
+                exc=exc,
+                run_id=run_id,
+                resolved_ticker=resolved_ticker,
+                analysis_date=analysis_date,
+                trace_recorder=trace_recorder,
+                response=response,
+                warnings=warnings,
+                started_at=started_at,
+                typed_synthesis=None,
+                recorder=recorder,
+            )
+
+        self._sync_blackboard_response_and_hooks(response=response, state=state)
+        self._record_unreached_specialists(trace_recorder, adk_result.observed_agents)
+        return self._finalize_analysis_response(
+            run_id=run_id,
+            resolved_ticker=resolved_ticker,
+            analysis_date=analysis_date,
+            trace_recorder=trace_recorder,
+            response=response,
+            warnings=warnings,
+            adk_result=adk_result,
+            started_at=started_at,
+            typed_synthesis=typed_synthesis,
+            recorder=recorder,
+        )
+
+    def _run_adk_blackboard(
+        self,
+        *,
+        registry: AgentRegistry,
+        ticker: str,
+        initial_state: dict[str, Any],
+        trace_recorder: TraceRecorder,
+        response: AnalyzeResponse,
+        recorder: Any,
+        retriever_skip_pending: bool = False,
+    ) -> tuple[_AdkRunResult, dict[str, Any], _TypedSynthesisRun | None]:
+        state = dict(initial_state)
+        token_usage: dict[str, int] = {}
+        warnings: list[str] = []
+        observed_agents: list[str] = []
+        event_count = 0
+        previous_event_at = time.monotonic()
+        pending_synthesis: _PendingTraceStep | None = None
+        initial_memo_result: DecisionMemoResult | None = None
+        buffered_specialists: dict[str, dict[str, Any]] = {}
+        pending_flags = {"retriever_skip": retriever_skip_pending}
+
+        try:
+            events, final_state = self._run_blackboard_events(registry, ticker, initial_state)
+            for event in events:
+                event_count += 1
+                if recorder is not None:
+                    recorder.record_event(event_count - 1, event)
+                self._apply_event_state_delta(state, event)
+                now = time.monotonic()
+                latency_ms = (now - previous_event_at) * 1000
+                previous_event_at = now
+                pending_synthesis, initial_memo_result = self._dispatch_blackboard_event(
+                    event=event,
+                    state=state,
+                    buffered_specialists=buffered_specialists,
+                    trace_recorder=trace_recorder,
+                    observed_agents=observed_agents,
+                    response=response,
+                    warnings=warnings,
+                    token_usage=token_usage,
+                    latency_ms=latency_ms,
+                    pending_synthesis=pending_synthesis,
+                    initial_memo_result=initial_memo_result,
+                    pending_flags=pending_flags,
+                )
+
+            if final_state:
+                state.update(final_state)
+            if pending_flags["retriever_skip"]:
+                trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+                pending_flags["retriever_skip"] = False
+            self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+            typed_synthesis = self._build_blackboard_typed_synthesis(
+                state=state,
+                initial_memo_result=initial_memo_result,
+            )
+            return (
+                _AdkRunResult(
+                    token_usage=token_usage,
+                    warnings=warnings,
+                    event_count=event_count,
+                    observed_agents=observed_agents,
+                ),
+                state,
+                typed_synthesis,
+            )
+        except Exception as exc:
+            if pending_flags["retriever_skip"]:
+                trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+                pending_flags["retriever_skip"] = False
+            detail = str(exc)[:500]
+            trace_recorder.record_failed(
+                ROOT_AGENT_NAME,
+                "adk_runner_exception",
+                detail=detail,
+            )
+            logger.exception("google_adk_workflow_failed: ticker=%s", ticker)
+            result = _AdkRunResult(
+                token_usage=token_usage,
+                warnings=warnings,
+                event_count=event_count,
+                observed_agents=observed_agents,
+            )
+            raise _AdkExecutionError(f"ADK execution failed: {exc}", result) from exc
+
+    def _dispatch_blackboard_event(
+        self,
+        *,
+        event: Any,
+        state: dict[str, Any],
+        buffered_specialists: dict[str, dict[str, Any]],
+        trace_recorder: TraceRecorder,
+        observed_agents: list[str],
+        response: AnalyzeResponse,
+        warnings: list[str],
+        token_usage: dict[str, int],
+        latency_ms: float,
+        pending_synthesis: _PendingTraceStep | None,
+        initial_memo_result: DecisionMemoResult | None,
+        pending_flags: dict[str, bool],
+    ) -> tuple[_PendingTraceStep | None, DecisionMemoResult | None]:
+        author = event_author(event)
+        tool_calls = event_function_calls(event)
+        text = event_text(event)
+        usage = event_token_usage(event)
+        error_detail = event_error(event)
+
+        if author in {FUNDAMENTAL_ANALYST_NAME, TECHNICAL_ANALYST_NAME}:
+            buffered_specialists[author] = {
+                "tool_calls": tool_calls,
+                "text": text,
+                "usage": usage,
+                "latency_ms": latency_ms,
+                "error_detail": error_detail,
+            }
+            if error_detail is not None:
+                warnings.append(f"agent_narration_degraded: {error_detail}")
+            return pending_synthesis, initial_memo_result
+
+        if author == SPECIALIST_POLICY_FOLD_NAME:
+            self._flush_blackboard_specialists(
+                state=state,
+                buffered=buffered_specialists,
+                trace_recorder=trace_recorder,
+                observed_agents=observed_agents,
+                token_usage=token_usage,
+            )
+            return pending_synthesis, initial_memo_result
+
+        if author == CROSS_DOMAIN_TENSION_NAME:
+            self._handle_blackboard_tension_event(
+                state=state,
+                latency_ms=latency_ms,
+                trace_recorder=trace_recorder,
+                observed_agents=observed_agents,
+            )
+            if pending_flags["retriever_skip"]:
+                trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+                pending_flags["retriever_skip"] = False
+            return pending_synthesis, initial_memo_result
+
+        if pending_flags["retriever_skip"]:
+            trace_recorder.record_skipped(RETRIEVER_TOOL_NAME, "retriever_tool_unavailable")
+            pending_flags["retriever_skip"] = False
+
+        if author not in observed_agents:
+            observed_agents.append(author)
+
+        return self._dispatch_blackboard_post_tension_event(
+            author=author,
+            state=state,
+            trace_recorder=trace_recorder,
+            response=response,
+            warnings=warnings,
+            tool_calls=tool_calls,
+            text=text,
+            usage=usage,
+            error_detail=error_detail,
+            latency_ms=latency_ms,
+            token_usage=token_usage,
+            pending_synthesis=pending_synthesis,
+            initial_memo_result=initial_memo_result,
+        )
+
+    def _dispatch_blackboard_post_tension_event(
+        self,
+        *,
+        author: str,
+        state: dict[str, Any],
+        trace_recorder: TraceRecorder,
+        response: AnalyzeResponse,
+        warnings: list[str],
+        tool_calls: list[str],
+        text: str,
+        usage: dict[str, int],
+        error_detail: str | None,
+        latency_ms: float,
+        token_usage: dict[str, int],
+        pending_synthesis: _PendingTraceStep | None,
+        initial_memo_result: DecisionMemoResult | None,
+    ) -> tuple[_PendingTraceStep | None, DecisionMemoResult | None]:
+        if error_detail is not None:
+            self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+            _merge_adk_event_token_usage(token_usage, author=author, event_usage=usage)
+            warnings.append(f"agent_narration_degraded: {error_detail}")
+            self._record_degraded_adk_event(
+                trace_recorder=trace_recorder,
+                author=author,
+                error_detail=error_detail,
+                tool_calls=tool_calls,
+                text=text,
+                latency_ms=latency_ms,
+                usage=usage,
+            )
+            return None, initial_memo_result
+
+        if author == DECISION_SYNTHESIZER_NAME:
+            return self._handle_blackboard_synthesizer_event(
+                state=state,
+                response=response,
+                warnings=warnings,
+                text=text,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                usage=usage,
+                token_usage=token_usage,
+            )
+
+        if author == CRITIC_NAME:
+            self._handle_blackboard_critic_event(
+                state=state,
+                trace_recorder=trace_recorder,
+                pending_synthesis=pending_synthesis,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                usage=usage,
+                token_usage=token_usage,
+            )
+            return None, initial_memo_result
+
+        self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+        _merge_adk_event_token_usage(token_usage, author=author, event_usage=usage)
+        trace_recorder.record_completed(
+            author,
+            tool_calls=tool_calls,
+            output={"text": text} if text else None,
+            latency_ms=latency_ms,
+            token_usage=usage,
+        )
+        return None, initial_memo_result
+
+    def _run_blackboard_events(
+        self,
+        registry: AgentRegistry,
+        ticker: str,
+        initial_state: dict[str, Any],
+    ) -> tuple[list[Any], dict[str, Any]]:
+        if self.runner_factory != self._default_runner_factory:
+            return list(self.runner_factory(registry, ticker)), {}
+
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai.types import Content, Part
+
+        session_service = InMemorySessionService()
+        session = asyncio.run(
+            session_service.create_session(
+                app_name="forseti",
+                user_id=ticker,
+                state=dict(initial_state),
+            )
+        )
+        runner = Runner(
+            app_name="forseti",
+            agent=registry.root_agent,
+            session_service=session_service,
+        )
+        events = list(
+            runner.run(
+                user_id=ticker,
+                session_id=session.id,
+                new_message=Content(role="user", parts=[Part(text=f"Analyze ticker {ticker}")]),
+            )
+        )
+        final_session = asyncio.run(
+            session_service.get_session(
+                app_name="forseti",
+                user_id=ticker,
+                session_id=session.id,
+            )
+        )
+        return events, dict(final_session.state) if final_session is not None else {}
+
+    @staticmethod
+    def _apply_event_state_delta(state: dict[str, Any], event: Any) -> None:
+        actions = getattr(event, "actions", None)
+        state_delta = getattr(actions, "state_delta", None)
+        if isinstance(state_delta, dict):
+            state.update(state_delta)
+
+    def _flush_blackboard_specialists(
+        self,
+        *,
+        state: dict[str, Any],
+        buffered: dict[str, dict[str, Any]],
+        trace_recorder: TraceRecorder,
+        observed_agents: list[str],
+        token_usage: dict[str, int],
+    ) -> None:
+        fund_req = read_state_model(state, FUNDAMENTAL_REQUEST_KEY, FundamentalAnalysisRequest)
+        fund_res = read_state_model(state, FUNDAMENTAL_ASSESSMENT_KEY, FundamentalAssessmentResult)
+        tech_req = read_state_model(state, TECHNICAL_REQUEST_KEY, TechnicalAnalysisRequest)
+        tech_res = read_state_model(state, TECHNICAL_ASSESSMENT_KEY, TechnicalAssessmentResult)
+
+        if fund_req is not None and fund_res is not None:
+            self._record_fundamental_steps_from_state(
+                fund_req=fund_req,
+                fund_res=fund_res,
+                context_latency_ms=float(state.get(FUNDAMENTAL_CONTEXT_LATENCY_MS_KEY, 0.0)),
+                assessment_latency_ms=float(state.get(FUNDAMENTAL_ASSESSMENT_LATENCY_MS_KEY, 0.0)),
+                trace_recorder=trace_recorder,
+            )
+        else:
+            self._flush_one_buffered_specialist(
+                author=FUNDAMENTAL_ANALYST_NAME,
+                buffered=buffered,
+                is_typed=False,
+                trace_recorder=trace_recorder,
+                observed_agents=observed_agents,
+                token_usage=token_usage,
+            )
+
+        if tech_req is not None and tech_res is not None:
+            self._record_technical_steps_from_state(
+                tech_req=tech_req,
+                tech_res=tech_res,
+                context_latency_ms=float(state.get(TECHNICAL_CONTEXT_LATENCY_MS_KEY, 0.0)),
+                assessment_latency_ms=float(state.get(TECHNICAL_ASSESSMENT_LATENCY_MS_KEY, 0.0)),
+                trace_recorder=trace_recorder,
+            )
+
+        self._flush_one_buffered_specialist(
+            author=FUNDAMENTAL_ANALYST_NAME,
+            buffered=buffered,
+            is_typed=fund_res is not None,
+            trace_recorder=trace_recorder,
+            observed_agents=observed_agents,
+            token_usage=token_usage,
+        )
+        self._flush_one_buffered_specialist(
+            author=TECHNICAL_ANALYST_NAME,
+            buffered=buffered,
+            is_typed=tech_res is not None,
+            trace_recorder=trace_recorder,
+            observed_agents=observed_agents,
+            token_usage=token_usage,
+        )
+        buffered.clear()
+        self._sync_blackboard_technical_hooks(state)
+
+    def _flush_one_buffered_specialist(
+        self,
+        *,
+        author: str,
+        buffered: dict[str, dict[str, Any]],
+        is_typed: bool,
+        trace_recorder: TraceRecorder,
+        observed_agents: list[str],
+        token_usage: dict[str, int],
+    ) -> None:
+        payload = buffered.pop(author, None)
+        if payload is None:
+            return
+        if author not in observed_agents:
+            observed_agents.append(author)
+        self._record_buffered_specialist_view(
+            author=author,
+            payload=payload,
+            is_typed=is_typed,
+            trace_recorder=trace_recorder,
+            token_usage=token_usage,
+        )
+
+    def _record_buffered_specialist_view(
+        self,
+        *,
+        author: str,
+        payload: dict[str, Any],
+        is_typed: bool,
+        trace_recorder: TraceRecorder,
+        token_usage: dict[str, int],
+    ) -> None:
+        usage = payload["usage"]
+        _merge_adk_event_token_usage(token_usage, author=author, event_usage=usage)
+        if payload["error_detail"] is not None:
+            self._record_degraded_adk_event(
+                trace_recorder=trace_recorder,
+                author=author,
+                error_detail=payload["error_detail"],
+                tool_calls=payload["tool_calls"],
+                text=payload["text"],
+                latency_ms=payload["latency_ms"],
+                usage=usage,
+            )
+            return
+        output = (
+            _typed_analyst_trace_output(payload["text"])
+            if is_typed
+            else ({"text": payload["text"]} if payload["text"] else None)
+        )
+        trace_recorder.record_completed(
+            author,
+            tool_calls=payload["tool_calls"],
+            output=output,
+            latency_ms=payload["latency_ms"],
+            token_usage=usage,
+        )
+
+    def _handle_blackboard_tension_event(
+        self,
+        *,
+        state: dict[str, Any],
+        latency_ms: float,
+        trace_recorder: TraceRecorder,
+        observed_agents: list[str],
+    ) -> None:
+        tension = read_state_model(state, CROSS_DOMAIN_TENSION_KEY, CrossDomainTension)
+        if tension is None:
+            return
+        if CROSS_DOMAIN_TENSION_NAME not in observed_agents:
+            observed_agents.append(CROSS_DOMAIN_TENSION_NAME)
+        trace_recorder.record_completed(
+            CROSS_DOMAIN_TENSION_NAME,
+            latency_ms=float(state.get(TENSION_LATENCY_MS_KEY, latency_ms)),
+            token_usage={},
+            output={
+                "conflict_type": tension.conflict_type,
+                "fundamental_signal": tension.fundamental_signal,
+                "technical_signal": tension.technical_signal,
+                "supplemental_chunk_ids": list(tension.supplemental_chunk_ids),
+                "date_window_days": tension.date_window_days,
+            },
+        )
+
+    def _handle_blackboard_synthesizer_event(
+        self,
+        *,
+        state: dict[str, Any],
+        response: AnalyzeResponse,
+        warnings: list[str],
+        text: str,
+        tool_calls: list[str],
+        latency_ms: float,
+        usage: dict[str, int],
+        token_usage: dict[str, int],
+    ) -> tuple[_PendingTraceStep, DecisionMemoResult | None]:
+        _merge_adk_event_token_usage(token_usage, author=DECISION_SYNTHESIZER_NAME, event_usage=usage)
+        memo_result = read_state_model(state, DECISION_MEMO_RESULT_KEY, DecisionMemoResult)
+        synth_request = read_state_model(state, DECISION_SYNTHESIS_REQUEST_KEY, DecisionSynthesisRequest)
+        if memo_result is None or synth_request is None:
+            step = self._build_decision_synthesizer_step(
+                response=response,
+                warnings=warnings,
+                text=text,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                token_usage=usage,
+            )
+            return step, None
+
+        _merge_token_usage(token_usage, memo_result.token_usage)
+        typed_run = _TypedSynthesisRun(request=synth_request, results=[memo_result])
+        step = self._build_typed_synthesizer_step(
+            response=response,
+            typed_synthesis=typed_run,
+            tool_calls=tool_calls,
+            latency_ms=latency_ms,
+            token_usage=usage,
+        )
+        return step, memo_result
+
+    def _handle_blackboard_critic_event(
+        self,
+        *,
+        state: dict[str, Any],
+        trace_recorder: TraceRecorder,
+        pending_synthesis: _PendingTraceStep | None,
+        tool_calls: list[str],
+        latency_ms: float,
+        usage: dict[str, int],
+        token_usage: dict[str, int],
+    ) -> None:
+        _merge_adk_event_token_usage(token_usage, author=CRITIC_NAME, event_usage=usage)
+        mode = _critic_mode()
+        if mode == "off":
+            critic_result = _skipped_critic_step(latency_ms, usage)
+            self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+            self._record_pending_step(trace_recorder, CRITIC_NAME, critic_result.step)
+            return None
+
+        meta = dict(state.get(CRITIC_STEP_META_KEY) or {})
+        critique_tokens = dict(meta.get("critique_token_usage") or {})
+        revision_tokens = dict(meta.get("revision_token_usage") or {})
+        _merge_token_usage(token_usage, critique_tokens)
+        _merge_token_usage(token_usage, revision_tokens)
+        revisions_performed = int(meta.get("revisions_performed", 0))
+        revision_rejected = bool(meta.get("revision_rejected", False))
+        self._update_pending_synthesis_from_blackboard_meta(
+            pending_synthesis=pending_synthesis,
+            meta=meta,
+            is_typed=DECISION_MEMO_RESULT_KEY in state,
+        )
+        self._flush_pending_synthesis(
+            trace_recorder,
+            pending_synthesis,
+            retries=revisions_performed,
+        )
+
+        output = dict(meta.get("output") or {})
+        output["adk_token_usage"] = dict(usage)
+        if revisions_performed == 1 or revision_rejected:
+            output["revision_objection_ids"] = list(meta.get("revision_objection_ids") or [])
+            output["revision_targets"] = list(meta.get("revision_targets") or [])
+
+        step_tokens = _merged_token_usage(usage, critique_tokens)
+        step_latency = latency_ms + float(meta.get("critique_latency_ms", 0.0))
+        critique_accepted = bool(meta.get("critique_accepted", True))
+        if revision_rejected:
+            critic_step = _PendingTraceStep(
+                status="degraded",
+                reason=str(meta.get("revision_error_reason") or "critic_revision_failed"),
+                detail=meta.get("revision_error_detail"),
+                tool_calls=tool_calls,
+                output=output,
+                latency_ms=step_latency,
+                token_usage=step_tokens,
+            )
+        elif critique_accepted:
+            critic_step = _PendingTraceStep(
+                status="completed",
+                tool_calls=tool_calls,
+                output=output,
+                latency_ms=step_latency,
+                token_usage=step_tokens,
+            )
+        else:
+            critic_step = _PendingTraceStep(
+                status="degraded",
+                reason="assessment_invalid",
+                detail="; ".join(meta.get("critique_diagnostics") or []),
+                tool_calls=tool_calls,
+                output=output,
+                latency_ms=step_latency,
+                token_usage=step_tokens,
+            )
+        self._record_pending_step(trace_recorder, CRITIC_NAME, critic_step)
+        return None
+
+    @staticmethod
+    def _update_pending_synthesis_from_blackboard_meta(
+        *,
+        pending_synthesis: _PendingTraceStep | None,
+        meta: dict[str, Any],
+        is_typed: bool,
+    ) -> None:
+        if pending_synthesis is None:
+            return
+        revisions_performed = int(meta.get("revisions_performed", 0))
+        revision_rejected = bool(meta.get("revision_rejected", False))
+        if revision_rejected:
+            pending_synthesis.status = "degraded"
+            pending_synthesis.reason = str(meta.get("revision_error_reason") or "critic_revision_failed")
+            pending_synthesis.detail = meta.get("revision_error_detail")
+            pending_synthesis.output = {
+                **(pending_synthesis.output or {}),
+                "revision_text": meta.get("revision_raw_output", ""),
+                "revision_objection_ids": list(meta.get("revision_objection_ids") or []),
+                "revision_targets": list(meta.get("revision_targets") or []),
+            }
+            return
+        if revisions_performed == 1:
+            pending_synthesis.output = {
+                **(pending_synthesis.output or {}),
+                "revision_guardrail": "applied",
+                "revision_text": meta.get("revision_raw_output", ""),
+                "revision_objection_ids": list(meta.get("revision_objection_ids") or []),
+                "revision_targets": list(meta.get("revision_targets") or []),
+            }
+            pending_synthesis.latency_ms += float(meta.get("revision_latency_ms", 0.0))
+            if not is_typed:
+                pending_synthesis.token_usage = _merged_token_usage(
+                    pending_synthesis.token_usage,
+                    dict(meta.get("revision_token_usage") or {}),
+                )
+
+    def _sync_blackboard_technical_hooks(self, state: Mapping[str, Any]) -> None:
+        tech_req = read_state_model(state, TECHNICAL_REQUEST_KEY, TechnicalAnalysisRequest)
+        tech_res = read_state_model(state, TECHNICAL_ASSESSMENT_KEY, TechnicalAssessmentResult)
+        if tech_res is not None:
+            self.last_technical_assessment = tech_res
+        if tech_req is not None:
+            self.last_technical_request = tech_req
+
+    def _sync_blackboard_response_and_hooks(
+        self,
+        *,
+        response: AnalyzeResponse,
+        state: Mapping[str, Any],
+    ) -> None:
+        self._sync_blackboard_technical_hooks(state)
+        final_resp = read_state_model(state, ANALYSIS_RESPONSE_KEY, AnalyzeResponse)
+        if final_resp is None:
+            return
+        response.decision = final_resp.decision
+        response.confidence = final_resp.confidence
+        response.reasons = list(final_resp.reasons)
+        response.warnings = list(final_resp.warnings)
+        for field_name in (
+            "entry_range",
+            "stop_loss",
+            "take_profit",
+            "risk_reward",
+            "position_size_eur",
+            "time_stop_at",
+            "memo",
+            "fundamental_agent_effect",
+            "technical_agent_effect",
+            "critic_effect",
+        ):
+            setattr(response, field_name, getattr(final_resp, field_name))
+        extra_warnings = state.get(WORKFLOW_WARNINGS_KEY)
+        if isinstance(extra_warnings, list):
+            for warning in extra_warnings:
+                if warning not in response.warnings:
+                    response.warnings.append(warning)
+
+    @staticmethod
+    def _build_blackboard_typed_synthesis(
+        *,
+        state: Mapping[str, Any],
+        initial_memo_result: DecisionMemoResult | None,
+    ) -> _TypedSynthesisRun | None:
+        synth_request = read_state_model(state, DECISION_SYNTHESIS_REQUEST_KEY, DecisionSynthesisRequest)
+        final_memo_result = read_state_model(state, DECISION_MEMO_RESULT_KEY, DecisionMemoResult)
+        if synth_request is None or final_memo_result is None:
+            return None
+        results: list[DecisionMemoResult] = []
+        if initial_memo_result is not None and initial_memo_result != final_memo_result:
+            results.append(initial_memo_result)
+        results.append(final_memo_result)
+        return _TypedSynthesisRun(request=synth_request, results=results)
+
+    @staticmethod
+    def _record_degraded_adk_event(
+        *,
+        trace_recorder: TraceRecorder,
+        author: str,
+        error_detail: str,
+        tool_calls: list[str],
+        text: str,
+        latency_ms: float,
+        usage: dict[str, int],
+    ) -> None:
+        output: dict[str, Any] | None = {"text": text} if text else None
+        if author == CRITIC_NAME:
+            nonzero_adk_usage = _nonzero_token_usage(usage)
+            if nonzero_adk_usage:
+                output = {**(output or {}), "adk_token_usage": nonzero_adk_usage}
+        trace_recorder.record_degraded(
+            author,
+            "agent_narration_degraded",
+            detail=error_detail,
+            tool_calls=tool_calls,
+            output=output,
+            latency_ms=latency_ms,
+            token_usage=usage,
+        )
+
+    def _handle_adk_execution_error(
+        self,
+        *,
+        exc: _AdkExecutionError,
+        run_id: str,
+        resolved_ticker: str,
+        analysis_date: date | None,
+        trace_recorder: TraceRecorder,
+        response: AnalyzeResponse,
+        warnings: list[str],
+        started_at: float,
+        typed_synthesis: _TypedSynthesisRun | None,
+        recorder: Any,
+    ) -> AnalyzeResponse:
+        final_warnings = list(response.warnings) + warnings + exc.result.warnings
+        response.warnings = final_warnings
+        partial_trace = self._build_trace(
+            run_id=run_id,
+            ticker=resolved_ticker,
+            as_of_date=analysis_date,
+            trace_recorder=trace_recorder,
+            response=response,
+            token_usage=exc.result.token_usage,
+            warnings=final_warnings,
+            total_latency_ms=(time.monotonic() - started_at) * 1000,
+            adk_event_count=exc.result.event_count,
+            observed_agents=exc.result.observed_agents,
+            typed_synthesis=typed_synthesis,
+        )
+        self._persist_trace(partial_trace)
+        recorder.record_summary(
+            {
+                "event_count": exc.result.event_count,
+                "total_token_usage": exc.result.token_usage,
+                "final_decision": response.decision,
+                "deterministic_fields": _deterministic_fields(response),
+                "observed_agents": exc.result.observed_agents,
+                "warnings": final_warnings,
+                "error": str(exc),
+                "wall_clock_ms": partial_trace.total_latency_ms,
+            }
+        )
+        if getattr(recorder, "enabled", False):
+            logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
+        raise GoogleWorkflowError(str(exc)) from exc
+
+    def _finalize_analysis_response(
+        self,
+        *,
+        run_id: str,
+        resolved_ticker: str,
+        analysis_date: date | None,
+        trace_recorder: TraceRecorder,
+        response: AnalyzeResponse,
+        warnings: list[str],
+        adk_result: _AdkRunResult,
+        started_at: float,
+        typed_synthesis: _TypedSynthesisRun | None,
+        recorder: Any,
+    ) -> AnalyzeResponse:
+        final_warnings = list(dict.fromkeys([*response.warnings, *warnings, *adk_result.warnings]))
+        response.warnings = final_warnings
+        total_latency_ms = (time.monotonic() - started_at) * 1000
+        trace = self._build_trace(
+            run_id=run_id,
+            ticker=resolved_ticker,
+            as_of_date=analysis_date,
+            trace_recorder=trace_recorder,
+            response=response,
+            token_usage=adk_result.token_usage,
+            warnings=final_warnings,
+            total_latency_ms=total_latency_ms,
+            adk_event_count=adk_result.event_count,
+            observed_agents=adk_result.observed_agents,
+            typed_synthesis=typed_synthesis,
+        )
+        response.trace_id = run_id
+        response.trace = trace
+        self._persist_trace(trace)
+        recorder.record_summary(
+            {
+                "event_count": adk_result.event_count,
+                "total_token_usage": adk_result.token_usage,
+                "final_decision": response.decision,
+                "deterministic_fields": _deterministic_fields(response),
+                "observed_agents": adk_result.observed_agents,
+                "warnings": final_warnings,
+                "wall_clock_ms": total_latency_ms,
+            }
+        )
+        if getattr(recorder, "enabled", False):
+            logger.info("llm_io_captured run_id=%s directory=%s", run_id, recorder.run_directory)
+        return response
 
     def _run_adk(
         self,
@@ -682,6 +1650,12 @@ class AgenticAnalysisWorkflow:
         fundamental_assessment: FundamentalAssessmentResult | None,
         technical_assessment: TechnicalAssessmentResult | None,
         typed_synthesis: _TypedSynthesisRun | None = None,
+        effective_as_of: date | None = None,
+        snapshot_at: datetime | None = None,
+        fundamental_request: FundamentalAnalysisRequest | None = None,
+        cross_domain_tension: CrossDomainTension | None = None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
+        deferred_technical: tuple[_TechnicalAssessmentOutcome, AnalyzeResponse, AnalyzeResponse] | None = None,
         recorder=None,
     ) -> _AdkRunResult:
         token_usage = _synthesis_token_usage(typed_synthesis)
@@ -690,6 +1664,7 @@ class AgenticAnalysisWorkflow:
         event_count = 0
         previous_event_at = time.monotonic()
         pending_synthesis: _PendingTraceStep | None = None
+        pending_deferred_technical = deferred_technical
 
         try:
             events = self.runner_factory(registry, ticker)
@@ -701,98 +1676,28 @@ class AgenticAnalysisWorkflow:
                 now = time.monotonic()
                 latency_ms = (now - previous_event_at) * 1000
                 previous_event_at = now
-
-                author = event_author(event)
-                if author not in observed_agents:
-                    observed_agents.append(author)
-                tool_calls = event_function_calls(event)
-                text = event_text(event)
-                usage = event_token_usage(event)
-                _merge_token_usage(token_usage, usage)
-
-                error_detail = event_error(event)
-                if error_detail is not None:
-                    self._flush_pending_synthesis(trace_recorder, pending_synthesis)
-                    pending_synthesis = None
-                    warnings.append(f"agent_narration_degraded: {error_detail}")
-                    trace_recorder.record_degraded(
-                        author,
-                        "agent_narration_degraded",
-                        detail=error_detail,
-                        tool_calls=tool_calls,
-                        output={"text": text} if text else None,
-                        latency_ms=latency_ms,
-                        token_usage=usage,
-                    )
-                    continue
-
-                if author == DECISION_SYNTHESIZER_NAME:
-                    pending_synthesis = self._build_synthesis_step(
-                        response=response,
-                        warnings=warnings,
-                        typed_synthesis=typed_synthesis,
-                        text=text,
-                        tool_calls=tool_calls,
-                        latency_ms=latency_ms,
-                        token_usage=usage,
-                    )
-                    continue
-
-                if author == CRITIC_NAME:
-                    critic_result = self._record_critic_policy_step(
-                        ticker=ticker,
-                        request=request,
-                        run_id=run_id,
-                        trace_recorder=trace_recorder,
-                        response=response,
-                        baseline=baseline,
-                        fundamental_assessment=fundamental_assessment,
-                        technical_assessment=technical_assessment,
-                        warnings=warnings,
-                        tool_calls=tool_calls,
-                        latency_ms=latency_ms,
-                        token_usage=usage,
-                        pending_synthesis=pending_synthesis,
-                        typed_synthesis=typed_synthesis,
-                    )
-                    _merge_token_usage(token_usage, critic_result.additional_token_usage)
-                    self._flush_pending_synthesis(
-                        trace_recorder,
-                        pending_synthesis,
-                        retries=critic_result.synthesis_retries,
-                    )
-                    self._record_pending_step(
-                        trace_recorder,
-                        CRITIC_NAME,
-                        critic_result.step,
-                    )
-                    pending_synthesis = None
-                    continue
-
-                if author in {FUNDAMENTAL_ANALYST_NAME, TECHNICAL_ANALYST_NAME} and (
-                    (author == FUNDAMENTAL_ANALYST_NAME and fundamental_assessment is not None)
-                    or (author == TECHNICAL_ANALYST_NAME and technical_assessment is not None)
-                ):
-                    self._flush_pending_synthesis(trace_recorder, pending_synthesis)
-                    pending_synthesis = None
-                    trace_recorder.record_completed(
-                        author,
-                        tool_calls=tool_calls,
-                        output=_typed_analyst_trace_output(text),
-                        latency_ms=latency_ms,
-                        token_usage=usage,
-                    )
-                    continue
-
-                self._flush_pending_synthesis(trace_recorder, pending_synthesis)
-                pending_synthesis = None
-
-                trace_recorder.record_completed(
-                    author,
-                    tool_calls=tool_calls,
-                    output={"text": text} if text else None,
+                pending_synthesis, pending_deferred_technical = self._dispatch_adk_event(
+                    event=event,
+                    ticker=ticker,
+                    request=request,
+                    run_id=run_id,
+                    trace_recorder=trace_recorder,
+                    response=response,
+                    baseline=baseline,
+                    fundamental_assessment=fundamental_assessment,
+                    technical_assessment=technical_assessment,
+                    typed_synthesis=typed_synthesis,
+                    effective_as_of=effective_as_of,
+                    snapshot_at=snapshot_at,
+                    fundamental_request=fundamental_request,
+                    cross_domain_tension=cross_domain_tension,
+                    supplemental_evidence_chunks=supplemental_evidence_chunks,
+                    warnings=warnings,
+                    observed_agents=observed_agents,
+                    token_usage=token_usage,
                     latency_ms=latency_ms,
-                    token_usage=usage,
+                    pending_synthesis=pending_synthesis,
+                    pending_deferred_technical=pending_deferred_technical,
                 )
             self._flush_pending_synthesis(trace_recorder, pending_synthesis)
             return _AdkRunResult(
@@ -817,27 +1722,163 @@ class AgenticAnalysisWorkflow:
             )
             raise _AdkExecutionError(f"ADK execution failed: {exc}", result) from exc
 
+    def _dispatch_adk_event(
+        self,
+        *,
+        event: Any,
+        ticker: str,
+        request: AnalyzeRequest,
+        run_id: str,
+        trace_recorder: TraceRecorder,
+        response: AnalyzeResponse,
+        baseline: DraftRecommendation,
+        fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
+        typed_synthesis: _TypedSynthesisRun | None,
+        effective_as_of: date | None,
+        snapshot_at: datetime | None,
+        fundamental_request: FundamentalAnalysisRequest | None,
+        cross_domain_tension: CrossDomainTension | None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput],
+        warnings: list[str],
+        observed_agents: list[str],
+        token_usage: dict[str, int],
+        latency_ms: float,
+        pending_synthesis: _PendingTraceStep | None,
+        pending_deferred_technical: tuple[_TechnicalAssessmentOutcome, AnalyzeResponse, AnalyzeResponse] | None,
+    ) -> tuple[
+        _PendingTraceStep | None,
+        tuple[_TechnicalAssessmentOutcome, AnalyzeResponse, AnalyzeResponse] | None,
+    ]:
+        author = event_author(event)
+        if author not in observed_agents:
+            observed_agents.append(author)
+        tool_calls = event_function_calls(event)
+        text = event_text(event)
+        usage = event_token_usage(event)
+        _merge_adk_event_token_usage(token_usage, author=author, event_usage=usage)
+
+        if author in {TECHNICAL_ANALYST_NAME, DECISION_SYNTHESIZER_NAME, CRITIC_NAME}:
+            self._flush_deferred_technical(
+                trace_recorder,
+                pending_deferred_technical,
+            )
+            pending_deferred_technical = None
+
+        error_detail = event_error(event)
+        if error_detail is not None:
+            self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+            warnings.append(f"agent_narration_degraded: {error_detail}")
+            self._record_degraded_adk_event(
+                trace_recorder=trace_recorder,
+                author=author,
+                error_detail=error_detail,
+                tool_calls=tool_calls,
+                text=text,
+                latency_ms=latency_ms,
+                usage=usage,
+            )
+            if author == FUNDAMENTAL_ANALYST_NAME:
+                self._flush_deferred_technical(
+                    trace_recorder,
+                    pending_deferred_technical,
+                )
+                pending_deferred_technical = None
+            return None, pending_deferred_technical
+
+        if author == DECISION_SYNTHESIZER_NAME:
+            next_pending = self._build_synthesis_step(
+                response=response,
+                warnings=warnings,
+                typed_synthesis=typed_synthesis,
+                text=text,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                token_usage=usage,
+            )
+            return next_pending, pending_deferred_technical
+
+        if author == CRITIC_NAME:
+            critic_result = self._record_critic_policy_step(
+                ticker=ticker,
+                request=request,
+                run_id=run_id,
+                trace_recorder=trace_recorder,
+                response=response,
+                baseline=baseline,
+                fundamental_assessment=fundamental_assessment,
+                technical_assessment=technical_assessment,
+                warnings=warnings,
+                tool_calls=tool_calls,
+                latency_ms=latency_ms,
+                token_usage=usage,
+                pending_synthesis=pending_synthesis,
+                typed_synthesis=typed_synthesis,
+                effective_as_of=effective_as_of,
+                snapshot_at=snapshot_at,
+                fundamental_request=fundamental_request,
+                cross_domain_tension=cross_domain_tension,
+                supplemental_evidence_chunks=supplemental_evidence_chunks,
+            )
+            _merge_token_usage(token_usage, critic_result.additional_token_usage)
+            self._flush_pending_synthesis(
+                trace_recorder,
+                pending_synthesis,
+                retries=critic_result.synthesis_retries,
+            )
+            self._record_pending_step(
+                trace_recorder,
+                CRITIC_NAME,
+                critic_result.step,
+            )
+            return None, pending_deferred_technical
+
+        self._flush_pending_synthesis(trace_recorder, pending_synthesis)
+        is_typed_analyst = (
+            (author == FUNDAMENTAL_ANALYST_NAME and fundamental_assessment is not None)
+            or (author == TECHNICAL_ANALYST_NAME and technical_assessment is not None)
+        )
+        output = _typed_analyst_trace_output(text) if is_typed_analyst else ({"text": text} if text else None)
+        trace_recorder.record_completed(
+            author,
+            tool_calls=tool_calls,
+            output=output,
+            latency_ms=latency_ms,
+            token_usage=usage,
+        )
+        if author == FUNDAMENTAL_ANALYST_NAME:
+            self._flush_deferred_technical(
+                trace_recorder,
+                pending_deferred_technical,
+            )
+            pending_deferred_technical = None
+        return None, pending_deferred_technical
+
     def _synthesize_typed_memo_if_enabled(
         self,
         *,
         run_id: str,
-        request: AnalyzeRequest,
         response: AnalyzeResponse,
         fundamental_assessment: FundamentalAssessmentResult | None,
         technical_assessment: TechnicalAssessmentResult | None,
+        as_of_date: date,
+        snapshot_at: datetime,
+        cross_domain_tension: CrossDomainTension | None = None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
     ) -> _TypedSynthesisRun | None:
         if _synthesizer_contract() != "typed":
             return None
 
-        snapshot_at = datetime.now(timezone.utc)
         synthesis_request = build_synthesis_request(
             run_id=run_id,
             response=response,
             analyst_views=build_analyst_views(
                 fundamental=fundamental_assessment, technical=technical_assessment
             ),
-            as_of_date=request.as_of_date or snapshot_at.date(),
+            as_of_date=as_of_date,
             snapshot_at=snapshot_at,
+            cross_domain_tension=cross_domain_tension,
+            supplemental_evidence_chunks=supplemental_evidence_chunks,
         )
         result = self._typed_synthesizer().synthesize(synthesis_request)
         return _TypedSynthesisRun(request=synthesis_request, results=[result])
@@ -1042,6 +2083,8 @@ class AgenticAnalysisWorkflow:
             trace_recorder.record_skipped(
                 agent_name,
                 step.reason or "skipped",
+                output=step.output,
+                token_usage=step.token_usage,
             )
             return
         trace_recorder.record_degraded(
@@ -1072,39 +2115,32 @@ class AgenticAnalysisWorkflow:
         token_usage: dict[str, int],
         pending_synthesis: _PendingTraceStep | None,
         typed_synthesis: _TypedSynthesisRun | None = None,
+        effective_as_of: date | None = None,
+        snapshot_at: datetime | None = None,
+        fundamental_request: FundamentalAnalysisRequest | None = None,
+        cross_domain_tension: CrossDomainTension | None = None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
     ) -> _CriticStepResult:
         # `technical_assessment` threads TA-4's validated result into the
         # Critic, so there is a single technical interpretation per run.
         del trace_recorder
         mode = _critic_mode()
         if mode == "off":
-            return _CriticStepResult(
-                step=_PendingTraceStep(
-                    status="skipped",
-                    reason="critic_mode_off",
-                    tool_calls=[],
-                    output={"reason": "critic_mode_off"},
-                    latency_ms=latency_ms,
-                    token_usage=token_usage,
-                )
-            )
+            return _skipped_critic_step(latency_ms, token_usage)
 
-        critique_request = build_critique_request(
+        critique_request = self._build_run_critique_request(
             ticker=ticker,
             run_id=run_id,
-            draft=build_draft_from_response(
-                response,
-                memo=self._synthesizer_memo(pending_synthesis),
-                memo_claims=typed_synthesis.memo_claims() if typed_synthesis is not None else (),
-                source="decision_synthesizer",
-            ),
-            analyst_views=build_analyst_views(
-                fundamental=fundamental_assessment, technical=technical_assessment
-            ),
-            deterministic_warnings=response.warnings,
-            deterministic_diagnosis=response.diagnosis,
-            as_of=request.as_of_date,
-            engine=self.engine,
+            response=response,
+            fundamental_assessment=fundamental_assessment,
+            technical_assessment=technical_assessment,
+            pending_synthesis=pending_synthesis,
+            typed_synthesis=typed_synthesis,
+            as_of=effective_as_of or request.as_of_date,
+            snapshot_at=snapshot_at,
+            fundamental_request=fundamental_request,
+            cross_domain_tension=cross_domain_tension,
+            supplemental_evidence_chunks=supplemental_evidence_chunks,
         )
         deterministic_objections = evaluate_deterministic_objections(
             request=critique_request,
@@ -1128,6 +2164,7 @@ class AgenticAnalysisWorkflow:
             tool_calls=tool_calls,
             latency_ms=latency_ms + critique_result.latency_ms,
             token_usage=_merged_token_usage(token_usage, critique_result.token_usage),
+            adk_token_usage=token_usage,
         )
         synthesis_retries = 0
         additional_token_usage = dict(critique_result.token_usage)
@@ -1146,15 +2183,25 @@ class AgenticAnalysisWorkflow:
 
         if effect.revisions_requested == 1:
             synthesis_retries = self._apply_bounded_revision(
+                run_id=run_id,
                 request=request,
                 response=response,
                 baseline=baseline,
                 critique_result=critique_result,
+                effect=effect,
+                pre_revision_objections=deterministic_objections,
                 pending_synthesis=pending_synthesis,
                 critic_step=critic_step,
                 additional_token_usage=additional_token_usage,
                 warnings=warnings,
                 typed_synthesis=typed_synthesis,
+                fundamental_assessment=fundamental_assessment,
+                technical_assessment=technical_assessment,
+                effective_as_of=effective_as_of,
+                snapshot_at=snapshot_at,
+                fundamental_request=fundamental_request,
+                cross_domain_tension=cross_domain_tension,
+                supplemental_evidence_chunks=supplemental_evidence_chunks,
             )
             effect.revisions_performed = synthesis_retries
             effect.final_decision = response.decision
@@ -1178,12 +2225,15 @@ class AgenticAnalysisWorkflow:
         tool_calls: list[str],
         latency_ms: float,
         token_usage: dict[str, int],
+        adk_token_usage: dict[str, int],
     ) -> _PendingTraceStep:
         objections = [
             *deterministic_objections,
             *critique_result.response.objections,
         ]
         output = {
+            "source": "typed_critic_view",
+            "adk_token_usage": dict(adk_token_usage),
             "status": critique_result.response.status,
             "verdict": critique_result.response.verdict,
             "objection_counts_by_severity": _objection_counts_by_severity(objections),
@@ -1219,78 +2269,115 @@ class AgenticAnalysisWorkflow:
     def _apply_bounded_revision(
         self,
         *,
+        run_id: str,
         request: AnalyzeRequest,
         response: AnalyzeResponse,
         baseline: DraftRecommendation,
         critique_result: CritiqueResult,
+        effect: Any,
+        pre_revision_objections: Sequence[CritiqueObjection],
         pending_synthesis: _PendingTraceStep | None,
         critic_step: _PendingTraceStep,
         additional_token_usage: dict[str, int],
         warnings: list[str],
         typed_synthesis: _TypedSynthesisRun | None = None,
+        fundamental_assessment: FundamentalAssessmentResult | None = None,
+        technical_assessment: TechnicalAssessmentResult | None = None,
+        effective_as_of: date | None = None,
+        snapshot_at: datetime | None = None,
+        fundamental_request: FundamentalAnalysisRequest | None = None,
+        cross_domain_tension: CrossDomainTension | None = None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
     ) -> int:
-        if MAX_CRITIC_REVISIONS != 1:
-            raise ValueError("MAX_CRITIC_REVISIONS must remain 1 for the bounded critic loop.")
-
-        revision_result = self._request_synthesis_revision(
+        runtime = self._build_blackboard_runtime(
+            fundamental_mode=_fundamental_agent_mode(),
+            technical_mode=_technical_agent_mode(),
+            synthesizer_contract=_synthesizer_contract(),
+            critic_mode=_critic_mode(),
+        )
+        outcome = run_bounded_critic_revision(
+            runtime=runtime,
             ticker=request.ticker,
+            run_id=run_id,
             request=request,
             response=response,
             baseline=baseline,
-            revision_instructions=critique_result.response.revision_instructions,
-            critic_findings=_critic_findings(critique_result),
+            critique_result=critique_result,
+            effect=effect,
+            pre_revision_objections=pre_revision_objections,
+            fundamental_assessment=fundamental_assessment,
+            technical_assessment=technical_assessment,
+            fundamental_request=fundamental_request,
+            cross_domain_tension=cross_domain_tension,
+            supplemental_evidence_chunks=supplemental_evidence_chunks,
+            effective_as_of=effective_as_of,
+            snapshot_at=snapshot_at,
+            typed_synthesis_request=typed_synthesis.request if typed_synthesis is not None else None,
+            typed_results_len=len(typed_synthesis.results) if typed_synthesis is not None else 0,
+            draft_memo_text=self._synthesizer_memo(pending_synthesis),
+            session_state={},
+            warnings=warnings,
+            typed_synthesis_obj=typed_synthesis,
+        )
+        _merge_token_usage(additional_token_usage, outcome.token_usage)
+        self._apply_revision_outcome_to_steps(
+            outcome=outcome,
+            critique_result=critique_result,
+            pending_synthesis=pending_synthesis,
+            critic_step=critic_step,
             typed_synthesis=typed_synthesis,
         )
-        _merge_token_usage(additional_token_usage, revision_result.token_usage)
-        if revision_result.synthesis is None:
-            warnings.append("critic_revision_failed")
+        return outcome.revisions_performed
+
+    @staticmethod
+    def _apply_revision_outcome_to_steps(
+        *,
+        outcome: BoundedRevisionOutcome,
+        critique_result: CritiqueResult,
+        pending_synthesis: _PendingTraceStep | None,
+        critic_step: _PendingTraceStep,
+        typed_synthesis: _TypedSynthesisRun | None,
+    ) -> None:
+        routing_payload = {
+            "revision_objection_ids": list(outcome.routing.revision_objection_ids),
+            "revision_targets": [
+                target.model_dump(mode="json") for target in outcome.routing.revision_targets
+            ],
+        }
+        if critic_step.output is not None:
+            critic_step.output.update(routing_payload)
+
+        if outcome.rejected:
             if pending_synthesis is not None:
                 pending_synthesis.status = "degraded"
-                pending_synthesis.reason = revision_result.error_reason or "critic_revision_failed"
-                pending_synthesis.detail = revision_result.error_detail
+                pending_synthesis.reason = outcome.error_reason or "critic_revision_failed"
+                pending_synthesis.detail = outcome.error_detail
                 pending_synthesis.output = {
                     **(pending_synthesis.output or {}),
                     "revision_instructions": critique_result.response.revision_instructions,
-                    "revision_text": revision_result.raw_output,
+                    "revision_text": outcome.raw_output,
+                    **routing_payload,
                 }
             critic_step.status = "degraded"
-            critic_step.reason = revision_result.error_reason or "critic_revision_failed"
-            critic_step.detail = revision_result.error_detail
-            return 0
+            critic_step.reason = outcome.error_reason or "critic_revision_failed"
+            critic_step.detail = outcome.error_detail
+            return
 
-        try:
-            validate_risk_output(revision_result.synthesis, response)
-        except ValueError as exc:
-            warnings.append("critic_revision_failed")
-            if pending_synthesis is not None:
-                pending_synthesis.status = "degraded"
-                pending_synthesis.reason = "critic_revision_failed"
-                pending_synthesis.detail = str(exc)
-            critic_step.status = "degraded"
-            critic_step.reason = "critic_revision_failed"
-            critic_step.detail = str(exc)
-            return 0
-
-        self._apply_downgrade_only_transition(
-            response=response,
-            proposed_decision=revision_result.synthesis.decision,
-            proposed_confidence=revision_result.synthesis.confidence,
-        )
-        if typed_synthesis is not None:
-            response.memo = typed_synthesis.memo()
+        if typed_synthesis is not None and outcome.typed_request is not None and outcome.typed_result is not None:
+            typed_synthesis.record_revision(outcome.typed_request, outcome.typed_result)
         if pending_synthesis is not None:
             pending_synthesis.output = {
                 **(pending_synthesis.output or {}),
                 "revision_guardrail": "applied",
-                "revision_text": revision_result.raw_output,
+                "revision_text": outcome.raw_output,
+                **routing_payload,
             }
-            pending_synthesis.latency_ms += revision_result.latency_ms
+            pending_synthesis.latency_ms += outcome.latency_ms
             if typed_synthesis is None:
                 pending_synthesis.token_usage = _merged_token_usage(
                     pending_synthesis.token_usage,
-                    revision_result.token_usage,
+                    outcome.token_usage,
                 )
-        return 1
 
     def _review_critique(self, critique_request) -> CritiqueResult:
         return Critic().review(critique_request)
@@ -1304,20 +2391,31 @@ class AgenticAnalysisWorkflow:
         baseline: DraftRecommendation,
         revision_instructions: str,
         critic_findings: list[str] | None = None,
+        critic_objections: Sequence[CritiqueObjection] = (),
+        revision_objection_ids: Sequence[str] = (),
+        revision_targets: Sequence[CritiqueRevisionTarget] = (),
         typed_synthesis: _TypedSynthesisRun | None = None,
+        typed_request: DecisionSynthesisRequest | None = None,
     ) -> _DecisionRevisionResult:
         del ticker
-        if typed_synthesis is not None:
+        if typed_synthesis is not None or typed_request is not None:
             return self._request_typed_synthesis_revision(
                 response=response,
                 typed_synthesis=typed_synthesis,
+                typed_request=typed_request,
                 critic_findings=critic_findings or [revision_instructions],
+                critic_objections=critic_objections,
+                revision_objection_ids=revision_objection_ids,
+                revision_targets=revision_targets,
             )
         prompt = self._build_revision_prompt(
             request=request,
             response=response,
             baseline=baseline,
             revision_instructions=revision_instructions,
+            critic_objections=critic_objections,
+            revision_objection_ids=revision_objection_ids,
+            revision_targets=revision_targets,
         )
         settings = get_settings()
         model = _GeminiDecisionRevisionModel(
@@ -1360,10 +2458,18 @@ class AgenticAnalysisWorkflow:
         self,
         *,
         response: AnalyzeResponse,
-        typed_synthesis: _TypedSynthesisRun,
+        typed_synthesis: _TypedSynthesisRun | None,
         critic_findings: list[str],
+        typed_request: DecisionSynthesisRequest | None = None,
+        critic_objections: Sequence[CritiqueObjection] = (),
+        revision_objection_ids: Sequence[str] = (),
+        revision_targets: Sequence[CritiqueRevisionTarget] = (),
     ) -> _DecisionRevisionResult:
-        previous_request = typed_synthesis.request
+        previous_request = typed_request or (
+            typed_synthesis.request if typed_synthesis is not None else None
+        )
+        if previous_request is None:
+            raise ValueError("typed_request or typed_synthesis is required for typed revision.")
         revision_request = build_synthesis_request(
             run_id=previous_request.run_id,
             response=response,
@@ -1371,10 +2477,14 @@ class AgenticAnalysisWorkflow:
             as_of_date=previous_request.as_of_date,
             snapshot_at=previous_request.snapshot_at,
             critic_findings=critic_findings,
+            critic_objections=critic_objections,
+            revision_objection_ids=revision_objection_ids,
+            revision_targets=revision_targets,
+            cross_domain_tension=previous_request.cross_domain_tension,
+            supplemental_evidence_chunks=previous_request.supplemental_evidence_chunks,
         )
         started_at = time.monotonic()
         result = self._typed_synthesizer().synthesize(revision_request)
-        typed_synthesis.record_revision(revision_request, result)
         return _DecisionRevisionResult(
             synthesis=DecisionSynthesis(
                 decision=result.response.proposed_decision,
@@ -1384,6 +2494,8 @@ class AgenticAnalysisWorkflow:
             raw_output=result.rendered_memo,
             token_usage=result.token_usage,
             latency_ms=(time.monotonic() - started_at) * 1000,
+            typed_request=revision_request,
+            typed_result=result,
         )
 
     def _build_revision_prompt(
@@ -1393,8 +2505,11 @@ class AgenticAnalysisWorkflow:
         response: AnalyzeResponse,
         baseline: DraftRecommendation,
         revision_instructions: str,
+        critic_objections: Sequence[CritiqueObjection] = (),
+        revision_objection_ids: Sequence[str] = (),
+        revision_targets: Sequence[CritiqueRevisionTarget] = (),
     ) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "ticker": request.ticker,
             "as_of_date": request.as_of_date.isoformat() if request.as_of_date is not None else None,
             "baseline": baseline.model_dump(mode="json"),
@@ -1404,6 +2519,12 @@ class AgenticAnalysisWorkflow:
             ).model_dump(mode="json"),
             "revision_instructions": revision_instructions,
         }
+        if critic_objections:
+            payload["critic_objections"] = [obj.model_dump(mode="json") for obj in critic_objections]
+        if revision_objection_ids:
+            payload["revision_objection_ids"] = list(revision_objection_ids)
+        if revision_targets:
+            payload["revision_targets"] = [target.model_dump(mode="json") for target in revision_targets]
         return (
             f"{HARD_RULES_TEXT}\n\n"
             "You are revising the Decision Synthesizer output for Forseti.\n"
@@ -1434,9 +2555,15 @@ class AgenticAnalysisWorkflow:
         self,
         trace_recorder: TraceRecorder,
         observed_agents: list[str],
+        *,
+        deferred_technical: tuple[_TechnicalAssessmentOutcome, AnalyzeResponse, AnalyzeResponse] | None = None,
     ) -> None:
         observed = set(observed_agents)
+        pending_deferred = deferred_technical
         for agent_name, reason in _SPECIALIST_SKIP_REASONS.items():
+            if agent_name == TECHNICAL_ANALYST_NAME and pending_deferred is not None:
+                self._flush_deferred_technical(trace_recorder, pending_deferred)
+                pending_deferred = None
             if agent_name not in observed:
                 trace_recorder.record_skipped(agent_name, reason)
 
@@ -1466,61 +2593,254 @@ class AgenticAnalysisWorkflow:
         )
         recorder.record_agent_prompts(registry)
 
-    def _apply_fundamental_policy_if_enabled(
+    def _assess_specialists(
         self,
         *,
         run_id: str,
         request: AnalyzeRequest,
-        response: AnalyzeResponse,
-        trace_recorder: TraceRecorder,
-    ) -> FundamentalAssessmentResult | None:
-        mode = _fundamental_agent_mode()
-        if mode == "off":
-            return None
+        as_of: date,
+    ) -> tuple[_FundamentalAssessmentOutcome | None, _TechnicalAssessmentOutcome | None]:
+        fundamental_mode = _fundamental_agent_mode()
+        technical_mode = _technical_agent_mode()
+        if fundamental_mode != "off" and technical_mode != "off":
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="specialist") as executor:
+                fundamental_future = executor.submit(
+                    self._run_fundamental_assessment,
+                    mode=fundamental_mode,
+                    ticker=request.ticker,
+                    run_id=run_id,
+                    as_of=as_of,
+                )
+                technical_future = executor.submit(
+                    self._run_technical_assessment,
+                    mode=technical_mode,
+                    ticker=request.ticker,
+                    run_id=run_id,
+                    as_of=as_of,
+                )
+                return fundamental_future.result(), technical_future.result()
 
-        context_started_at = time.monotonic()
-        context = build_fundamental_analysis_request(
-            request.ticker,
-            run_id,
-            as_of=request.as_of_date,
+        fundamental_outcome = (
+            self._run_fundamental_assessment(
+                mode=fundamental_mode,
+                ticker=request.ticker,
+                run_id=run_id,
+                as_of=as_of,
+            )
+            if fundamental_mode != "off"
+            else None
+        )
+        technical_outcome = (
+            self._run_technical_assessment(
+                mode=technical_mode,
+                ticker=request.ticker,
+                run_id=run_id,
+                as_of=as_of,
+            )
+            if technical_mode != "off"
+            else None
+        )
+        return fundamental_outcome, technical_outcome
+
+    def _build_run_critique_request(
+        self,
+        *,
+        ticker: str,
+        run_id: str,
+        response: AnalyzeResponse,
+        fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
+        pending_synthesis: _PendingTraceStep | None,
+        typed_synthesis: _TypedSynthesisRun | None,
+        as_of: date | None,
+        snapshot_at: datetime | None,
+        fundamental_request: FundamentalAnalysisRequest | None,
+        cross_domain_tension: CrossDomainTension | None,
+        supplemental_evidence_chunks: Sequence[EvidenceChunkInput],
+    ) -> CritiqueRequest:
+        critique_kwargs: dict[str, Any] = {
+            "ticker": ticker,
+            "run_id": run_id,
+            "draft": build_draft_from_response(
+                response,
+                memo=self._synthesizer_memo(pending_synthesis),
+                memo_claims=typed_synthesis.memo_claims() if typed_synthesis is not None else (),
+                source="decision_synthesizer",
+            ),
+            "analyst_views": build_analyst_views(
+                fundamental=fundamental_assessment, technical=technical_assessment
+            ),
+            "deterministic_warnings": response.warnings,
+            "deterministic_diagnosis": response.diagnosis,
+            "as_of": as_of,
+            "engine": self.engine,
+            "fundamental_request": fundamental_request,
+            "cross_domain_tension": cross_domain_tension,
+            "supplemental_evidence_chunks": supplemental_evidence_chunks,
+            "snapshot_at": snapshot_at,
+        }
+        if self.embedding_client is not None and callable(getattr(self.embedding_client, "embed_texts", None)):
+            critique_kwargs["embedding_client"] = self.embedding_client
+        return build_critique_request(**critique_kwargs)
+
+    def _resolve_cross_domain_tension(
+        self,
+        *,
+        ticker: str,
+        snapshot_at: datetime,
+        fundamental_outcome: _FundamentalAssessmentOutcome | None,
+        technical_outcome: _TechnicalAssessmentOutcome | None,
+        fundamental_assessment: FundamentalAssessmentResult | None,
+        technical_assessment: TechnicalAssessmentResult | None,
+        trace_recorder: TraceRecorder,
+    ) -> CrossDomainTensionResolution:
+        started_at = time.monotonic()
+        resolution = resolve_cross_domain_tension(
+            ticker=ticker,
+            snapshot_at=snapshot_at,
+            fundamental_assessment=fundamental_assessment,
+            technical_assessment=technical_assessment,
+            fundamental_request=fundamental_outcome.context if fundamental_outcome is not None else None,
+            technical_request=technical_outcome.context if technical_outcome is not None else None,
+            embedding_client=self.embedding_client,
             engine=self.engine,
         )
-        trace_recorder.record_completed(
-            "fundamental_context_builder",
-            latency_ms=(time.monotonic() - context_started_at) * 1000,
-            output={
-                "context_hash": context.context_hash,
-                "chunk_count": len(context.evidence_chunks),
-            },
+        if resolution.tension is not None:
+            trace_recorder.record_completed(
+                "cross_domain_tension",
+                latency_ms=(time.monotonic() - started_at) * 1000,
+                token_usage={},
+                output={
+                    "conflict_type": resolution.tension.conflict_type,
+                    "fundamental_signal": resolution.tension.fundamental_signal,
+                    "technical_signal": resolution.tension.technical_signal,
+                    "supplemental_chunk_ids": list(resolution.tension.supplemental_chunk_ids),
+                    "date_window_days": resolution.tension.date_window_days,
+                },
+            )
+        return resolution
+
+    def _run_fundamental_assessment(
+        self,
+        *,
+        mode: Literal["shadow", "enforced"],
+        ticker: str,
+        run_id: str,
+        as_of: date | None,
+    ) -> _FundamentalAssessmentOutcome:
+        context_started_at = time.monotonic()
+        context_kwargs: dict[str, Any] = {
+            "as_of": as_of,
+            "engine": self.engine,
+        }
+        if self.embedding_client is not None and callable(getattr(self.embedding_client, "embed_texts", None)):
+            context_kwargs["embedding_client"] = self.embedding_client
+        context = build_fundamental_analysis_request(
+            ticker,
+            run_id,
+            **context_kwargs,
         )
+        context_latency_ms = (time.monotonic() - context_started_at) * 1000
 
         assessment_started_at = time.monotonic()
         assessment_result = FundamentalAnalyst().assess(context)
         assessment_latency_ms = (time.monotonic() - assessment_started_at) * 1000
-        if assessment_result.validation.accepted:
+        return _FundamentalAssessmentOutcome(
+            mode=mode,
+            context=context,
+            context_latency_ms=context_latency_ms,
+            assessment_result=assessment_result,
+            assessment_latency_ms=assessment_latency_ms,
+        )
+
+    def _run_technical_assessment(
+        self,
+        *,
+        mode: Literal["shadow", "enforced"],
+        ticker: str,
+        run_id: str,
+        as_of: date | None,
+    ) -> _TechnicalAssessmentOutcome:
+        context_started_at = time.monotonic()
+        context = build_technical_analysis_request(
+            ticker,
+            run_id,
+            as_of=as_of,
+            engine=self.engine,
+        )
+        context_latency_ms = (time.monotonic() - context_started_at) * 1000
+
+        assessment_started_at = time.monotonic()
+        assessment_result = TechnicalAnalyst().assess(context)
+        assessment_latency_ms = (time.monotonic() - assessment_started_at) * 1000
+        return _TechnicalAssessmentOutcome(
+            mode=mode,
+            context=context,
+            context_latency_ms=context_latency_ms,
+            assessment_result=assessment_result,
+            assessment_latency_ms=assessment_latency_ms,
+        )
+
+    @staticmethod
+    def _record_fundamental_steps_from_state(
+        *,
+        fund_req: FundamentalAnalysisRequest,
+        fund_res: FundamentalAssessmentResult,
+        context_latency_ms: float,
+        assessment_latency_ms: float,
+        trace_recorder: TraceRecorder,
+    ) -> None:
+        trace_recorder.record_completed(
+            "fundamental_context_builder",
+            latency_ms=context_latency_ms,
+            output={
+                "context_hash": fund_req.context_hash,
+                "chunk_count": len(fund_req.evidence_chunks),
+            },
+        )
+        if fund_res.validation.accepted:
             trace_recorder.record_completed(
                 FUNDAMENTAL_ANALYST_NAME,
                 latency_ms=assessment_latency_ms,
-                token_usage=assessment_result.token_usage,
+                token_usage=fund_res.token_usage,
                 output={
-                    "status": assessment_result.response.status,
-                    "proposed_score_adjustment": assessment_result.response.proposed_score_adjustment,
+                    "status": fund_res.response.status,
+                    "proposed_score_adjustment": fund_res.response.proposed_score_adjustment,
                 },
             )
         else:
             trace_recorder.record_degraded(
                 FUNDAMENTAL_ANALYST_NAME,
                 "assessment_invalid",
-                detail=",".join(assessment_result.validation.reason_codes),
+                detail=",".join(fund_res.validation.reason_codes),
                 latency_ms=assessment_latency_ms,
-                token_usage=assessment_result.token_usage,
-                output={"status": assessment_result.response.status},
+                token_usage=fund_res.token_usage,
+                output={"status": fund_res.response.status},
             )
 
+    def _fold_fundamental_outcome(
+        self,
+        *,
+        outcome: _FundamentalAssessmentOutcome | None,
+        response: AnalyzeResponse,
+        trace_recorder: TraceRecorder,
+    ) -> FundamentalAssessmentResult | None:
+        if outcome is None:
+            return None
+
+        assessment_result = outcome.assessment_result
+        self._record_fundamental_steps_from_state(
+            fund_req=outcome.context,
+            fund_res=assessment_result,
+            context_latency_ms=outcome.context_latency_ms,
+            assessment_latency_ms=outcome.assessment_latency_ms,
+            trace_recorder=trace_recorder,
+        )
+
         effect = apply_fundamental_policy(
-            mode=mode,
+            mode=outcome.mode,
             deterministic_response=response.model_copy(deep=True),
-            request=context,
+            request=outcome.context,
             assessment_result=assessment_result,
         )
         updated_effect = self._apply_policy_effect_to_response(effect, response)
@@ -1541,71 +2861,95 @@ class AgenticAnalysisWorkflow:
         effect.decision_changed = effect.final_decision != effect.baseline_decision
         return effect
 
-    def _apply_technical_policy_if_enabled(
-        self,
+    @staticmethod
+    def _record_technical_steps_from_state(
         *,
-        run_id: str,
-        request: AnalyzeRequest,
-        deterministic_response: AnalyzeResponse,
-        response: AnalyzeResponse,
+        tech_req: TechnicalAnalysisRequest,
+        tech_res: TechnicalAssessmentResult,
+        context_latency_ms: float,
+        assessment_latency_ms: float,
         trace_recorder: TraceRecorder,
-    ) -> TechnicalAssessmentResult | None:
-        mode = _technical_agent_mode()
-        if mode == "off":
-            return None
-
-        context_started_at = time.monotonic()
-        context = build_technical_analysis_request(
-            request.ticker,
-            run_id,
-            as_of=request.as_of_date,
-            engine=self.engine,
-        )
+    ) -> None:
         trace_recorder.record_completed(
             "technical_context_builder",
-            latency_ms=(time.monotonic() - context_started_at) * 1000,
+            latency_ms=context_latency_ms,
             output={
-                "context_hash": context.context_hash,
-                "fact_count": len(context.facts),
-                "bar_count": context.coverage.bar_count,
+                "context_hash": tech_req.context_hash,
+                "fact_count": len(tech_req.facts),
+                "bar_count": tech_req.coverage.bar_count,
             },
         )
-
-        assessment_started_at = time.monotonic()
-        assessment_result = TechnicalAnalyst().assess(context)
-        assessment_latency_ms = (time.monotonic() - assessment_started_at) * 1000
-        if assessment_result.validation.accepted:
+        if tech_res.validation.accepted:
             trace_recorder.record_completed(
                 TECHNICAL_ANALYST_NAME,
                 latency_ms=assessment_latency_ms,
-                token_usage=assessment_result.token_usage,
+                token_usage=tech_res.token_usage,
                 output={
-                    "status": assessment_result.response.status,
-                    "proposed_score_adjustment": assessment_result.response.proposed_score_adjustment,
-                    "trend_state": assessment_result.response.trend_state,
+                    "status": tech_res.response.status,
+                    "proposed_score_adjustment": tech_res.response.proposed_score_adjustment,
+                    "trend_state": tech_res.response.trend_state,
                 },
             )
         else:
             trace_recorder.record_degraded(
                 TECHNICAL_ANALYST_NAME,
                 "assessment_invalid",
-                detail=",".join(assessment_result.validation.reason_codes),
+                detail=",".join(tech_res.validation.reason_codes),
                 latency_ms=assessment_latency_ms,
-                token_usage=assessment_result.token_usage,
-                output={"status": assessment_result.response.status},
+                token_usage=tech_res.token_usage,
+                output={"status": tech_res.response.status},
+            )
+
+    def _flush_deferred_technical(
+        self,
+        trace_recorder: TraceRecorder,
+        deferred_technical: tuple[_TechnicalAssessmentOutcome, AnalyzeResponse, AnalyzeResponse] | None,
+    ) -> None:
+        if deferred_technical is None:
+            return None
+        outcome, _det_resp, _resp = deferred_technical
+        self._record_technical_steps_from_state(
+            tech_req=outcome.context,
+            tech_res=outcome.assessment_result,
+            context_latency_ms=outcome.context_latency_ms,
+            assessment_latency_ms=outcome.assessment_latency_ms,
+            trace_recorder=trace_recorder,
+        )
+        return None
+
+    def _fold_technical_outcome(
+        self,
+        *,
+        outcome: _TechnicalAssessmentOutcome | None,
+        deterministic_response: AnalyzeResponse,
+        response: AnalyzeResponse,
+        trace_recorder: TraceRecorder,
+        record_trace: bool = True,
+    ) -> TechnicalAssessmentResult | None:
+        if outcome is None:
+            return None
+
+        assessment_result = outcome.assessment_result
+        if record_trace:
+            self._record_technical_steps_from_state(
+                tech_req=outcome.context,
+                tech_res=assessment_result,
+                context_latency_ms=outcome.context_latency_ms,
+                assessment_latency_ms=outcome.assessment_latency_ms,
+                trace_recorder=trace_recorder,
             )
 
         effect = apply_technical_policy(
-            mode=mode,
+            mode=outcome.mode,
             deterministic_response=deterministic_response,
             post_fundamental_response=response.model_copy(deep=True),
-            request=context,
+            request=outcome.context,
             assessment_result=assessment_result,
         )
         _apply_technical_effect_to_response(effect, response)
         response.technical_agent_effect = effect
         self.last_technical_assessment = assessment_result
-        self.last_technical_request = context
+        self.last_technical_request = outcome.context
         return assessment_result
 
     def _build_trace(

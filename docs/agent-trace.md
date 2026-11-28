@@ -50,47 +50,82 @@ Any string nested in `TraceStep.output` is truncated to 20,000 chars and suffixe
 ## `fundamental_analyst` step
 
 When `FUNDAMENTAL_AGENT_MODE` is `off`, the `fundamental_analyst` ADK slot is
-the legacy narrative `LlmAgent`.
+the legacy narrative `LlmAgent` (or a no-op blackboard node when the unified
+typed blackboard spine is active).
 
-When the mode is `shadow` or `enforced`, the workflow calls the Fundamental
-Analyst once before ADK to produce the validated assessment used by policy.
-The ADK slot is then a deterministic typed view (`TypedAnalystViewAgent`),
-not another model call:
+When the mode is `shadow` or `enforced`, the Fundamental Analyst executes as a
+typed ADK `BaseAgent` blackboard node (`BlackboardFundamentalAgent`, or
+`TypedAnalystViewAgent` in legacy view mode) that runs one validated assessment
+and writes typed artifacts (`fundamental_request`, `fundamental_assessment`,
+`fundamental_view`) to `session.state`:
 
+- When both `FUNDAMENTAL_AGENT_MODE` and `TECHNICAL_AGENT_MODE` are enabled,
+  the ADK spine fans out `fundamental_analyst` and `technical_analyst`
+  concurrently inside `specialist_fan_out` (`ParallelAgent`), then folds
+  policies sequentially in `specialist_policy_fold`
+  (`Rules -> Fundamental -> Technical`) so `fundamental_agent_effect`,
+  `technical_agent_effect`, `context_hash`, and `SPECIALIST_ORDER` trace steps
+  remain deterministic regardless of completion order.
 - `output.source == "typed_assessment"` and the remaining fields mirror the
   validated result, including cited `metric_ids` and `chunk_ids`.
-- The typed-view event has `token_usage == {}`. The earlier assessment trace
-  records the one Fundamental model call and its usage.
-- The Synthesizer and Critic read this validated view from `fundamental_view`.
+- The typed-view event has `token_usage == {}`. The assessment trace records
+  the single Fundamental model call and its usage.
+- Downstream nodes (`cross_domain_tension`, `decision_synthesizer`, and
+  `critic_guardrail`) read this validated view from `session.state`.
 
 ## `technical_analyst` step
 
 When `TECHNICAL_AGENT_MODE` is `off`, the `technical_analyst` step is a
-narrative ADK `LlmAgent` turn like any other specialist: `output` is the raw
-`{"text": ...}` fallback and `token_usage` reflects the model call.
+narrative ADK `LlmAgent` turn in legacy mode (or a no-op blackboard node in
+blackboard mode).
 
 When `TECHNICAL_AGENT_MODE` is `shadow` or `enforced`, the step is produced by
-the deterministic `TypedAnalystViewAgent`
-(`agents/orchestration/typed_view_agent.py`) instead of a second model call:
+the typed ADK `BaseAgent` node (`BlackboardTechnicalAgent` or
+`TypedAnalystViewAgent`) instead of a duplicate model call:
 
+- When both specialists are enabled, `technical_analyst` builds its context and
+  runs its assessment concurrently with `fundamental_analyst` under
+  `specialist_fan_out`, while policy folding remains strictly sequential after
+  the join.
 - `output.source == "typed_assessment"`, and the remaining `output` fields
   (`status`, `overall_signal`, `trend_state`, `momentum_state`,
   `proposed_score_adjustment`, `findings`, `summary`) mirror the validated
   `TechnicalAssessmentResult` from TA-4.
-- `token_usage` is always `{}` — no model call is made.
-- `SPECIALIST_ORDER` and `observed_agents` are unchanged; the agent still
-  emits exactly one event authored `technical_analyst`.
+- `token_usage` on the typed-view event is always `{}` — no duplicate model call
+  is made.
+- `SPECIALIST_ORDER` and `observed_agents` remain deterministic; the agent
+  emits its structured view to `technical_view` on `session.state`.
 
 See [`docs/technical-analyst.md`](technical-analyst.md) for how this typed
-view also reaches the Decision Synthesizer and the Critic.
+view also reaches `cross_domain_tension`, the Decision Synthesizer, and the
+Critic.
+
+## `cross_domain_tension` step
+
+When both Fundamental and Technical assessments complete and conflict (opposite
+polarity, `signal_conflict`, or a high-materiality technical `risk_flag`
+against a positive fundamental view), the `cross_domain_tension` blackboard
+node emits a typed `CrossDomainTension` artifact on `session.state` and runs at
+most one point-in-time-safe (`published_at <= snapshot_at`) `pgvector` evidence
+lookup, deduplicated against `FundamentalAnalysisRequest.evidence_chunks`. Both
+the tension object and supplemental chunks flow into `decision_synthesizer` and
+`critic_guardrail` without altering ADR 002 risk math or ADR 008 ceilings.
 
 ## `critic_guardrail` step
 
 Agentic runs always include a `critic_guardrail` step after `decision_synthesizer`.
+The ADK slot is backed by a typed `BaseAgent` (`BlackboardCriticAgent` /
+`TypedCriticViewAgent`) rather than a duplicate narrative `LlmAgent`:
 
 - `status=completed` — critique ran and passed validation
 - `status=degraded` — critique ran but the validation or fallback path degraded
-- `status=skipped` — critique was intentionally bypassed; `skip_reason` and `output.reason` explain why
+- `status=skipped` — critique was intentionally bypassed (`CRITIC_MODE=off`
+  records `reason="critic_mode_off"` with zero LLM calls and `token_usage={}`)
+
+In `shadow` or `enforced` mode, at most one `Critic().review()` LLM call
+executes per run, and the ADK view step carries zero redundant ADK tokens
+(`adk_token_usage == {}`), enforced by `check_critic_step_zero_redundant_tokens`
+in `app/trust/invariants.py`.
 
 For schema validation failures, the trace `detail` includes sanitized field paths
 and validation error types (for example, `verdict:literal_error`). It does not
@@ -110,7 +145,12 @@ The step `output` is a compact summary of the critic result:
 - `accepted`
 - `reason_codes`
 
-If the critic requests and receives one bounded revision, the `decision_synthesizer` step keeps the original sequence position and exposes `retries=1`.
+If the critic requests and receives one bounded revision (`MAX_CRITIC_REVISIONS = 1`),
+structured `revision_objection_ids` / `revision_targets` are routed to the
+Decision Synthesizer, the `decision_synthesizer` step keeps the original
+sequence position and exposes `retries=1`, and the revised memo is re-verified
+via zero-token `evaluate_deterministic_objections` before finalizing (no second
+Critic LLM call).
 
 ## SQL quick check
 

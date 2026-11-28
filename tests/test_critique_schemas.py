@@ -12,6 +12,7 @@ from app.schemas.critique import (
     CritiqueRequest,
     CritiqueResponse,
     CritiqueResult,
+    CritiqueRevisionTarget,
     CritiqueValidation,
     DraftRecommendation,
 )
@@ -394,6 +395,10 @@ def _critique_response_payload(
                 },
             },
         ),
+        (
+            CritiqueRevisionTarget,
+            lambda: {"objection_id": "obj-1", "target": "key_reasons", "action": "add_citations"},
+        ),
     ],
 )
 def test_all_critique_models_forbid_unknown_fields(model_class, payload_factory):
@@ -403,3 +408,37 @@ def test_all_critique_models_forbid_unknown_fields(model_class, payload_factory)
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         model_class.model_validate(invalid_payload)
+
+
+def test_critique_response_revision_routing_round_trip_and_validation():
+    payload = _critique_response_payload(verdict="revise")
+    payload["revision_objection_ids"] = ["obj-1"]
+    payload["revision_targets"] = [
+        {"objection_id": "obj-1", "target": "key_reasons", "action": "add_citations"}
+    ]
+    model = CritiqueResponse.model_validate(payload)
+    assert model.revision_objection_ids == ["obj-1"]
+    assert model.revision_targets[0].target == "key_reasons"
+    assert CritiqueResponse.model_validate(model.model_dump(mode="json")) == model
+
+    dup_payload = dict(payload, revision_objection_ids=["obj-1", "obj-1"])
+    with pytest.raises(ValidationError, match="Revision objection IDs must be unique"):
+        CritiqueResponse.model_validate(dup_payload)
+
+    empty_id_payload = dict(payload, revision_objection_ids=["  "])
+    with pytest.raises(ValidationError, match="Revision objection IDs must not be empty"):
+        CritiqueResponse.model_validate(empty_id_payload)
+
+    empty_target_id_payload = dict(
+        payload,
+        revision_targets=[{"objection_id": " ", "target": "thesis", "action": "soften_claims"}],
+    )
+    with pytest.raises(ValidationError, match="Revision target objection_id must not be empty"):
+        CritiqueResponse.model_validate(empty_target_id_payload)
+
+    failed_payload = _critique_response_payload(status="failed", verdict="accept", objections=[])
+    failed_payload["proposed_confidence_penalty"] = 0.0
+    failed_payload["proposed_decision"] = None
+    failed_payload["revision_objection_ids"] = ["obj-1"]
+    with pytest.raises(ValidationError, match="Failed and insufficient-data critiques must not include revision routing"):
+        CritiqueResponse.model_validate(failed_payload)

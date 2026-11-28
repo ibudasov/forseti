@@ -7,9 +7,11 @@ from app.schemas.analyze import AnalyzeResponse
 from app.schemas.critique import (
     CriticEffect,
     CriticVersionStamp,
-    CritiqueResult,
     CritiqueObjection,
     CritiqueRequest,
+    CritiqueResponse,
+    CritiqueResult,
+    CritiqueValidation,
     DraftRecommendation,
 )
 
@@ -46,6 +48,10 @@ def apply_critic_policy(
         decision = baseline.decision
         confidence = baseline.confidence
         reason_codes.append("guardrail_rejected: decision_upgrade_attempt")
+    elif deterministic_action == "restore_baseline_memo_claim_mismatch":
+        decision = baseline.decision
+        confidence = baseline.confidence
+        reason_codes.append("guardrail_rejected: memo_claim_mismatch")
     elif deterministic_action == "force_no_trade":
         decision = _NO_TRADE_DECISION
         reason_codes.append("guardrail_forced_no_trade")
@@ -152,6 +158,7 @@ def _deterministic_decision_action(
 ) -> Literal[
     "restore_baseline_risk_mismatch",
     "restore_baseline_upgrade_attempt",
+    "restore_baseline_memo_claim_mismatch",
     "force_no_trade",
     "cap_watchlist",
     "analyst_contradiction",
@@ -160,6 +167,8 @@ def _deterministic_decision_action(
         return "restore_baseline_risk_mismatch"
     if _has_decision_upgrade_objection(objections):
         return "restore_baseline_upgrade_attempt"
+    if _has_memo_claim_mismatch_objection(objections):
+        return "restore_baseline_memo_claim_mismatch"
     if _has_missing_trade_field_objection(objections):
         return "force_no_trade"
     if _has_high_category(objections, "stale_or_incomplete_data"):
@@ -167,6 +176,43 @@ def _deterministic_decision_action(
     if _has_high_category(objections, "analyst_contradiction"):
         return "analyst_contradiction"
     return None
+
+
+def evaluate_post_revision_policy(
+    *,
+    mode: str,
+    response: AnalyzeResponse,
+    request: CritiqueRequest,
+    baseline: DraftRecommendation,
+    deterministic_objections: Sequence[CritiqueObjection],
+    model_name: str = "deterministic-post-revision-gate",
+    prompt_version: str = "deterministic-gate.v1",
+) -> CriticEffect:
+    """Apply deterministic Critic policy on a revised draft with zero LLM calls."""
+    neutral_result = CritiqueResult(
+        response=CritiqueResponse(
+            run_id=request.run_id,
+            context_hash=request.context_hash,
+            status="completed",
+            verdict="accept",
+            objections=[],
+            proposed_decision=None,
+            proposed_confidence_penalty=0.0,
+            revision_instructions="",
+            summary="Zero-token post-revision deterministic policy check.",
+        ),
+        validation=CritiqueValidation(accepted=True, reason_codes=[]),
+        model_name=model_name,
+        prompt_version=prompt_version,
+    )
+    return apply_critic_policy(
+        mode=mode,
+        response=response,
+        request=request,
+        baseline=baseline,
+        critique_result=neutral_result,
+        deterministic_objections=deterministic_objections,
+    )
 
 
 def _has_high_category(
@@ -184,6 +230,15 @@ def _has_decision_upgrade_objection(objections: Sequence[CritiqueObjection]) -> 
         objection.category == "internal_inconsistency"
         and objection.severity == "high"
         and any(code.startswith("decision_upgrade:") for code in objection.warning_codes)
+        for objection in objections
+    )
+
+
+def _has_memo_claim_mismatch_objection(objections: Sequence[CritiqueObjection]) -> bool:
+    return any(
+        objection.category == "internal_inconsistency"
+        and objection.severity == "high"
+        and any(code.startswith("memo_claim_mismatch:") for code in objection.warning_codes)
         for objection in objections
     )
 

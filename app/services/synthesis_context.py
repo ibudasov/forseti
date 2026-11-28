@@ -4,8 +4,10 @@ from datetime import date, datetime
 from typing import Sequence
 
 from app.schemas.analyze import AnalyzeResponse
-from app.schemas.critique import AnalystView
+from app.schemas.critique import AnalystView, CritiqueObjection, CritiqueRevisionTarget
+from app.schemas.fundamentals import EvidenceChunkInput
 from app.schemas.synthesis import DecisionSynthesisRequest
+from app.schemas.tension import CrossDomainTension
 from app.services.decision_synthesizer import build_decision_synthesis_request
 
 _DECISION_RANK = {"no_trade": 0, "watchlist": 1, "trade": 2}
@@ -19,6 +21,11 @@ def build_synthesis_request(
     as_of_date: date,
     snapshot_at: datetime,
     critic_findings: Sequence[str] = (),
+    critic_objections: Sequence[CritiqueObjection] = (),
+    revision_objection_ids: Sequence[str] = (),
+    revision_targets: Sequence[CritiqueRevisionTarget] = (),
+    cross_domain_tension: CrossDomainTension | None = None,
+    supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
 ) -> DecisionSynthesisRequest:
     """Freeze the current deterministic response and analyst views for one synthesis call.
 
@@ -42,9 +49,14 @@ def build_synthesis_request(
         diagnosis=response.diagnosis,
         analyst_views=list(analyst_views),
         known_metric_ids=_known_metric_ids(analyst_views),
-        known_chunk_ids=_known_chunk_ids(analyst_views),
+        known_chunk_ids=_known_chunk_ids(analyst_views, supplemental_evidence_chunks),
         known_warning_codes=_known_warning_codes(response.warnings),
         critic_findings=list(critic_findings),
+        critic_objections=list(critic_objections),
+        revision_objection_ids=list(revision_objection_ids),
+        revision_targets=list(revision_targets),
+        cross_domain_tension=cross_domain_tension,
+        supplemental_evidence_chunks=list(supplemental_evidence_chunks),
         allowed_decisions=_decisions_up_to(response.decision),
         max_confidence=response.confidence,
     )
@@ -59,8 +71,18 @@ def _known_metric_ids(analyst_views: Sequence[AnalystView]) -> list[str]:
     return sorted({metric_id for view in analyst_views for finding in view.findings for metric_id in finding.metric_ids})
 
 
-def _known_chunk_ids(analyst_views: Sequence[AnalystView]) -> list[int]:
-    return sorted({chunk_id for view in analyst_views for finding in view.findings for chunk_id in finding.chunk_ids})
+def _known_chunk_ids(
+    analyst_views: Sequence[AnalystView],
+    supplemental_evidence_chunks: Sequence[EvidenceChunkInput] = (),
+) -> list[int]:
+    chunk_ids = {
+        chunk_id
+        for view in analyst_views
+        for finding in view.findings
+        for chunk_id in finding.chunk_ids
+    }
+    chunk_ids.update(chunk.chunk_id for chunk in supplemental_evidence_chunks)
+    return sorted(chunk_ids)
 
 
 def _known_warning_codes(warnings: Sequence[str]) -> list[str]:
